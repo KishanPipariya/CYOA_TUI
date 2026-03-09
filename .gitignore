@@ -201,7 +201,13 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+#Antigravity
+.agents
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Models
+*.gguf  
