@@ -75,10 +75,13 @@ class CYOAApp(App):
         
     @work(exclusive=True, thread=True)
     def initialize_and_start(self, model_path: str):
-        # Initialize generator (takes time to load model)
+        # Initialized here to avoid showing Llama.cpp loading screen
         self.generator = StoryGenerator(model_path=model_path)
         self.story_context = StoryContext(starting_prompt=STARTING_PROMPT)
         
+        with open("story.md", "w", encoding="utf-8") as f:
+            f.write("# New Adventure\n\n")
+            
         # Generate first node
         self.call_from_thread(self.show_loading)
         node = self.generator.generate_next_node(self.story_context)
@@ -108,6 +111,10 @@ class CYOAApp(App):
         self._current_story = node.narrative
         story_md.update(self._current_story)
         
+        # Append latest narrative text to the file
+        with open("story.md", "a", encoding="utf-8") as f:
+            f.write(f"{self._current_story}\n\n")
+        
         choices_container = self.query_one("#choices-container")
         
         # Add new buttons for choices
@@ -122,6 +129,10 @@ class CYOAApp(App):
         
         # Add the turn to our context
         self.story_context.add_turn(self._current_story, choice_text)
+        
+        # Append user choice to the file
+        with open("story.md", "a", encoding="utf-8") as f:
+            f.write(f"> **You chose:** {choice_text}\n\n---\n\n")
         
         # Show loading and start generation worker
         self.show_loading()
