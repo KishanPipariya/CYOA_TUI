@@ -21,7 +21,9 @@ class StoryGenerator:
         self.llm = Llama(
             model_path=model_path,
             n_ctx=n_ctx,
+            n_threads=8, # Generally best to match physical performance cores on Apple Silicon
             n_gpu_layers=-1, # Try to offload to GPU if available (e.g. Metal on Mac)
+            flash_attn=True, # Significantly speeds up context processing
             verbose=False
         )
     
