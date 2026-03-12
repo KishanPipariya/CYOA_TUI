@@ -5,6 +5,8 @@ from typing import Callable, Optional
 from llama_cpp import Llama
 from models import StoryNode
 
+__all__ = ["StoryContext", "StoryGenerator"]
+
 # Configurable via .env / environment — defaults used if not set
 MAX_CONTEXT_TURNS = int(os.getenv("LLM_MAX_TURNS", "10"))
 
@@ -38,8 +40,9 @@ class StoryContext:
 
     def inject_memory(self, memories: list[str]) -> None:
         """
-        RAG: Insert a system-role memory block containing relevant past scenes
-        just before the last user message so the LLM has long-term context.
+        Fix #5: Insert or REPLACE a memory block in context history.
+        Replaces any existing memory block rather than accumulating duplicates,
+        which would inflate token count rapidly across many turns.
         """
         if not memories:
             return
@@ -48,12 +51,19 @@ class StoryContext:
             "[Memory — relevant past scenes for context]\n"
             + "\n---\n".join(memories)
         )
-        # Find the last user message and insert memory before it
+        new_block = {"role": "system", "content": memory_text}
+
+        # Check if a memory block already exists; replace it in-place
+        for i, msg in enumerate(self.history):
+            if msg["role"] == "system" and msg["content"].startswith("[Memory"):
+                self.history[i] = new_block
+                return
+
+        # No existing block — insert before the last user message
         insert_idx = len(self.history) - 1
         while insert_idx > 0 and self.history[insert_idx]["role"] != "user":
             insert_idx -= 1
-
-        self.history.insert(insert_idx, {"role": "system", "content": memory_text})
+        self.history.insert(insert_idx, new_block)
 
 
 class StoryGenerator:
@@ -125,10 +135,12 @@ class StoryGenerator:
         of the narrative field as it appears, and return the complete JSON string.
         """
         buffer = ""
-        # State machine for extracting the narrative field incrementally
         in_narrative = False
         narrative_done = False
         escape_next = False
+        # Fix #6: track how much of buffer we've already searched for the
+        # narrative key, so we only search the new tail each iteration.
+        search_offset = 0
 
         for chunk in stream_iter:
             delta = chunk["choices"][0].get("delta", {})
@@ -136,14 +148,16 @@ class StoryGenerator:
             if not token:
                 continue
 
+            prev_len = len(buffer)
             buffer += token
 
-            # Once we've found the narrative value, emit characters one-by-one
             if not in_narrative and not narrative_done:
-                match = _NARRATIVE_START_RE.search(buffer)
+                # Fix #6: search only from where we left off (minus a small
+                # overlap to handle keys split across chunk boundaries)
+                search_from = max(0, search_offset - 15)
+                match = _NARRATIVE_START_RE.search(buffer, search_from)
                 if match:
                     in_narrative = True
-                    # Emit characters already received after the opening quote
                     tail = buffer[match.end():]
                     for ch in tail:
                         if escape_next:
@@ -153,12 +167,13 @@ class StoryGenerator:
                             escape_next = True
                             on_token(ch)
                         elif ch == '"':
-                            # Closing quote — narrative value is complete
                             in_narrative = False
                             narrative_done = True
                             break
                         else:
                             on_token(ch)
+                else:
+                    search_offset = len(buffer)
             elif in_narrative:
                 for ch in token:
                     if escape_next:

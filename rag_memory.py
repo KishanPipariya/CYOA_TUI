@@ -8,6 +8,8 @@ beyond the sliding context window.
 """
 import uuid
 
+__all__ = ["NarrativeMemory"]
+
 try:
     import chromadb
     _CHROMA_AVAILABLE = True
@@ -21,26 +23,41 @@ class NarrativeMemory:
 
     Gracefully degrades to a no-op if chromadb is unavailable.
     No persistence needed — the Neo4j graph DB stores everything permanently.
+
+    Fix #7: Lazy-initialises the chromadb client and embedding model on the
+    first add() call, not at __init__ time. This avoids blocking the main
+    thread at app startup while chromadb downloads/loads all-MiniLM-L6-v2.
     """
 
     def __init__(self, collection_name: str = "scenes"):
         self._available = _CHROMA_AVAILABLE
-        if not self._available:
-            print("Warning: chromadb not installed. Narrative memory disabled.")
-            return
+        self._collection_name = collection_name
+        # Fix #7: defer client + collection creation to first use
+        self._client = None
+        self._collection = None
 
-        self._client = chromadb.Client()  # ephemeral in-memory client
-        # Each session gets a unique collection so restarts start fresh
-        unique_name = f"{collection_name}_{uuid.uuid4().hex[:8]}"
-        self._collection = self._client.create_collection(
-            name=unique_name,
-            # Use chromadb's default embeddings (all-MiniLM-L6-v2)
-            metadata={"hnsw:space": "cosine"},
-        )
+    def _ensure_ready(self) -> bool:
+        """Create the chroma client and collection on first use. Returns False if unavailable."""
+        if not self._available:
+            return False
+        if self._collection is not None:
+            return True
+        try:
+            self._client = chromadb.Client()
+            unique_name = f"{self._collection_name}_{uuid.uuid4().hex[:8]}"
+            self._collection = self._client.create_collection(
+                name=unique_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+            return True
+        except Exception as e:
+            print(f"RAG memory: failed to initialise chromadb: {e}")
+            self._available = False
+            return False
 
     def add(self, scene_id: str, narrative: str) -> None:
         """Embed and store a scene narrative."""
-        if not self._available:
+        if not self._ensure_ready():
             return
         try:
             self._collection.upsert(
@@ -55,7 +72,7 @@ class NarrativeMemory:
         Return the top-N most semantically relevant past narratives.
         Returns an empty list if memory is unavailable or empty.
         """
-        if not self._available:
+        if not self._ensure_ready():
             return []
         try:
             count = self._collection.count()

@@ -12,6 +12,12 @@ from llm_backend import StoryGenerator, StoryContext
 from graph_db import CYOAGraphDB
 from rag_memory import NarrativeMemory
 
+__all__ = ["CYOAApp", "DEFAULT_STARTING_PROMPT"]
+
+# Fix #1: Only re-render Markdown every N streamed characters to avoid
+# re-parsing the full story string on every single token.
+_STREAM_RENDER_THROTTLE = 8
+
 DEFAULT_STARTING_PROMPT = """You are a dark fantasy interactive fiction engine.
 Describe the starting scenario where the player wakes up in a cold, unfamiliar dungeon cell.
 Provide 2-3 choices for what they can do next.
@@ -77,6 +83,8 @@ class CYOAApp(App):
         self._loading_suffix_shown: bool = False
         self._current_story = LOADING_ART
         self._story_file = None
+        # Fix #1: token accumulator for throttled streaming re-renders
+        self._stream_token_buffer: int = 0
         # RAG: in-memory semantic scene store
         self.memory = NarrativeMemory()
 
@@ -147,29 +155,33 @@ class CYOAApp(App):
 
     def _stream_narrative(self, partial: str) -> None:
         """
-        Streaming callback: called from the worker thread via call_from_thread.
-        Appends each new character to the live Markdown widget (typewriter effect).
-        On the very first token, hides the spinner and removes the 'shifting' placeholder.
+        Streaming callback called via call_from_thread for each batch of chars.
+        Fix #1: throttles Markdown re-renders to every _STREAM_RENDER_THROTTLE
+        characters so the full story string is not re-parsed on every token.
         """
         story_md = self.query_one("#story-text", Markdown)
 
         if self._loading_suffix_shown:
-            # First token arrived — strip the loading placeholder
+            # First token batch arrived — strip the loading placeholder
             suffix = "\n\n*(The ancient texts are shifting...)*"
             if self._current_story.endswith(suffix):
                 self._current_story = self._current_story[: -len(suffix)]
             self._loading_suffix_shown = False
-            # Hide spinner and start a fresh narrative section
             self.query_one("#loading").add_class("hidden")
             if self._current_story == LOADING_ART:
                 self._current_story = partial
             else:
                 self._current_story += f"\n\n---\n\n{partial}"
+            # Always render immediately on first token so text appears
+            self._stream_token_buffer = 0
+            story_md.update(self._current_story)
         else:
-            # Subsequent tokens: just append the new character(s)
             self._current_story += partial
-
-        story_md.update(self._current_story)
+            self._stream_token_buffer += len(partial)
+            # Fix #1: throttle — only re-render when buffer threshold is reached
+            if self._stream_token_buffer >= _STREAM_RENDER_THROTTLE:
+                self._stream_token_buffer = 0
+                story_md.update(self._current_story)
 
     def show_loading(self):
         """Clear choice buttons, show spinner, append 'shifting' text."""
@@ -213,9 +225,8 @@ class CYOAApp(App):
             self._story_file.write(f"{node.narrative}\n\n")
             self._story_file.flush()
 
-        # RAG: store this scene in memory for future retrieval
-        scene_id = self.current_scene_id or str(uuid.uuid4())
-        self.memory.add(scene_id, node.narrative)
+        # Fix #4: memory.add() moved to worker thread (generate_next_step)
+        # so chromadb embedding does not block the UI event loop here.
 
         choices_container = self.query_one("#choices-container")
 
@@ -268,15 +279,17 @@ class CYOAApp(App):
     async def action_restart(self) -> None:
         """Reset story state and start a new adventure without reloading the model."""
         self._current_story = LOADING_ART
-        self.turn_count = 0
+        self.turn_count = 1
         self.current_scene_id = None
         self.last_choice_text = None
         self._last_raw_narrative = None
+        self._stream_token_buffer = 0
+        # Fix #8: reset memory so the new adventure doesn't inherit old scene embeddings
+        self.memory = NarrativeMemory()
 
-        # Reset UI to loading state
         self.query_one("#story-text", Markdown).update(LOADING_ART)
-        for btn in self.query_one("#choices-container").query(Button):
-            btn.remove()
+        # Fix #3: use remove_children() instead of query+remove loop
+        self.query_one("#choices-container").remove_children()
 
         self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
 
@@ -299,6 +312,11 @@ class CYOAApp(App):
         node = self.generator.generate_next_node(self.story_context, on_token=on_token)
         self._last_raw_narrative = node.narrative
 
+        # Fix #4: embed the scene in the RAG store from the worker thread,
+        # not from display_node() on the UI thread.
+        scene_id = self.current_scene_id or str(uuid.uuid4())
+        self.memory.add(scene_id, node.narrative)
+
         choices_text = [choice.text for choice in node.choices]
         prev_scene_id = self.current_scene_id
         prev_choice = self.last_choice_text
@@ -312,4 +330,9 @@ class CYOAApp(App):
             on_complete=lambda sid: setattr(self, "current_scene_id", sid)
         )
 
+        # Flush any remaining throttled stream chars before final render
+        if self._stream_token_buffer > 0:
+            self.call_from_thread(
+                lambda: self.query_one("#story-text", Markdown).update(self._current_story)
+            )
         self.call_from_thread(self.display_node, node)

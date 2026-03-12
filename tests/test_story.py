@@ -200,6 +200,13 @@ class TestNarrativeMemory:
         results = mem.query("interesting scene", n=2)
         assert len(results) <= 2
 
+    def test_lazy_init_defers_client_creation(self):
+        """Fix #7: _collection should be None until the first add() triggers lazy init."""
+        mem = NarrativeMemory()
+        assert mem._collection is None, "Client should not be created at __init__ time"
+        mem.add("scene-lazy", "A dark corridor stretches ahead.")
+        assert mem._collection is not None, "_collection should exist after first add()"
+
     def test_duplicate_id_upserts(self):
         """Adding the same scene_id twice should not raise and should have 1 entry."""
         mem = NarrativeMemory()
@@ -232,6 +239,20 @@ class TestStreamingCallback:
         before_len = len(ctx.history)
         ctx.inject_memory([])
         assert len(ctx.history) == before_len
+
+    def test_inject_memory_replaces_existing_block(self):
+        """inject_memory() called twice should replace, not accumulate, the memory block."""
+        ctx = StoryContext(starting_prompt="Start", max_turns=5)
+        ctx.add_turn("Narrative one.", "Go left")
+
+        ctx.inject_memory(["Memory A."])
+        ctx.inject_memory(["Memory B."])  # should replace A, not add a second block
+
+        memory_msgs = [m for m in ctx.history if
+                       m["role"] == "system" and m["content"].startswith("[Memory")]
+        assert len(memory_msgs) == 1, "There should be exactly one memory block after two injects"
+        assert "Memory B" in memory_msgs[0]["content"]
+        assert "Memory A" not in memory_msgs[0]["content"]
 
     def test_stream_narrative_extractor(self):
         """_stream_with_callback should extract narrative characters correctly."""
