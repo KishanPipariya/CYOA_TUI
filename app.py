@@ -73,7 +73,12 @@ class CYOAApp(App):
         self.last_choice_text = None
         self.current_story_title = None
         self._last_raw_narrative: str | None = None
+        # Perf #2: Track whether the loading suffix is currently appended,
+        # so we never need to str.replace() over the full accumulated story string.
+        self._loading_suffix_shown: bool = False
         self._current_story = LOADING_ART
+        # Perf #3: Persistent file handle — open once, flush per write
+        self._story_file = None
 
         # Fix #9: Restore dark mode preference
         config = _load_config()
@@ -123,6 +128,10 @@ class CYOAApp(App):
 
         with open("story.md", "w", encoding="utf-8") as f:
             f.write(f"# {self.current_story_title}\n\n")
+        # Perf #3: Open the story log once and keep it open for the session
+        if self._story_file:
+            self._story_file.close()
+        self._story_file = open("story.md", "a", encoding="utf-8")
 
         choices_text = [choice.text for choice in node.choices]
         self.db.save_scene_async(
@@ -138,14 +147,14 @@ class CYOAApp(App):
 
     def show_loading(self):
         """Clear choice buttons, show spinner, append 'shifting' text."""
-        container = self.query_one("#choices-container")
-        for btn in container.query(Button):
-            btn.remove()
-
+        # Perf #6: remove_children() is O(1) vs query(Button) DOM traversal
+        self.query_one("#choices-container").remove_children()
         self.query_one("#loading").remove_class("hidden")
 
-        if "*(The ancient texts are shifting...)*" not in self._current_story:
+        if not self._loading_suffix_shown:
+            # Perf #2: append suffix and set flag — avoids str.replace later
             self._current_story += "\n\n*(The ancient texts are shifting...)*"
+            self._loading_suffix_shown = True
             self.query_one("#story-text", Markdown).update(self._current_story)
             story_container = self.query_one("#story-container")
             self.set_timer(0.05, lambda: story_container.scroll_end(animate=False))
@@ -159,18 +168,24 @@ class CYOAApp(App):
         if self._current_story == LOADING_ART:
             self._current_story = node.narrative
         else:
-            self._current_story = self._current_story.replace(
-                "\n\n*(The ancient texts are shifting...)*", ""
-            )
+            # Perf #2: strip suffix cleanly using the flag, not str.replace on full string
+            if self._loading_suffix_shown:
+                # The suffix is exactly at the end — slice it off
+                suffix = "\n\n*(The ancient texts are shifting...)*"
+                if self._current_story.endswith(suffix):
+                    self._current_story = self._current_story[: -len(suffix)]
             self._current_story += f"\n\n---\n\n{node.narrative}"
+        self._loading_suffix_shown = False
 
         story_md.update(self._current_story)
 
         story_container = self.query_one("#story-container")
         self.set_timer(0.05, lambda: story_container.scroll_end(animate=False))
 
-        with open("story.md", "a", encoding="utf-8") as f:
-            f.write(f"{node.narrative}\n\n")
+        # Perf #3: write to persistent file handle and flush
+        if self._story_file:
+            self._story_file.write(f"{node.narrative}\n\n")
+            self._story_file.flush()
 
         choices_container = self.query_one("#choices-container")
 
@@ -211,8 +226,10 @@ class CYOAApp(App):
         self.story_context.add_turn(self._last_raw_narrative or "", choice_text)
         self.turn_count += 1  # Fix #4
 
-        with open("story.md", "a", encoding="utf-8") as f:
-            f.write(f"> **You chose:** {choice_text}\n\n---\n\n")
+        # Perf #3: write choice to persistent file handle
+        if self._story_file:
+            self._story_file.write(f"> **You chose:** {choice_text}\n\n---\n\n")
+            self._story_file.flush()
 
         self._current_story += f"\n\n> **You chose:** {choice_text}"
         self.show_loading()
