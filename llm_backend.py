@@ -1,10 +1,15 @@
 import json
 import os
+import re
+from typing import Callable, Optional
 from llama_cpp import Llama
 from models import StoryNode
 
 # Configurable via .env / environment — defaults used if not set
 MAX_CONTEXT_TURNS = int(os.getenv("LLM_MAX_TURNS", "10"))
+
+# Regex to find the start of the "narrative" value in streaming JSON
+_NARRATIVE_START_RE = re.compile(r'"narrative"\s*:\s*"')
 
 
 class StoryContext:
@@ -22,29 +27,38 @@ class StoryContext:
         self.history.append({"role": "user", "content": starting_prompt})
 
     def add_turn(self, raw_narrative: str, user_choice: str):
-        """
-        Add an assistant turn (raw narrative text only) and user choice.
-
-        Fix #2: We now accept and store only the raw narrative string, NOT the
-        accumulated rendered Markdown (_current_story). This keeps each turn
-        concise and prevents the LLM from re-reading its entire output history.
-        """
+        """Add an assistant turn (raw narrative) and user choice, trimming old turns."""
         self.history.append({"role": "assistant", "content": raw_narrative})
         self.history.append({"role": "user", "content": f"I choose: {user_choice}"})
 
-        # Fix #4: Sliding window — trim oldest turns if context is too large.
-        # Always preserve index 0 (system) and index 1 (initial user prompt).
-        # Each turn is 2 messages (assistant + user), so trim from index 2.
-        non_system_messages = self.history[2:]  # exclude system + initial prompt
-        if len(non_system_messages) > self.max_turns * 2:
-            # Drop the oldest (assistant, user) pair
-            self.history = self.history[:2] + non_system_messages[2:]
+        # Sliding window: always keep system (0) + initial prompt (1)
+        non_system = self.history[2:]
+        if len(non_system) > self.max_turns * 2:
+            self.history = self.history[:2] + non_system[2:]
+
+    def inject_memory(self, memories: list[str]) -> None:
+        """
+        RAG: Insert a system-role memory block containing relevant past scenes
+        just before the last user message so the LLM has long-term context.
+        """
+        if not memories:
+            return
+
+        memory_text = (
+            "[Memory — relevant past scenes for context]\n"
+            + "\n---\n".join(memories)
+        )
+        # Find the last user message and insert memory before it
+        insert_idx = len(self.history) - 1
+        while insert_idx > 0 and self.history[insert_idx]["role"] != "user":
+            insert_idx -= 1
+
+        self.history.insert(insert_idx, {"role": "system", "content": memory_text})
 
 
 class StoryGenerator:
     def __init__(self, model_path: str, n_ctx: int = None):
         n_ctx = n_ctx or int(os.getenv("LLM_N_CTX", "4096"))
-        # Perf #4: Use physical core count for CPU threads
         cpu_threads = max(1, (os.cpu_count() or 8) // 2)
         self.llm = Llama(
             model_path=model_path,
@@ -54,16 +68,24 @@ class StoryGenerator:
             flash_attn=True,
             verbose=False
         )
-        # Perf #1: Cache schema once at init
         self._schema = StoryNode.model_json_schema()
         self._temperature = float(os.getenv("LLM_TEMPERATURE", "0.6"))
         self._max_tokens = int(os.getenv("LLM_MAX_TOKENS", "512"))
 
-    def generate_next_node(self, context: StoryContext) -> StoryNode:
+    def generate_next_node(
+        self,
+        context: StoryContext,
+        on_token: Optional[Callable[[str], None]] = None,
+    ) -> StoryNode:
         """
-        Generates the next story node given the current context history.
-        Uses structured JSON schema via llama.cpp constrained outputs.
+        Generate the next story node.
+
+        If `on_token` is provided, stream tokens and call it with each new
+        character of the narrative as it streams in (typewriter effect).
+        The complete JSON is still assembled and validated after streaming.
         """
+        stream = on_token is not None
+
         response = self.llm.create_chat_completion(
             messages=context.history,
             response_format={
@@ -72,9 +94,13 @@ class StoryGenerator:
             },
             temperature=self._temperature,
             max_tokens=self._max_tokens,
+            stream=stream,
         )
 
-        content = response["choices"][0]["message"]["content"]
+        if stream:
+            content = self._stream_with_callback(response, on_token)
+        else:
+            content = response["choices"][0]["message"]["content"]
 
         try:
             data = json.loads(content)
@@ -88,3 +114,64 @@ class StoryGenerator:
                 ),
                 choices=[{"text": "Try doing something different."}]
             )
+
+    def _stream_with_callback(
+        self,
+        stream_iter,
+        on_token: Callable[[str], None],
+    ) -> str:
+        """
+        Consume the streaming response, fire `on_token` with each new character
+        of the narrative field as it appears, and return the complete JSON string.
+        """
+        buffer = ""
+        # State machine for extracting the narrative field incrementally
+        in_narrative = False
+        narrative_done = False
+        escape_next = False
+
+        for chunk in stream_iter:
+            delta = chunk["choices"][0].get("delta", {})
+            token = delta.get("content", "")
+            if not token:
+                continue
+
+            buffer += token
+
+            # Once we've found the narrative value, emit characters one-by-one
+            if not in_narrative and not narrative_done:
+                match = _NARRATIVE_START_RE.search(buffer)
+                if match:
+                    in_narrative = True
+                    # Emit characters already received after the opening quote
+                    tail = buffer[match.end():]
+                    for ch in tail:
+                        if escape_next:
+                            escape_next = False
+                            on_token(ch)
+                        elif ch == "\\":
+                            escape_next = True
+                            on_token(ch)
+                        elif ch == '"':
+                            # Closing quote — narrative value is complete
+                            in_narrative = False
+                            narrative_done = True
+                            break
+                        else:
+                            on_token(ch)
+            elif in_narrative:
+                for ch in token:
+                    if escape_next:
+                        escape_next = False
+                        on_token(ch)
+                    elif ch == "\\":
+                        escape_next = True
+                        on_token(ch)
+                    elif ch == '"':
+                        in_narrative = False
+                        narrative_done = True
+                        break
+                    else:
+                        on_token(ch)
+
+        return buffer

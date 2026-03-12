@@ -10,6 +10,7 @@ from textual import work
 from models import StoryNode
 from llm_backend import StoryGenerator, StoryContext
 from graph_db import CYOAGraphDB
+from rag_memory import NarrativeMemory
 
 DEFAULT_STARTING_PROMPT = """You are a dark fantasy interactive fiction engine.
 Describe the starting scenario where the player wakes up in a cold, unfamiliar dungeon cell.
@@ -73,12 +74,11 @@ class CYOAApp(App):
         self.last_choice_text = None
         self.current_story_title = None
         self._last_raw_narrative: str | None = None
-        # Perf #2: Track whether the loading suffix is currently appended,
-        # so we never need to str.replace() over the full accumulated story string.
         self._loading_suffix_shown: bool = False
         self._current_story = LOADING_ART
-        # Perf #3: Persistent file handle — open once, flush per write
         self._story_file = None
+        # RAG: in-memory semantic scene store
+        self.memory = NarrativeMemory()
 
         # Fix #9: Restore dark mode preference
         config = _load_config()
@@ -145,6 +145,32 @@ class CYOAApp(App):
 
         self.call_from_thread(self.display_node, node)
 
+    def _stream_narrative(self, partial: str) -> None:
+        """
+        Streaming callback: called from the worker thread via call_from_thread.
+        Appends each new character to the live Markdown widget (typewriter effect).
+        On the very first token, hides the spinner and removes the 'shifting' placeholder.
+        """
+        story_md = self.query_one("#story-text", Markdown)
+
+        if self._loading_suffix_shown:
+            # First token arrived — strip the loading placeholder
+            suffix = "\n\n*(The ancient texts are shifting...)*"
+            if self._current_story.endswith(suffix):
+                self._current_story = self._current_story[: -len(suffix)]
+            self._loading_suffix_shown = False
+            # Hide spinner and start a fresh narrative section
+            self.query_one("#loading").add_class("hidden")
+            if self._current_story == LOADING_ART:
+                self._current_story = partial
+            else:
+                self._current_story += f"\n\n---\n\n{partial}"
+        else:
+            # Subsequent tokens: just append the new character(s)
+            self._current_story += partial
+
+        story_md.update(self._current_story)
+
     def show_loading(self):
         """Clear choice buttons, show spinner, append 'shifting' text."""
         # Perf #6: remove_children() is O(1) vs query(Button) DOM traversal
@@ -160,21 +186,22 @@ class CYOAApp(App):
             self.set_timer(0.05, lambda: story_container.scroll_end(animate=False))
 
     def display_node(self, node: StoryNode):
-        """Render a newly generated StoryNode to the UI."""
+        """Render a newly generated StoryNode to the UI (after streaming completes)."""
         self.query_one("#loading").add_class("hidden")
 
         story_md = self.query_one("#story-text", Markdown)
 
+        # If streaming happened, _stream_narrative already updated the story;
+        # only do a full replace if we somehow ended up in non-streaming mode.
         if self._current_story == LOADING_ART:
             self._current_story = node.narrative
-        else:
-            # Perf #2: strip suffix cleanly using the flag, not str.replace on full string
-            if self._loading_suffix_shown:
-                # The suffix is exactly at the end — slice it off
-                suffix = "\n\n*(The ancient texts are shifting...)*"
-                if self._current_story.endswith(suffix):
-                    self._current_story = self._current_story[: -len(suffix)]
+        elif self._loading_suffix_shown:
+            # No streaming happened (fallback) — strip suffix and append
+            suffix = "\n\n*(The ancient texts are shifting...)*"
+            if self._current_story.endswith(suffix):
+                self._current_story = self._current_story[: -len(suffix)]
             self._current_story += f"\n\n---\n\n{node.narrative}"
+        # else: streaming already updated _current_story incrementally
         self._loading_suffix_shown = False
 
         story_md.update(self._current_story)
@@ -182,14 +209,16 @@ class CYOAApp(App):
         story_container = self.query_one("#story-container")
         self.set_timer(0.05, lambda: story_container.scroll_end(animate=False))
 
-        # Perf #3: write to persistent file handle and flush
         if self._story_file:
             self._story_file.write(f"{node.narrative}\n\n")
             self._story_file.flush()
 
+        # RAG: store this scene in memory for future retrieval
+        scene_id = self.current_scene_id or str(uuid.uuid4())
+        self.memory.add(scene_id, node.narrative)
+
         choices_container = self.query_one("#choices-container")
 
-        # Fix #7: Detect ending state — replace choices with a restart button
         if node.is_ending:
             end_btn = Button("✦ Start a New Adventure", id="btn-new-adventure", variant="success")
             choices_container.mount(end_btn)
@@ -258,7 +287,16 @@ class CYOAApp(App):
 
     @work(exclusive=True, thread=True)
     def generate_next_step(self):
-        node = self.generator.generate_next_node(self.story_context)
+        # RAG: retrieve relevant past scenes and inject as memory
+        if self._last_raw_narrative:
+            memories = self.memory.query(self._last_raw_narrative, n=3)
+            self.story_context.inject_memory(memories)
+
+        # Streaming: pass on_token callback so typewriter fires live
+        def on_token(partial: str):
+            self.call_from_thread(self._stream_narrative, partial)
+
+        node = self.generator.generate_next_node(self.story_context, on_token=on_token)
         self._last_raw_narrative = node.narrative
 
         choices_text = [choice.text for choice in node.choices]

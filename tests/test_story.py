@@ -11,6 +11,7 @@ from models import StoryNode, Choice
 from llm_backend import StoryContext, MAX_CONTEXT_TURNS
 from graph_db import CYOAGraphDB
 from theme_loader import load_theme, list_themes
+from rag_memory import NarrativeMemory
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -172,3 +173,92 @@ class TestThemeLoader:
         themes = list_themes()
         assert "dark_dungeon" in themes
         assert "space_explorer" in themes
+
+
+# ── 6. RAG Narrative Memory ───────────────────────────────────────────────────
+
+class TestNarrativeMemory:
+    def test_add_and_query_returns_results(self):
+        """Adding a scene and querying with similar text should return it."""
+        mem = NarrativeMemory()
+        mem.add("scene-1", "You discover a hidden door behind a bookshelf.")
+        results = mem.query("secret passage behind shelf")
+        assert len(results) == 1
+        assert "bookshelf" in results[0]
+
+    def test_empty_memory_returns_empty_list(self):
+        """Querying an empty memory store should return []."""
+        mem = NarrativeMemory()
+        results = mem.query("anything")
+        assert results == []
+
+    def test_n_limits_results(self):
+        """Query with n=2 should return at most 2 results."""
+        mem = NarrativeMemory()
+        for i in range(5):
+            mem.add(f"scene-{i}", f"Scene {i}: You see something interesting.")
+        results = mem.query("interesting scene", n=2)
+        assert len(results) <= 2
+
+    def test_duplicate_id_upserts(self):
+        """Adding the same scene_id twice should not raise and should have 1 entry."""
+        mem = NarrativeMemory()
+        mem.add("scene-x", "First version.")
+        mem.add("scene-x", "Updated version.")
+        # Should not raise; collection count stays at 1
+        assert mem._collection.count() == 1
+
+
+# ── 7. Streaming token callback ───────────────────────────────────────────────
+
+class TestStreamingCallback:
+    def test_inject_memory_inserts_before_last_user(self):
+        """inject_memory() should insert a system block before the last user message."""
+        ctx = StoryContext(starting_prompt="Start", max_turns=5)
+        ctx.add_turn("Narrative one.", "Go left")
+
+        # Inject memory after first turn
+        ctx.inject_memory(["You once saw a torch flicker."])
+
+        # Find the injected memory block
+        memory_msgs = [m for m in ctx.history if
+                       m["role"] == "system" and "Memory" in m["content"]]
+        assert len(memory_msgs) == 1
+        assert "torch flicker" in memory_msgs[0]["content"]
+
+    def test_inject_memory_empty_is_noop(self):
+        """inject_memory([]) should not modify context history."""
+        ctx = StoryContext(starting_prompt="Start", max_turns=5)
+        before_len = len(ctx.history)
+        ctx.inject_memory([])
+        assert len(ctx.history) == before_len
+
+    def test_stream_narrative_extractor(self):
+        """_stream_with_callback should extract narrative characters correctly."""
+        import json
+        from llm_backend import StoryGenerator
+
+        payload = {
+            "title": None,
+            "narrative": "A torch flickers in the dark.",
+            "choices": [{"text": "Run"}],
+            "is_ending": False,
+        }
+        json_str = json.dumps(payload)
+
+        # Simulate streaming chunks split mid-string
+        chunks = []
+        for ch in json_str:
+            chunks.append({"choices": [{"delta": {"content": ch}, "finish_reason": None}]})
+        chunks.append({"choices": [{"delta": {}, "finish_reason": "stop"}]})
+
+        received = []
+
+        gen = StoryGenerator.__new__(StoryGenerator)
+        result = gen._stream_with_callback(iter(chunks), on_token=received.append)
+
+        extracted = "".join(received)
+        assert "torch" in extracted
+        assert "dark" in extracted
+        # Full JSON still reconstructable
+        assert json.loads(result)["narrative"] == "A torch flickers in the dark."
