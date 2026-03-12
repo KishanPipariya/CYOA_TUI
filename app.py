@@ -1,19 +1,37 @@
 import uuid
+import json
+import os
 from textual.app import App, ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.widgets import Header, Footer, Markdown, Button, LoadingIndicator
+from textual.reactive import reactive
 from textual import work
 
 from models import StoryNode
 from llm_backend import StoryGenerator, StoryContext
 from graph_db import CYOAGraphDB
 
-DEFAULT_STARTING_PROMPT = """You are a dark fantasy text adventure game.
+DEFAULT_STARTING_PROMPT = """You are a dark fantasy interactive fiction engine.
 Describe the starting scenario where the player wakes up in a cold, unfamiliar dungeon cell.
 Provide 2-3 choices for what they can do next.
-Also, you MUST provide a creative 'title' for this new adventure in the JSON response.
+You MUST provide a creative 'title' for this new adventure in the JSON response.
+When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true and provide an empty choices list.
 Ensure your output is strictly valid JSON matching the requested schema.
 """
+
+CONFIG_FILE = ".config.json"
+
+# Fix #9: Persist dark mode preference
+def _load_config() -> dict:
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def _save_config(data: dict):
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(data, f)
 
 # Load the ASCII art for the initial screen
 try:
@@ -26,42 +44,26 @@ except FileNotFoundError:
 class CYOAApp(App):
     """A Choose-Your-Own-Adventure Textual App."""
 
-    CSS = """
-    Screen {
-        background: $surface;
-    }
+    # Fix #8: CSS loaded from external file
+    CSS_PATH = "styles.tcss"
 
-    #story-container {
-        height: 1fr;
-        border: solid $accent;
-        padding: 1 2;
-        margin: 1;
-        background: $boost;
-    }
+    # Fix #1: Number key bindings to select choices
+    BINDINGS = [
+        ("d", "toggle_dark", "Toggle dark mode"),
+        ("q", "quit", "Quit"),
+        ("r", "restart", "Restart"),
+        ("1", "choose('1')", "Choice 1"),
+        ("2", "choose('2')", "Choice 2"),
+        ("3", "choose('3')", "Choice 3"),
+        ("4", "choose('4')", "Choice 4"),
+    ]
 
-    #choices-container {
-        height: auto;
-        border: solid $secondary;
-        padding: 1;
-        margin: 0 1 1 1;
-    }
-
-    Button {
-        width: 100%;
-        margin-bottom: 1;
-    }
-
-    .hidden {
-        display: none;
-    }
-    """
-
-    BINDINGS = [("d", "toggle_dark", "Toggle dark mode"), ("q", "quit", "Quit")]
+    # Fix #4: Reactive turn counter displayed in footer
+    turn_count: reactive[int] = reactive(1)
 
     def __init__(self, model_path: str, starting_prompt: str = DEFAULT_STARTING_PROMPT, **kwargs):
         super().__init__(**kwargs)
         self.model_path = model_path
-        # Fix #6: starting_prompt is now a constructor parameter with a sensible default
         self.starting_prompt = starting_prompt
 
         self.generator = None
@@ -70,52 +72,58 @@ class CYOAApp(App):
         self.current_scene_id = None
         self.last_choice_text = None
         self.current_story_title = None
-
-        # Fix #2 companion: store the raw narrative of the *last* node separately
-        # so we can pass it cleanly to add_turn() rather than the accumulated markdown
         self._last_raw_narrative: str | None = None
-
-        # The accumulated markdown shown in the UI (display-only)
         self._current_story = LOADING_ART
+
+        # Fix #9: Restore dark mode preference
+        config = _load_config()
+        self.dark = config.get("dark", True)
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Container():
             with VerticalScroll(id="story-container"):
                 yield Markdown(LOADING_ART, id="story-text")
-            with Container(id="choices-container"):
+            # Fix #5: Dedicated status bar between story and choices
+            with Container(id="status-bar"):
                 yield LoadingIndicator(id="loading")
+            with Container(id="choices-container"):
+                pass
         yield Footer()
+
+    def watch_turn_count(self, count: int) -> None:
+        # Fix #4: Update footer subtitle with turn counter
+        self.sub_title = f"Turn {count}" if count > 0 else ""
 
     async def on_mount(self) -> None:
         self.query_one("#choices-container").border_title = "Choices"
         self.query_one("#story-container").border_title = "Story"
-        # Delay startup so UI finishes painting ASCII art before blocking on LLM load
+        # Fix #6: Show spinner immediately before model even begins loading
+        self.query_one("#loading").remove_class("hidden")
+        # Short delay to let the UI paint the ASCII art + spinner before blocking
         self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
 
     @work(exclusive=True, thread=True)
     def initialize_and_start(self, model_path: str):
-        self.generator = StoryGenerator(model_path=model_path)
-        self.story_context = StoryContext(starting_prompt=self.starting_prompt)
+        """Load model and generate the first scene. Reuses existing model if already loaded."""
+        if self.generator is None:
+            self.generator = StoryGenerator(model_path=model_path)
 
+        self.story_context = StoryContext(starting_prompt=self.starting_prompt)
         self.call_from_thread(self.show_loading)
 
-        # Initialize GraphDB (silently disables itself if offline)
-        self.db = CYOAGraphDB()
+        if self.db is None:
+            self.db = CYOAGraphDB()
 
-        # Generate first node
         node = self.generator.generate_next_node(self.story_context)
         self._last_raw_narrative = node.narrative
 
-        # Register the story in the graph
         generated_title = node.title if node.title else "Untitled Adventure"
         self.current_story_title = self.db.create_story_node_and_get_title(generated_title)
 
-        # Fix #3: story.md now written fresh using the actual LLM-generated title
         with open("story.md", "w", encoding="utf-8") as f:
             f.write(f"# {self.current_story_title}\n\n")
 
-        # Fix #5: DB write is async; UI will update immediately via call_from_thread
         choices_text = [choice.text for choice in node.choices]
         self.db.save_scene_async(
             narrative=node.narrative,
@@ -129,6 +137,7 @@ class CYOAApp(App):
         self.call_from_thread(self.display_node, node)
 
     def show_loading(self):
+        """Clear choice buttons, show spinner, append 'shifting' text."""
         container = self.query_one("#choices-container")
         for btn in container.query(Button):
             btn.remove()
@@ -142,11 +151,11 @@ class CYOAApp(App):
             self.set_timer(0.05, lambda: story_container.scroll_end(animate=False))
 
     def display_node(self, node: StoryNode):
+        """Render a newly generated StoryNode to the UI."""
         self.query_one("#loading").add_class("hidden")
 
         story_md = self.query_one("#story-text", Markdown)
 
-        # Strip the "shifting" loading placeholder before appending the new scene
         if self._current_story == LOADING_ART:
             self._current_story = node.narrative
         else:
@@ -157,38 +166,78 @@ class CYOAApp(App):
 
         story_md.update(self._current_story)
 
-        # Auto-scroll after layout recalculates
         story_container = self.query_one("#story-container")
         self.set_timer(0.05, lambda: story_container.scroll_end(animate=False))
 
-        # Fix #3: Only write the delta (new narrative) to story.md, not the entire history
         with open("story.md", "a", encoding="utf-8") as f:
             f.write(f"{node.narrative}\n\n")
 
         choices_container = self.query_one("#choices-container")
+
+        # Fix #7: Detect ending state — replace choices with a restart button
+        if node.is_ending:
+            end_btn = Button("✦ Start a New Adventure", id="btn-new-adventure", variant="success")
+            choices_container.mount(end_btn)
+            return
+
         for choice in node.choices:
-            # Fix #7: Use a unique short UUID so IDs never collide across turns
             btn_id = f"choice-{uuid.uuid4().hex[:8]}"
             btn = Button(str(choice.text), id=btn_id, variant="primary")
             btn.action_text = choice.text
             choices_container.mount(btn)
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
+        # Fix #7: Handle the end-game "New Adventure" button
+        if event.button.id == "btn-new-adventure":
+            await self.action_restart()
+            return
+
         choice_text = getattr(event.button, "action_text", str(event.button.label))
+        self._trigger_choice(choice_text)
 
+    # Fix #1: Keyboard number shortcut to select a choice
+    def action_choose(self, number: str) -> None:
+        """Select a choice by its 1-based index using number keys."""
+        buttons = list(self.query_one("#choices-container").query(Button))
+        idx = int(number) - 1
+        if 0 <= idx < len(buttons):
+            btn = buttons[idx]
+            choice_text = getattr(btn, "action_text", str(btn.label))
+            self._trigger_choice(choice_text)
+
+    def _trigger_choice(self, choice_text: str):
+        """Shared logic for both click and keyboard choice selection."""
         self.last_choice_text = choice_text
-
-        # Fix #2 companion: pass only the raw narrative, not the accumulated markdown
         self.story_context.add_turn(self._last_raw_narrative or "", choice_text)
+        self.turn_count += 1  # Fix #4
 
-        # Append choice to story log
         with open("story.md", "a", encoding="utf-8") as f:
             f.write(f"> **You chose:** {choice_text}\n\n---\n\n")
 
-        # Show choice in UI then start generation
         self._current_story += f"\n\n> **You chose:** {choice_text}"
         self.show_loading()
         self.generate_next_step()
+
+    # Fix #2: In-app restart without reloading the model
+    async def action_restart(self) -> None:
+        """Reset story state and start a new adventure without reloading the model."""
+        self._current_story = LOADING_ART
+        self.turn_count = 0
+        self.current_scene_id = None
+        self.last_choice_text = None
+        self._last_raw_narrative = None
+
+        # Reset UI to loading state
+        self.query_one("#story-text", Markdown).update(LOADING_ART)
+        for btn in self.query_one("#choices-container").query(Button):
+            btn.remove()
+
+        self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
+
+    # Fix #9: Persist dark mode preference when toggled
+    def action_toggle_dark(self) -> None:
+        self.dark = not self.dark
+        _save_config({"dark": self.dark})
 
     @work(exclusive=True, thread=True)
     def generate_next_step(self):
@@ -196,12 +245,9 @@ class CYOAApp(App):
         self._last_raw_narrative = node.narrative
 
         choices_text = [choice.text for choice in node.choices]
-
-        # Capture scene ID at point-of-write since async completion updates it after
         prev_scene_id = self.current_scene_id
         prev_choice = self.last_choice_text
 
-        # Fix #5: async, non-blocking DB save — UI updates immediately
         self.db.save_scene_async(
             narrative=node.narrative,
             available_choices=choices_text,

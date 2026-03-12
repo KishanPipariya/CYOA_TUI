@@ -1,0 +1,53 @@
+/* ═══════════════════════════════════════════════════════════
+   CYOA TUI — External Stylesheet (styles.tcss)
+   Fix #8: CSS moved out of the App class into this file.
+   ═══════════════════════════════════════════════════════════ */
+
+Screen {
+    background: $surface;
+}
+
+/* ── Story Panel ───────────────────────────────────────────── */
+#story-container {
+    height: 1fr;
+    border: solid $accent;
+    padding: 1 2;
+    margin: 1 1 0 1;
+    background: $boost;
+}
+
+/* ── Status Bar (loading indicator row) ───────────────────── */
+/* Fix #5: Dedicated status bar between story and choices */
+#status-bar {
+    height: auto;
+    padding: 0 1;
+    margin: 0 1;
+}
+
+/* ── Choices Panel ─────────────────────────────────────────── */
+/* Fix #3: Cap height to prevent overflow on small terminals */
+#choices-container {
+    height: auto;
+    /* Fix #3: hard cap so choices never crush the story panel */
+    max-height: 40%;
+    border: solid $secondary;
+    padding: 1;
+    margin: 0 1 1 1;
+    overflow-y: auto;
+}
+
+/* ── Buttons ────────────────────────────────────────────────── */
+Button {
+    width: 100%;
+    margin-bottom: 1;
+}
+
+/* Ending button gets a special success variant treatment */
+#btn-new-adventure {
+    margin-top: 1;
+}
+
+/* ── Utilities ──────────────────────────────────────────────── */
+.hidden {
+    display: none;
+}
