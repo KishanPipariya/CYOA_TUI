@@ -4,7 +4,14 @@ import uuid
 class CYOAGraphDB:
     def __init__(self, uri="bolt://localhost:7687", user="neo4j", password="cyoa_password"):
         """Initialize the connection to Neo4j."""
-        self.driver = GraphDatabase.driver(uri, auth=(user, password))
+        # Add a short connection timeout so the TUI doesn't hang for 30 seconds if Neo4j is offline.
+        self.driver = GraphDatabase.driver(
+            uri, 
+            auth=(user, password),
+            connection_timeout=2.0 
+        )
+        # Verify connectivity immediately to fail fast
+        self.driver.verify_connectivity()
 
     def close(self):
         """Close the database connection."""

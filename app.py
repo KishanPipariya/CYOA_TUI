@@ -16,6 +16,13 @@ Also, you MUST provide a creative 'title' for this new adventure in the JSON res
 Ensure your output is strictly valid JSON matching the requested schema.
 """
 
+# Load the ASCII art for the initial screen
+try:
+    with open("loading_art.md", "r", encoding="utf-8") as f:
+        LOADING_ART = f.read()
+except FileNotFoundError:
+    LOADING_ART = "# Welcome to the Adventure\n\n*Loading the AI model and generating the physical world... Please wait.*"
+
 class CYOAApp(App):
     """A Choose-Your-Own-Adventure Textual App."""
     
@@ -60,13 +67,13 @@ class CYOAApp(App):
         self.current_scene_id = None
         self.last_choice_text = None
         self.current_story_title = None
-        self._current_story = "# Welcome to the Adventure\nLoading the model and generating the intro..."
+        self._current_story = LOADING_ART
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Container():
             with VerticalScroll(id="story-container"):
-                yield Markdown("# Welcome to the Adventure\nLoading the model and generating the intro...", id="story-text")
+                yield Markdown(LOADING_ART, id="story-text")
             with Container(id="choices-container"):
                 yield LoadingIndicator(id="loading")
         yield Footer()
@@ -76,8 +83,8 @@ class CYOAApp(App):
         self.query_one("#choices-container").border_title = "Choices"
         self.query_one("#story-container").border_title = "Story"
         
-        # Start the LLM generation in a worker thread
-        self.initialize_and_start(self.model_path)
+        # Start the LLM generation in a worker thread after the UI has successfully painted the ASCII art.
+        self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
         
     @work(exclusive=True, thread=True)
     def initialize_and_start(self, model_path: str):
@@ -85,17 +92,19 @@ class CYOAApp(App):
         self.generator = StoryGenerator(model_path=model_path)
         self.story_context = StoryContext(starting_prompt=STARTING_PROMPT)
         
+        with open("story.md", "w", encoding="utf-8") as f:
+            f.write("# New Adventure\n\n")
+            
+        # Tell UI to show the loading screen FIRST, before we block on Neo4j/LLM
+        self.call_from_thread(self.show_loading)
+
         try:
             self.db = CYOAGraphDB()
         except Exception as e:
             print(f"Warning: Could not connect to Neo4j Graph DB: {e}")
             self.db = None
             
-        with open("story.md", "w", encoding="utf-8") as f:
-            f.write("# New Adventure\n\n")
-            
         # Generate first node
-        self.call_from_thread(self.show_loading)
         node = self.generator.generate_next_node(self.story_context)
         
         if self.db:
@@ -122,15 +131,32 @@ class CYOAApp(App):
         if "*(The ancient texts are shifting...)*" not in self._current_story:
             self._current_story += "\n\n*(The ancient texts are shifting...)*"
             story_md.update(self._current_story)
+            
+            # Auto-scroll so the loading indicator text and choice is visible
+            story_container = self.query_one("#story-container")
+            self.set_timer(0.05, lambda: story_container.scroll_end(animate=False))
 
     def display_node(self, node: StoryNode):
         loading = self.query_one("#loading")
         loading.add_class("hidden")
         
         story_md = self.query_one("#story-text", Markdown)
-        # Replacing it feels more like a paginated CYOA, let's just replace it.
-        self._current_story = node.narrative
+        
+        # If the current story is just the loading art, replace it; otherwise, append.
+        if self._current_story == LOADING_ART:
+            self._current_story = node.narrative
+        else:
+            # We already appended the user's choice and the "shifting texts" 
+            # message, so we just clean that up and properly append the story.
+            self._current_story = self._current_story.replace("\n\n*(The ancient texts are shifting...)*", "")
+            self._current_story += f"\n\n---\n\n{node.narrative}"
+            
         story_md.update(self._current_story)
+        
+        # Auto-scroll to the bottom so the new text and choices are visible
+        # We use a short timer to let Textual recalculate layout heights after the markdown update
+        story_container = self.query_one("#story-container")
+        self.set_timer(0.05, lambda: story_container.scroll_end(animate=False))
         
         # Append latest narrative text to the file
         with open("story.md", "a", encoding="utf-8") as f:
@@ -157,7 +183,8 @@ class CYOAApp(App):
         with open("story.md", "a", encoding="utf-8") as f:
             f.write(f"> **You chose:** {choice_text}\n\n---\n\n")
         
-        # Show loading and start generation worker
+        # Show the choice in the UI and trigger loading
+        self._current_story += f"\n\n> **You chose:** {choice_text}"
         self.show_loading()
         self.generate_next_step()
 

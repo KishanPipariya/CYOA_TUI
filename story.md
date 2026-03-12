@@ -1,34 +1,96 @@
 # New Adventure
 
-You awaken in a cold, damp dungeon cell. The walls are rough stone, and the only light comes from a small barred window near the ceiling. Your hands and feet are bound with thick ropes. The air is heavy with the scent of mildew and fear. You have no memory of how you got here, only a nagging sense of dread and the need to escape.
+# Welcome to the Adventure
 
-> **You chose:** Try to free yourself from the ropes using your hands and feet.
+```text
+                                                 /===-_---~~~~~~~~~------____
+                                                |===-~___                _,-'
+                 -==\\                         `//~\\   ~~~~`---.___.-~~
+             ______-==|                         | |  \\           _-~`
+       __--~~~  ,-/-==\\                        | |   `\        ,'
+    _-~       /'    |  \\                      / /      \      /
+  .'        /       |   \\                   /' /        \   /'
+ /  ____  /         |    \`\.__/-~~ ~ \ _ _/'  /          \/'
+/-'~    ~~~~~---__  |     ~-/~         ( )   /'        _--~`
+                  \_|      /        _)   ;  ),   __--~~
+                    '~~--_/      _-~/-  / \   '-~ \
+                   {\__--_/}    / \\_>- )<__\      \
+                   /'   (_/  _-~  | |__>--<__|      |
+                  |0  0 _/) )-~     | |__>--<__|     |
+                  / /~ ,_/       / /__>---<__/      |
+                 o o _//        /-~_>---<__-~      /
+                 (^(~          /~_>---<__-      _-~
+                ,/|           /__>--<__/     _-~
+             ,//('(          |__>--<__|     /                  .----_
+            ( ( '))          |__>--<__|    |                 /' _---_~\
+         `-)) )) (           |__>--<__|    |               /'  /     ~\`\
+        ,/,'//( (             \__>--<__\    \            /'  //        ||
+      ,( ( ((, ))              ~-__>--<_~-_  ~--____---~' _/'/        /'
+    `~/  )` ) ,/|                 ~-_~>--<_/-__       __-~ _/
+  ._-~//( )/ )) `                    ~~-'_/_/ /~~~~~~~__--~
+   ;'( ')/ ,)(                              ~~~~~~~~~~
+  ' ') '( (/
+    '   '  `
+```
+
+*Loading the AI model and generating the physical world... Please wait.*
+
 
 ---
 
-You strain against the ropes, feeling the rough fibers dig into your skin. After several tense minutes of struggling, you manage to slip out of the ropes binding your hands. Your feet are still tied, but you now have the dexterity to work on freeing them. You start to carefully untangle the knots with your newly freed hands.
+You awaken in a cold, damp dungeon cell, the walls slick with moisture and the air thick with the stench of decay. A flickering torch on the wall casts eerie shadows across the stone. You remember nothing before this moment. A narrow window high above you offers a glimpse of the night sky, but it's too small to escape through. The only exit appears to be the heavy iron door in front of you, which is securely locked.
 
-> **You chose:** Use your newly freed hands to explore the cell for any potential tools or weaknesses in the cell walls.
-
----
-
-You carefully examine the cell, feeling along the walls and under the bed. Your fingers find a loose stone in the wall opposite the door. You pry it out, revealing a small keyhole. It seems the cell has a hidden mechanism for opening the door. You also discover a small, sharp fragment of metal beneath the bed.
-
-> **You chose:** Use the sharp fragment to cut the ropes around your feet.
+> **You chose:** Explore the cell for any useful items, such as tools, food, or anything that can help you escape or understand your situation
 
 ---
 
-You use the sharp fragment to carefully cut through the ropes around your feet. The ropes are tough, but with persistence, you manage to free yourself. You now stand fully unbound in the middle of the cell.
+# Welcome to the Adventure
 
-> **You chose:** Look around the cell again for any other useful items or clues.
+```text
+                                                 /===-_---~~~~~~~~~------____
+                                                |===-~___                _,-'
+                 -==\\                         `//~\\   ~~~~`---.___.-~~
+             ______-==|                         | |  \\           _-~`
+       __--~~~  ,-/-==\\                        | |   `\        ,'
+    _-~       /'    |  \\                      / /      \      /
+  .'        /       |   \\                   /' /        \   /'
+ /  ____  /         |    \`\.__/-~~ ~ \ _ _/'  /          \/'
+/-'~    ~~~~~---__  |     ~-/~         ( )   /'        _--~`
+                  \_|      /        _)   ;  ),   __--~~
+                    '~~--_/      _-~/-  / \   '-~ \
+                   {\__--_/}    / \\_>- )<__\      \
+                   /'   (_/  _-~  | |__>--<__|      |
+                  |0  0 _/) )-~     | |__>--<__|     |
+                  / /~ ,_/       / /__>---<__/      |
+                 o o _//        /-~_>---<__-~      /
+                 (^(~          /~_>---<__-      _-~
+                ,/|           /__>--<__/     _-~
+             ,//('(          |__>--<__|     /                  .----_
+            ( ( '))          |__>--<__|    |                 /' _---_~\
+         `-)) )) (           |__>--<__|    |               /'  /     ~\`\
+        ,/,'//( (             \__>--<__\    \            /'  //        ||
+      ,( ( ((, ))              ~-__>--<_~-_  ~--____---~' _/'/        /'
+    `~/  )` ) ,/|                 ~-_~>--<_/-__       __-~ _/
+  ._-~//( )/ )) `                    ~~-'_/_/ /~~~~~~~__--~
+   ;'( ')/ ,)(                              ~~~~~~~~~~
+  ' ') '( (/
+    '   '  `
+```
+
+*Loading the AI model and generating the physical world... Please wait.*
+
 
 ---
 
-You scan the cell again, this time focusing on the floor and the corners. Behind the small bed, you find a partially concealed note. The note is written in a hurried hand and seems to indicate a secret passage behind the loose stone you found earlier.
+You awaken in a cold, damp dungeon cell, the walls slick with moisture and the air thick with the stench of decay. A flickering torch on the wall casts eerie shadows across the stone. You remember nothing before this moment. A narrow window high above you offers a glimpse of the night sky, but it's too small to escape through. The only exit appears to be the heavy iron door in front of you, which is securely locked.
 
-> **You chose:** Read the note carefully to understand its contents.
+> **You chose:** Explore the cell for any useful items, such as tools, food, or anything that can help you escape or understand your situation
 
 ---
 
-The note is crumpled and worn but legible. It describes a secret passage that leads behind the loose stone in the wall. The note suggests this passage might lead to a hidden exit from the dungeon. You feel a glimmer of hope as you consider your next move.
+As you search the cell, your hands feel the rough stone walls and the cold, hard ground. In one corner, you discover a small, rusty key and a crumpled piece of parchment. The key might fit the cell's lock, but it's old and may not work. The parchment is difficult to read due to water damage, but it seems to hint at a secret passage in the dungeon.
+
+> **You chose:** Try to decipher the parchment and find the secret passage mentioned. It could offer a way out or valuable information.
+
+---
 
