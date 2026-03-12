@@ -3,9 +3,8 @@ import os
 from llama_cpp import Llama
 from models import StoryNode
 
-# Fix #4: Max number of (assistant, user) turn pairs to keep in context.
-# Older turns beyond this are trimmed to prevent context window overflow.
-MAX_CONTEXT_TURNS = 10
+# Configurable via .env / environment — defaults used if not set
+MAX_CONTEXT_TURNS = int(os.getenv("LLM_MAX_TURNS", "10"))
 
 
 class StoryContext:
@@ -43,9 +42,9 @@ class StoryContext:
 
 
 class StoryGenerator:
-    def __init__(self, model_path: str, n_ctx: int = 4096):
-        # Perf #4: Use physical core count for CPU threads — avoids over-scheduling
-        # on Apple Silicon where efficiency cores compete with the Metal GPU queue.
+    def __init__(self, model_path: str, n_ctx: int = None):
+        n_ctx = n_ctx or int(os.getenv("LLM_N_CTX", "4096"))
+        # Perf #4: Use physical core count for CPU threads
         cpu_threads = max(1, (os.cpu_count() or 8) // 2)
         self.llm = Llama(
             model_path=model_path,
@@ -55,8 +54,10 @@ class StoryGenerator:
             flash_attn=True,
             verbose=False
         )
-        # Perf #1: Cache schema once at init — model_json_schema() is not cheap
+        # Perf #1: Cache schema once at init
         self._schema = StoryNode.model_json_schema()
+        self._temperature = float(os.getenv("LLM_TEMPERATURE", "0.6"))
+        self._max_tokens = int(os.getenv("LLM_MAX_TOKENS", "512"))
 
     def generate_next_node(self, context: StoryContext) -> StoryNode:
         """
@@ -67,10 +68,10 @@ class StoryGenerator:
             messages=context.history,
             response_format={
                 "type": "json_object",
-                "schema": self._schema,  # Perf #1: use cached schema
+                "schema": self._schema,
             },
-            temperature=0.6,  # Perf #5: slightly lower temp speeds up grammar-constrained sampling
-            max_tokens=512,
+            temperature=self._temperature,
+            max_tokens=self._max_tokens,
         )
 
         content = response["choices"][0]["message"]["content"]

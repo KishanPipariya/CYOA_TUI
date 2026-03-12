@@ -1,19 +1,41 @@
 import argparse
-from app import CYOAApp, DEFAULT_STARTING_PROMPT
+from dotenv import load_dotenv
+
+# Load .env before anything that reads os.getenv (graph_db, llm_backend)
+load_dotenv()
+
+from app import CYOAApp, DEFAULT_STARTING_PROMPT  # noqa: E402 (must follow load_dotenv)
+from theme_loader import load_theme, list_themes   # noqa: E402
+
 
 def main():
     parser = argparse.ArgumentParser(description="CYOA Terminal Game with Local LLM")
     parser.add_argument("--model", type=str, required=True, help="Path to the .gguf model file")
     parser.add_argument(
+        "--theme", type=str, default="dark_dungeon",
+        help=f"Story theme to use. Available: {', '.join(list_themes())} (default: dark_dungeon)"
+    )
+    parser.add_argument(
         "--prompt", type=str, default=None,
-        help="Optional custom starting prompt/scenario. Uses the default dungeon scenario if not provided."
+        help="Override the starting prompt directly (takes precedence over --theme)."
     )
 
     args = parser.parse_args()
 
-    starting_prompt = args.prompt if args.prompt else DEFAULT_STARTING_PROMPT
+    # --prompt overrides --theme
+    if args.prompt:
+        starting_prompt = args.prompt
+    else:
+        try:
+            theme = load_theme(args.theme)
+            starting_prompt = theme["prompt"]
+        except FileNotFoundError as e:
+            print(f"Error: {e}")
+            raise SystemExit(1)
+
     app = CYOAApp(model_path=args.model, starting_prompt=starting_prompt)
     app.run()
+
 
 if __name__ == "__main__":
     main()

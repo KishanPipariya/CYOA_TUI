@@ -211,3 +211,8 @@ __marimo__/
 
 # Models
 *.gguf  
+
+tasks.md
+
+# Secrets — never commit the actual .env, only .env.example
+.env

@@ -1,13 +1,21 @@
 import uuid
+import os
 import threading
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable
 
 
 class CYOAGraphDB:
-    def __init__(self, uri="bolt://localhost:7687", user="neo4j", password="cyoa_password"):
-        """Initialize the connection to Neo4j."""
-        # Add a short connection timeout so the TUI doesn't hang if Neo4j is offline.
+    def __init__(
+        self,
+        uri: str = None,
+        user: str = None,
+        password: str = None,
+    ):
+        """Initialize the connection to Neo4j. Reads credentials from env vars if not provided."""
+        uri = uri or os.getenv("NEO4J_URI", "bolt://localhost:7687")
+        user = user or os.getenv("NEO4J_USER", "neo4j")
+        password = password or os.getenv("NEO4J_PASSWORD", "cyoa_password")
         self.driver = GraphDatabase.driver(
             uri,
             auth=(user, password),
