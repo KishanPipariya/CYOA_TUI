@@ -1,5 +1,6 @@
-from neo4j import GraphDatabase
 import uuid
+from neo4j import GraphDatabase
+from neo4j.exceptions import ServiceUnavailable
 
 class CYOAGraphDB:
     def __init__(self, uri="bolt://localhost:7687", user="neo4j", password="cyoa_password"):
@@ -10,20 +11,27 @@ class CYOAGraphDB:
             auth=(user, password),
             connection_timeout=2.0 
         )
-        # Verify connectivity immediately to fail fast
-        self.driver.verify_connectivity()
+        
+        # Verify connectivity immediately to fail fast. 
+        # If Neo4j is offline, disable the driver.
+        try:
+            self.driver.verify_connectivity()
+        except ServiceUnavailable as e:
+            print(f"Graph DB is offline. Proceeding without graph persistence. Error: {e}")
+            self.driver = None
+        except Exception as e:
+            print(f"Unexpected Graph DB connection error. Error: {e}")
+            self.driver = None
 
     def close(self):
         """Close the database connection."""
-        self.driver.close()
+        if self.driver:
+            self.driver.close()
 
-    def create_story_node_and_get_title(self, generated_title: str) -> str:
         """
-        Creates a new Story node to act as the root of the graph.
-        If the generated_title already exists, appends a numeric modifier.
-        Returns the final unique title used.
-        """
-        
+        if not self.driver:
+            return generated_title
+            
         # Check if the title exists, and if so, append a modifier
         query_check = "MATCH (s:Story) WHERE s.title STARTS WITH $base_title RETURN s.title AS title"
         
@@ -65,6 +73,9 @@ class CYOAGraphDB:
         """Creates a Scene node in the graph, links it to its Story, and returns its distinct UUID."""
         scene_id = str(uuid.uuid4())
         
+        if not self.driver:
+            return scene_id
+        
         query = """
         MATCH (story:Story {title: $story_title})
         CREATE (s:Scene {
@@ -89,6 +100,9 @@ class CYOAGraphDB:
 
     def create_choice_edge(self, source_scene_id: str, target_scene_id: str, choice_text: str):
         """Creates a LEADS_TO relationship between two scenes based on a choice."""
+        if not self.driver:
+            return
+            
         query = """
         MATCH (source:Scene {id: $source_id})
         MATCH (target:Scene {id: $target_id})
@@ -109,6 +123,9 @@ class CYOAGraphDB:
         Retrieves the path of scenes that led to the current scene.
         (Returns a list of narratives and choices to reach this point).
         """
+        if not self.driver:
+            return None
+            
         query = """
         MATCH path = (start:Scene)-[:LEADS_TO*]->(current:Scene {id: $current_id})
         WHERE NOT ()-[:LEADS_TO]->(start) // Find the root node

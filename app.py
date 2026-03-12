@@ -98,22 +98,18 @@ class CYOAApp(App):
         # Tell UI to show the loading screen FIRST, before we block on Neo4j/LLM
         self.call_from_thread(self.show_loading)
 
-        try:
-            self.db = CYOAGraphDB()
-        except Exception as e:
-            print(f"Warning: Could not connect to Neo4j Graph DB: {e}")
-            self.db = None
+        # Initialize GraphDB. It will automatically disable itself if offline.
+        self.db = CYOAGraphDB()
             
         # Generate first node
         node = self.generator.generate_next_node(self.story_context)
         
-        if self.db:
-            # We asked the LLM for a title on the very first node
-            generated_title = node.title if node.title else "Untitled Adventure"
-            self.current_story_title = self.db.create_story_node_and_get_title(generated_title)
-            
-            choices_text = [choice.text for choice in node.choices]
-            self.current_scene_id = self.db.create_scene_node(node.narrative, choices_text, self.current_story_title)
+        # We asked the LLM for a title on the very first node
+        generated_title = node.title if node.title else "Untitled Adventure"
+        self.current_story_title = self.db.create_story_node_and_get_title(generated_title)
+        
+        choices_text = [choice.text for choice in node.choices]
+        self.current_scene_id = self.db.create_scene_node(node.narrative, choices_text, self.current_story_title)
             
         self.call_from_thread(self.display_node, node)
 
@@ -192,11 +188,10 @@ class CYOAApp(App):
     def generate_next_step(self):
         node = self.generator.generate_next_node(self.story_context)
         
-        if self.db and self.current_story_title:
-            choices_text = [choice.text for choice in node.choices]
-            new_scene_id = self.db.create_scene_node(node.narrative, choices_text, self.current_story_title)
-            if self.current_scene_id and self.last_choice_text:
-                self.db.create_choice_edge(self.current_scene_id, new_scene_id, self.last_choice_text)
-            self.current_scene_id = new_scene_id
+        choices_text = [choice.text for choice in node.choices]
+        new_scene_id = self.db.create_scene_node(node.narrative, choices_text, self.current_story_title)
+        if self.current_scene_id and self.last_choice_text:
+            self.db.create_choice_edge(self.current_scene_id, new_scene_id, self.last_choice_text)
+        self.current_scene_id = new_scene_id
             
         self.call_from_thread(self.display_node, node)
