@@ -25,15 +25,17 @@ def main() -> None:
     # --prompt overrides --theme
     if args.prompt:
         starting_prompt = args.prompt
+        spinner_frames = ["[-]", "[\\]", "[|]", "[/]"]
     else:
         try:
             theme = load_theme(args.theme)
             starting_prompt = theme["prompt"]
+            spinner_frames = theme.get("spinner_frames", ["[-]", "[\\]", "[|]", "[/]"])
         except FileNotFoundError as e:
             print(f"Error: {e}")
             raise SystemExit(1)
 
-    app = CYOAApp(model_path=args.model, starting_prompt=starting_prompt)
+    app = CYOAApp(model_path=args.model, starting_prompt=starting_prompt, spinner_frames=spinner_frames)
     app.run()
 
 

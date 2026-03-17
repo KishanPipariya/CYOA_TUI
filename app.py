@@ -3,7 +3,7 @@ import json
 import os
 from textual.app import App, ComposeResult
 from textual.containers import Container, VerticalScroll
-from textual.widgets import Header, Footer, Markdown, Button, LoadingIndicator, ListView, ListItem, Label
+from textual.widgets import Header, Footer, Markdown, Button, LoadingIndicator, ListView, ListItem, Label, Static
 from textual.screen import ModalScreen
 from textual.reactive import reactive
 from textual import work
@@ -107,6 +107,22 @@ class BranchScreen(ModalScreen[int]):
             self.dismiss(None)
 
 
+class ThemeSpinner(Static):
+    """Custom spinner that cycles through configured ASCII frames."""
+    def __init__(self, frames: list[str], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.frames = frames
+        self._frame_idx = 0
+        
+    def on_mount(self) -> None:
+        self.update(self.frames[0])
+        self.set_interval(0.5, self.tick)
+        
+    def tick(self) -> None:
+        self._frame_idx = (self._frame_idx + 1) % len(self.frames)
+        self.update(self.frames[self._frame_idx])
+
+
 class CYOAApp(App):
     """A Choose-Your-Adventure Textual App."""
 
@@ -128,10 +144,11 @@ class CYOAApp(App):
     # Fix #4: Reactive turn counter displayed in footer
     turn_count: reactive[int] = reactive(1)
 
-    def __init__(self, model_path: str, starting_prompt: str = DEFAULT_STARTING_PROMPT, **kwargs: Any) -> None:
+    def __init__(self, model_path: str, starting_prompt: str = DEFAULT_STARTING_PROMPT, spinner_frames: Optional[list[str]] = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.model_path = model_path
         self.starting_prompt = starting_prompt
+        self.spinner_frames = spinner_frames or ["[-]", "[\\]", "[|]", "[/]"]
 
         self.generator: Optional[StoryGenerator] = None
         self.story_context: Optional[StoryContext] = None
@@ -159,7 +176,7 @@ class CYOAApp(App):
                 yield Markdown(LOADING_ART, id="story-text")
             # Fix #5: Dedicated status bar between story and choices
             with Container(id="status-bar"):
-                yield LoadingIndicator(id="loading")
+                yield ThemeSpinner(frames=self.spinner_frames, id="loading")
             with Container(id="choices-container"):
                 pass
         yield Footer()

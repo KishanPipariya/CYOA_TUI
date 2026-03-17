@@ -1,6 +1,7 @@
 name = "Space Explorer"
 description = "A sci-fi survival adventure set on a hostile alien moon."
 accent_color = "cyan"
+spinner_frames = ["[🌑]", "[🌒]", "[🌓]", "[🌔]", "[🌕]", "[🌖]", "[🌗]", "[🌘]"]
 
 prompt = """You are a sci-fi interactive fiction engine.
 Describe the starting scenario where the player wakes up as the sole survivor of a crashed research shuttle on a hostile alien moon with dwindling oxygen.

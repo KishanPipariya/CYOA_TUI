@@ -1,6 +1,7 @@
 name = "Dark Dungeon"
 description = "A classic dark fantasy dungeon crawl."
 accent_color = "blue"
+spinner_frames = ["[💀]", "[🦴]", "[💀]", "[🩸]"]
 
 prompt = """You are a dark fantasy interactive fiction engine.
 Describe the starting scenario where the player wakes up in a cold, unfamiliar dungeon cell.

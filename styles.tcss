@@ -24,6 +24,12 @@ Screen {
     margin: 0 1;
 }
 
+ThemeSpinner {
+    text-align: center;
+    color: $accent;
+    height: 1;
+}
+
 /* ── Choices Panel ─────────────────────────────────────────── */
 /* Fix #3: Cap height to prevent overflow on small terminals */
 #choices-container {
