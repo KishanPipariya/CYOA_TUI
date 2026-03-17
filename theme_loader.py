@@ -1,11 +1,12 @@
 import os
 import tomllib
 from pathlib import Path
+from typing import Any
 
 THEMES_DIR = Path(__file__).parent / "themes"
 
 
-def load_theme(name: str) -> dict:
+def load_theme(name: str) -> dict[str, Any]:
     """
     Load a theme by name from the themes/ directory.
     Returns a dict with keys: name, description, accent_color, prompt.

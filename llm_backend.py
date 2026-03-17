@@ -15,9 +15,9 @@ _NARRATIVE_START_RE = re.compile(r'"narrative"\s*:\s*"')
 
 
 class StoryContext:
-    def __init__(self, starting_prompt: str, max_turns: int = MAX_CONTEXT_TURNS):
-        self.max_turns = max_turns
-        self.history = [
+    def __init__(self, starting_prompt: str, max_turns: int = MAX_CONTEXT_TURNS) -> None:
+        self.max_turns: int = max_turns
+        self.history: list[dict[str, str]] = [
             {"role": "system", "content": (
                 "You are a creative interactive fiction engine. The user makes choices, "
                 "and you narrate the consequences and provide the next set of choices. "
@@ -28,7 +28,7 @@ class StoryContext:
         self.starting_prompt = starting_prompt
         self.history.append({"role": "user", "content": starting_prompt})
 
-    def add_turn(self, raw_narrative: str, user_choice: str):
+    def add_turn(self, raw_narrative: str, user_choice: str) -> None:
         """Add an assistant turn (raw narrative) and user choice, trimming old turns."""
         self.history.append({"role": "assistant", "content": raw_narrative})
         self.history.append({"role": "user", "content": f"I choose: {user_choice}"})
@@ -67,12 +67,12 @@ class StoryContext:
 
 
 class StoryGenerator:
-    def __init__(self, model_path: str, n_ctx: int = None):
-        n_ctx = n_ctx or int(os.getenv("LLM_N_CTX", "4096"))
+    def __init__(self, model_path: str, n_ctx: Optional[int] = None) -> None:
+        n_ctx_val = n_ctx or int(os.getenv("LLM_N_CTX", "4096"))
         cpu_threads = max(1, (os.cpu_count() or 8) // 2)
         self.llm = Llama(
             model_path=model_path,
-            n_ctx=n_ctx,
+            n_ctx=n_ctx_val,
             n_threads=cpu_threads,
             n_gpu_layers=-1,
             flash_attn=True,
@@ -107,7 +107,7 @@ class StoryGenerator:
             stream=stream,
         )
 
-        if stream:
+        if stream and on_token is not None:
             content = self._stream_with_callback(response, on_token)
         else:
             content = response["choices"][0]["message"]["content"]

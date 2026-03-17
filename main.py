@@ -8,7 +8,7 @@ from app import CYOAApp, DEFAULT_STARTING_PROMPT  # noqa: E402 (must follow load
 from theme_loader import load_theme, list_themes   # noqa: E402
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="CYOA Terminal Game with Local LLM")
     parser.add_argument("--model", type=str, required=True, help="Path to the .gguf model file")
     parser.add_argument(

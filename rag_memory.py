@@ -7,12 +7,13 @@ LLM prompt as a "memory" block, giving it long-term story coherence
 beyond the sliding context window.
 """
 import uuid
+from typing import Any, Optional
 
 __all__ = ["NarrativeMemory"]
 
 try:
     import chromadb
-    _CHROMA_AVAILABLE = True
+    _CHROMA_AVAILABLE: bool = True
 except ImportError:
     _CHROMA_AVAILABLE = False
 
@@ -29,12 +30,12 @@ class NarrativeMemory:
     thread at app startup while chromadb downloads/loads all-MiniLM-L6-v2.
     """
 
-    def __init__(self, collection_name: str = "scenes"):
-        self._available = _CHROMA_AVAILABLE
-        self._collection_name = collection_name
+    def __init__(self, collection_name: str = "scenes") -> None:
+        self._available: bool = _CHROMA_AVAILABLE
+        self._collection_name: str = collection_name
         # Fix #7: defer client + collection creation to first use
-        self._client = None
-        self._collection = None
+        self._client: Optional[Any] = None
+        self._collection: Optional[Any] = None
 
     def _ensure_ready(self) -> bool:
         """Create the chroma client and collection on first use. Returns False if unavailable."""
@@ -57,7 +58,7 @@ class NarrativeMemory:
 
     def add(self, scene_id: str, narrative: str) -> None:
         """Embed and store a scene narrative."""
-        if not self._ensure_ready():
+        if not self._ensure_ready() or self._collection is None:
             return
         try:
             self._collection.upsert(
@@ -72,7 +73,7 @@ class NarrativeMemory:
         Return the top-N most semantically relevant past narratives.
         Returns an empty list if memory is unavailable or empty.
         """
-        if not self._ensure_ready():
+        if not self._ensure_ready() or self._collection is None:
             return []
         try:
             count = self._collection.count()
