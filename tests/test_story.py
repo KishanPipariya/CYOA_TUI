@@ -4,7 +4,7 @@ Automated Story Tests — tests/test_story.py
 Headless test harness that verifies core CYOA behaviour without loading the
 actual LLM model or requiring a Neo4j instance.
 """
-import pytest
+import pytest  # type: ignore
 from unittest.mock import patch, MagicMock
 
 from models import StoryNode, Choice
@@ -15,6 +15,18 @@ from rag_memory import NarrativeMemory
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def mock_textual_workers(monkeypatch):
+    """
+    Textual's @work decorator tries to create async tasks which fails in
+    synchronous pytest environments with 'no running event loop'.
+    We mock Worker._start to simply run the coroutine synchronously if needed,
+    or just mock it entirely since we test the sync logic directly.
+    """
+    from textual.worker import Worker
+    monkeypatch.setattr(Worker, "_start", lambda *args, **kwargs: None)
+
 
 def _make_node(narrative: str = "You are in a dungeon.", n_choices: int = 2, is_ending: bool = False) -> StoryNode:
     choices = [Choice(text=f"Choice {i + 1}") for i in range(n_choices)]
@@ -283,3 +295,89 @@ class TestStreamingCallback:
         assert "dark" in extracted
         # Full JSON still reconstructable
         assert json.loads(result)["narrative"] == "A torch flickers in the dark."
+
+
+# ── 8. New UI Components: Branching and Animated Spinner ───────────────────────
+
+class TestThemeSpinner:
+    def test_spinner_cycles_frames(self):
+        """ThemeSpinner should update its frame index on each tick."""
+        from app import ThemeSpinner
+        
+        frames = ["[A]", "[B]", "[C]"]
+        spinner = ThemeSpinner(frames=frames)
+        
+        # Manually invoke on_mount behavior for headless testing
+        spinner._frame_idx = 0
+        
+        spinner.tick()
+        assert spinner._frame_idx == 1
+        spinner.tick()
+        assert spinner._frame_idx == 2
+        spinner.tick()
+        assert spinner._frame_idx == 0
+
+
+class TestBranchingLogic:
+    def test_restore_to_scene_rebuilds_context(self):
+        """Restoring to a past scene should rebuild the StoryContext and memory correctly."""
+        from app import CYOAApp
+        
+        history = {
+            "scenes": [
+                {"id": "scene-1", "narrative": "You wake up.", "available_choices": ["Stand"]},
+                {"id": "scene-2", "narrative": "You stand up.", "available_choices": ["Walk left", "Walk right"]},
+                {"id": "scene-3", "narrative": "You walk left into a wall.", "available_choices": ["Turn around"]}
+            ],
+            "choices": ["Stand", "Walk left"]
+        }
+        
+        app = CYOAApp(model_path="dummy")
+        app.current_scene_id = "scene-3"
+        app._current_story = "You wake up.\n\nYou stand up.\n\nYou walk left into a wall."
+        
+        # In a headless pytest environment without an event loop, we must mock out
+        # both UI node queries (which fail without being mounted). We also mock
+        # call_from_thread to do NOTHING for the final `display_node` call because
+        # that method manipulates the DOM. The `pre_update` callback we can execute instantly.
+        def mock_call_from_thread(callback, *args, **kwargs):
+            if callback.__name__ == 'pre_update':
+                # Run the pre_update synchronous closure
+                callback(*args, **kwargs)
+            # Ignore display_node or show_branch_screen as they need real text DOM
+            
+        with patch.object(app, "call_from_thread", side_effect=mock_call_from_thread), \
+             patch.object(app, "query_one"), \
+             patch.object(app, "set_timer"):
+             
+            # 0-based idx: idx=1 implies restoring to scene-2
+            # Since restore_to_scene is a @work worker, call the unwrapped original function directly for sync testing
+            app.restore_to_scene.__wrapped__(app, idx=1, history=history)
+            
+            # Check context
+            assert app.current_scene_id == "scene-2"
+            assert app.last_choice_text == "Stand"
+            assert app._last_raw_narrative == "You stand up."
+            
+            # Context history should correctly have prompt + (narrative, choice) pairs up to idx
+            assert app.story_context is not None
+            assert len(app.story_context.history) == 4  # System + User Prompt + Assistant Scene 1 + User Choice 1
+            assert "You wake up." in app.story_context.history[2]["content"]
+            assert "Stand" in app.story_context.history[3]["content"]
+
+    def test_action_branch_past_aborts_if_no_history(self):
+        """action_branch_past should return early if there is no db or current scene."""
+        from app import CYOAApp
+        app = CYOAApp(model_path="dummy")
+        
+        # db is None
+        assert app.db is None
+        
+        # Mock work decorator to just call the function
+        def mock_call_from_thread(callback, *args, **kwargs):
+            callback(*args, **kwargs)
+            
+        with patch.object(app, "call_from_thread", side_effect=mock_call_from_thread) as mock_call:
+            app.action_branch_past()
+            mock_call.assert_not_called()
+

@@ -12,8 +12,8 @@ from typing import Any, Optional
 __all__ = ["NarrativeMemory"]
 
 try:
-    import chromadb
-    _CHROMA_AVAILABLE: bool = True
+    import chromadb  # type: ignore
+    _CHROMA_AVAILABLE = True
 except ImportError:
     _CHROMA_AVAILABLE = False
 

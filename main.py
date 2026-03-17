@@ -1,5 +1,5 @@
 import argparse
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # type: ignore
 
 # Load .env before anything that reads os.getenv (graph_db, llm_backend)
 load_dotenv()

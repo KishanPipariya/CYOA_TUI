@@ -2,7 +2,7 @@ import json
 import os
 import re
 from typing import Callable, Optional
-from llama_cpp import Llama
+from llama_cpp import Llama  # type: ignore
 from models import StoryNode
 
 __all__ = ["StoryContext", "StoryGenerator"]

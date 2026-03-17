@@ -1,12 +1,12 @@
 import uuid
 import json
 import os
-from textual.app import App, ComposeResult
-from textual.containers import Container, VerticalScroll
-from textual.widgets import Header, Footer, Markdown, Button, LoadingIndicator, ListView, ListItem, Label, Static
-from textual.screen import ModalScreen
-from textual.reactive import reactive
-from textual import work
+from textual.app import App, ComposeResult  # type: ignore
+from textual.containers import Container, VerticalScroll  # type: ignore
+from textual.widgets import Header, Footer, Markdown, Button, LoadingIndicator, ListView, ListItem, Label, Static  # type: ignore
+from textual.screen import ModalScreen  # type: ignore
+from textual.reactive import reactive  # type: ignore
+from textual import work  # type: ignore
 from typing import Any, Optional
 
 from models import StoryNode, Choice

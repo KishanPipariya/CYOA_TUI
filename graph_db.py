@@ -2,8 +2,8 @@ import uuid
 import os
 import threading
 from typing import Any, Callable, Optional
-from neo4j import GraphDatabase
-from neo4j.exceptions import ServiceUnavailable
+from neo4j import GraphDatabase  # type: ignore
+from neo4j.exceptions import ServiceUnavailable  # type: ignore
 
 
 class CYOAGraphDB:
