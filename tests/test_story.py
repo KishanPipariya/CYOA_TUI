@@ -24,7 +24,7 @@ def mock_textual_workers(monkeypatch):
     We mock Worker._start to simply run the coroutine synchronously if needed,
     or just mock it entirely since we test the sync logic directly.
     """
-    from textual.worker import Worker
+    from textual.worker import Worker  # type: ignore
     monkeypatch.setattr(Worker, "_start", lambda *args, **kwargs: None)
 
 

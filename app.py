@@ -2,7 +2,7 @@ import uuid
 import json
 import os
 from textual.app import App, ComposeResult  # type: ignore
-from textual.containers import Container, VerticalScroll  # type: ignore
+from textual.containers import Container, VerticalScroll, Horizontal  # type: ignore
 from textual.widgets import Header, Footer, Markdown, Button, LoadingIndicator, ListView, ListItem, Label, Static  # type: ignore
 from textual.screen import ModalScreen  # type: ignore
 from textual.reactive import reactive  # type: ignore
@@ -133,6 +133,7 @@ class CYOAApp(App):
     BINDINGS = [
         ("d", "toggle_dark", "Toggle dark mode"),
         ("b", "branch_past", "Branch from Past"),
+        ("j", "toggle_journal", "Toggle Journal"),
         ("q", "quit", "Quit"),
         ("r", "restart", "Restart"),
         ("1", "choose('1')", "Choice 1"),
@@ -171,14 +172,18 @@ class CYOAApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Container():
-            with VerticalScroll(id="story-container"):
-                yield Markdown(LOADING_ART, id="story-text")
-            # Fix #5: Dedicated status bar between story and choices
-            with Container(id="status-bar"):
-                yield ThemeSpinner(frames=self.spinner_frames, id="loading")
-            with Container(id="choices-container"):
-                pass
+        with Horizontal():
+            with Container(id="main-container"):
+                with VerticalScroll(id="story-container"):
+                    yield Markdown(LOADING_ART, id="story-text")
+                # Fix #5: Dedicated status bar between story and choices
+                with Container(id="status-bar"):
+                    yield ThemeSpinner(frames=self.spinner_frames, id="loading")
+                with Container(id="choices-container"):
+                    pass
+            with Container(id="journal-panel", classes="hidden"):
+                yield Label("In-Game Journal", id="journal-title")
+                yield ListView(id="journal-list")
         yield Footer()
 
     def watch_turn_count(self, count: int) -> None:
@@ -354,6 +359,12 @@ class CYOAApp(App):
             self._story_file.flush()
 
         self._current_story += f"\n\n> **You chose:** {choice_text}"
+        
+        # Append choice to the journal
+        journal_list = self.query_one("#journal-list", ListView)
+        journal_list.append(ListItem(Label(f"Turn {self.turn_count}: {choice_text}")))
+        journal_list.scroll_end(animate=False)
+        
         self.show_loading()
         self.generate_next_step()
 
@@ -372,6 +383,7 @@ class CYOAApp(App):
         self.query_one("#story-text", Markdown).update(LOADING_ART)
         # Fix #3: use remove_children() instead of query+remove loop
         self.query_one("#choices-container").remove_children()
+        self.query_one("#journal-list", ListView).clear()
 
         self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
 
@@ -379,6 +391,11 @@ class CYOAApp(App):
     def action_toggle_dark(self) -> None:
         self.dark = not self.dark
         _save_config({"dark": self.dark})
+
+    def action_toggle_journal(self) -> None:
+        """Toggle the visibility of the side journal panel."""
+        panel = self.query_one("#journal-panel")
+        panel.toggle_class("hidden")
 
     @work(exclusive=True, thread=True)
     def generate_next_step(self) -> None:
@@ -476,6 +493,15 @@ class CYOAApp(App):
         self.memory = NarrativeMemory()
         for i in range(idx + 1):
             self.memory.add(history["scenes"][i]["id"], history["scenes"][i]["narrative"])
+            
+        def rebuild_journal() -> None:
+            journal_list = self.query_one("#journal-list", ListView)
+            journal_list.clear()
+            for i in range(idx):
+                journal_list.append(ListItem(Label(f"Turn {i + 1}: {history['choices'][i]}")))
+            journal_list.scroll_end(animate=False)
+            
+        self.call_from_thread(rebuild_journal)
             
         available = target_scene.get("available_choices") or []
         choices = [Choice(text=c) for c in available]

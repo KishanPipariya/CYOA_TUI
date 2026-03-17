@@ -7,6 +7,36 @@ Screen {
     background: $surface;
 }
 
+/* ── Main Layout Containers ──────────────────────────────────── */
+#main-container {
+    width: 2fr;
+}
+
+#journal-panel {
+    width: 1fr;
+    max-width: 40;
+    border-left: vkey $secondary;
+    padding: 1;
+    background: $surface;
+}
+
+#journal-title {
+    text-align: center;
+    text-style: bold;
+    color: $primary;
+    margin-bottom: 1;
+}
+
+#journal-list {
+    height: 1fr;
+    background: transparent;
+}
+
+#journal-list Label {
+    width: 100%;
+    content-align: left middle;
+}
+
 /* ── Story Panel ───────────────────────────────────────────── */
 #story-container {
     height: 1fr;
