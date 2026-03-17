@@ -3,7 +3,13 @@ import os
 import threading
 from typing import Any, Callable, Optional
 from neo4j import GraphDatabase  # type: ignore
-from neo4j.exceptions import ServiceUnavailable  # type: ignore
+from neo4j.exceptions import ServiceUnavailable, AuthError  # type: ignore
+
+import logging
+from events import bus
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class CYOAGraphDB:
@@ -17,22 +23,49 @@ class CYOAGraphDB:
         uri = uri or os.getenv("NEO4J_URI", "bolt://localhost:7687")
         user = user or os.getenv("NEO4J_USER", "neo4j")
         password = password or os.getenv("NEO4J_PASSWORD", "cyoa_password")
-        self.driver = GraphDatabase.driver(
-            uri,
-            auth=(user, password),
-            connection_timeout=2.0
-        )
+        self.driver = None # Initialize to None
 
-        # Verify connectivity immediately to fail fast.
-        # If Neo4j is offline, disable the driver gracefully.
         try:
+            self.driver = GraphDatabase.driver(
+                uri,
+                auth=(user, password),
+                connection_timeout=2.0
+            )
+            # Verify connectivity immediately to fail fast.
             self.driver.verify_connectivity()
+            logger.info("Successfully connected to Neo4j.")
         except ServiceUnavailable as e:
-            print(f"Graph DB is offline. Proceeding without graph persistence. Error: {e}")
+            logger.warning(f"Graph DB is offline. Proceeding without graph persistence. Error: {e}")
+            self.driver = None
+        except AuthError:
+            logger.error("Failed to connect to Neo4j: Authentication failed. Check username and password.")
             self.driver = None
         except Exception as e:
-            print(f"Unexpected Graph DB connection error. Error: {e}")
+            logger.error(f"Unexpected Graph DB connection error: {e}")
             self.driver = None
+        
+        bus.subscribe("scene_generated", self.on_scene_generated)
+
+    def on_scene_generated(self, **kwargs: Any) -> None:
+        """Event bus handler that unwraps kwargs into the async task signature."""
+        narrative = kwargs.get("narrative")
+        available_choices = kwargs.get("available_choices")
+        if available_choices is None:
+            available_choices = []
+        story_title = kwargs.get("story_title")
+        source_scene_id = kwargs.get("source_scene_id")
+        choice_text = kwargs.get("choice_text")
+        on_complete = kwargs.get("on_complete")
+        
+        if narrative and story_title:
+            self.save_scene_async(
+                narrative, 
+                list(available_choices), 
+                story_title, 
+                source_scene_id, 
+                choice_text, 
+                on_complete
+            )
 
     def close(self) -> None:
         """Close the database connection."""

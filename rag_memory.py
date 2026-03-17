@@ -7,15 +7,19 @@ LLM prompt as a "memory" block, giving it long-term story coherence
 beyond the sliding context window.
 """
 import uuid
+import logging
 from typing import Any, Optional
 
 __all__ = ["NarrativeMemory"]
 
 try:
     import chromadb  # type: ignore
+    from events import bus
     _CHROMA_AVAILABLE = True
+    logger = logging.getLogger(__name__)
 except ImportError:
     _CHROMA_AVAILABLE = False
+    logger = logging.getLogger(__name__) # Still need logger even if chromadb is not available
 
 
 class NarrativeMemory:
@@ -30,12 +34,22 @@ class NarrativeMemory:
     thread at app startup while chromadb downloads/loads all-MiniLM-L6-v2.
     """
 
-    def __init__(self, collection_name: str = "scenes") -> None:
+    def __init__(self, collection_name: str = "cyoa_narrative_memory") -> None:
         self._available: bool = _CHROMA_AVAILABLE
         self._collection_name: str = collection_name
-        # Fix #7: defer client + collection creation to first use
         self._client: Optional[Any] = None
         self._collection: Optional[Any] = None
+        
+        if self._available:
+            bus.subscribe("scene_generated", self.on_scene_generated)
+            
+    def on_scene_generated(self, **kwargs: Any) -> None:
+        """Event bus listener extracting the UUID and string for the RAG store."""
+        narrative = kwargs.get("narrative")
+        # Ensure we always supply an ID if GraphDB is disabled/racing
+        scene_id = kwargs.get("scene_id") or str(uuid.uuid4())
+        if narrative:
+            self.add(scene_id, narrative)
 
     def _ensure_ready(self) -> bool:
         """Create the chroma client and collection on first use. Returns False if unavailable."""
