@@ -157,11 +157,15 @@ class CYOAApp(App):
         self.current_scene_id: Optional[str] = None
         self.last_choice_text: Optional[str] = None
         self.current_story_title: Optional[str] = None
-        self._last_raw_narrative: str | None = None
+        self._last_raw_narrative: Optional[str] = None
+        
         self._loading_suffix_shown: bool = False
         self._current_story: str = LOADING_ART
+        
+        # Procedural inventory tracking
+        self.inventory: list[str] = []
         self._story_file: Optional[Any] = None
-        # Fix #1: token accumulator for throttled streaming re-renders
+        self.current_node: Optional[StoryNode] = None
         self._stream_token_buffer: int = 0
         # RAG: in-memory semantic scene store
         self.memory = NarrativeMemory()
@@ -179,6 +183,7 @@ class CYOAApp(App):
                 # Fix #5: Dedicated status bar between story and choices
                 with Container(id="status-bar"):
                     yield ThemeSpinner(frames=self.spinner_frames, id="loading")
+                    yield Label("🎒 Inventory: Empty", id="inventory-display")
                 with Container(id="choices-container"):
                     pass
             with Container(id="journal-panel", classes="hidden"):
@@ -212,6 +217,13 @@ class CYOAApp(App):
 
         node = self.generator.generate_next_node(self.story_context)
         self._last_raw_narrative = node.narrative
+        self.current_node = node
+        for item in getattr(node, "items_gained", []):
+            if item not in self.inventory:
+                self.inventory.append(item)
+        for item in getattr(node, "items_lost", []):
+            if item in self.inventory:
+                self.inventory.remove(item)
 
         generated_title = node.title if node.title else "Untitled Adventure"
         self.current_story_title = self.db.create_story_node_and_get_title(generated_title)
@@ -313,6 +325,12 @@ class CYOAApp(App):
 
         # Fix #4: memory.add() moved to worker thread (generate_next_step)
         # so chromadb embedding does not block the UI event loop here.
+                
+        inventory_label = self.query_one("#inventory-display", Label)
+        if self.inventory:
+            inventory_label.update(f"🎒 Inventory: {', '.join(self.inventory)}")
+        else:
+            inventory_label.update("🎒 Inventory: Empty")
 
         choices_container = self.query_one("#choices-container")
 
@@ -321,10 +339,10 @@ class CYOAApp(App):
             choices_container.mount(end_btn)
             return
 
-        for choice in node.choices:
+        for i, choice in enumerate(node.choices): # Modified to enumerate
             btn_id = f"choice-{uuid.uuid4().hex[:8]}"
             btn = Button(str(choice.text), id=btn_id, variant="primary")
-            btn.action_text = choice.text
+            btn.action_text = str(i) # Modified to store index
             choices_container.mount(btn)
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -333,8 +351,12 @@ class CYOAApp(App):
             await self.action_restart()
             return
 
-        choice_text = getattr(event.button, "action_text", str(event.button.label))
-        self._trigger_choice(choice_text)
+        # Find which choice button was actually clicked
+        buttons = list(self.query_one("#choices-container").query(Button))
+        if event.button in buttons:
+            choice_idx = buttons.index(event.button)
+            self._trigger_choice(choice_idx)
+
 
     # Fix #1: Keyboard number shortcut to select a choice
     def action_choose(self, number: str) -> None:
@@ -342,15 +364,18 @@ class CYOAApp(App):
         buttons = list(self.query_one("#choices-container").query(Button))
         idx = int(number) - 1
         if 0 <= idx < len(buttons):
-            btn = buttons[idx]
-            choice_text = getattr(btn, "action_text", str(btn.label))
-            self._trigger_choice(choice_text)
+            # Modified to pass index to _trigger_choice
+            self._trigger_choice(idx)
 
-    def _trigger_choice(self, choice_text: str) -> None:
-        """Shared logic for both click and keyboard choice selection."""
+    def _trigger_choice(self, choice_idx: int) -> None: # Modified signature
+        """Handle choice selection, update the narrative, and query LLM.""" # Modified docstring
+        if not self.story_context or not self.current_node or choice_idx >= len(self.current_node.choices): # Added checks
+            return
+
+        choice_text = self.current_node.choices[choice_idx].text # Modified to use current_node and index
         self.last_choice_text = choice_text
-        if self.story_context:
-            self.story_context.add_turn(self._last_raw_narrative or "", choice_text)
+        if self.story_context: # Original if-check, kept for safety
+            self.story_context.add_turn(self.current_node.narrative, choice_text, self.inventory) # Modified
         self.turn_count += 1  # Fix #4
 
         # Perf #3: write choice to persistent file handle
@@ -377,6 +402,8 @@ class CYOAApp(App):
         self.last_choice_text = None
         self._last_raw_narrative = None
         self._stream_token_buffer = 0
+        self.inventory = []
+        self.current_node = None # Added
         # Fix #8: reset memory so the new adventure doesn't inherit old scene embeddings
         self.memory = NarrativeMemory()
 
@@ -384,6 +411,9 @@ class CYOAApp(App):
         # Fix #3: use remove_children() instead of query+remove loop
         self.query_one("#choices-container").remove_children()
         self.query_one("#journal-list", ListView).clear()
+
+        # Reset inventory display
+        self.query_one("#inventory-display", Label).update("🎒 Inventory: Empty") # Added
 
         self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
 
@@ -410,6 +440,14 @@ class CYOAApp(App):
 
             node = self.generator.generate_next_node(self.story_context, on_token=on_token)
             self._last_raw_narrative = node.narrative
+            self.current_node = node # Added
+
+            for item in getattr(node, "items_gained", []):
+                if item not in self.inventory:
+                    self.inventory.append(item)
+            for item in getattr(node, "items_lost", []):
+                if item in self.inventory:
+                    self.inventory.remove(item)
 
             # Fix #4: embed the scene in the RAG store from the worker thread,
             # not from display_node() on the UI thread.
@@ -489,6 +527,9 @@ class CYOAApp(App):
         self.last_choice_text = history["choices"][idx-1] if idx > 0 else None
         self._last_raw_narrative = target_scene["narrative"]
         self.turn_count = idx + 1
+        # TODO: A fully correct branch integration requires tracking `items` per-turn in Neo4j. 
+        # For now, we blank it gracefully on branch, requiring the player to re-find items or the LLM to hallucinate them back.
+        self.inventory = []
         
         self.memory = NarrativeMemory()
         for i in range(idx + 1):

@@ -381,3 +381,51 @@ class TestBranchingLogic:
             app.action_branch_past()
             mock_call.assert_not_called()
 
+
+# ── 9. Procedural Item System ────────────────────────────────────────────────
+
+class TestProceduralItemSystem:
+    def test_story_context_formats_inventory(self):
+        """StoryContext should properly inject the inventory state into the user prompt."""
+        ctx = StoryContext(starting_prompt="Start", max_turns=5)
+        ctx.add_turn("You found a sword.", "Take sword", inventory=["Iron Sword", "Torch"])
+        
+        last_user_msg = ctx.history[-1]
+        assert last_user_msg["role"] == "user"
+        assert "Take sword" in last_user_msg["content"]
+        assert "[System Note: Current Inventory: Iron Sword, Torch]" in last_user_msg["content"]
+
+    def test_story_context_handles_empty_inventory(self):
+        """StoryContext should format gracefully when inventory is empty."""
+        ctx = StoryContext(starting_prompt="Start", max_turns=5)
+        ctx.add_turn("You found nothing.", "Wait", inventory=[])
+        
+        last_user_msg = ctx.history[-1]
+        assert last_user_msg["role"] == "user"
+        assert "[System Note: Current Inventory: Empty]" in last_user_msg["content"]
+
+    def test_app_updates_inventory_state(self):
+        """CYOAApp should extract the items list from the generated StoryNode and update state."""
+        from app import CYOAApp
+        from models import Choice, StoryNode
+        
+        app = CYOAApp(model_path="dummy")
+        
+        # Mock generator to return a node with items
+        mock_node = StoryNode(
+            narrative="You found a shiny key.",
+            choices=[Choice(text="Take key")],
+            items_gained=["Shiny Key", "Map"],
+            items_lost=[]
+        )
+        
+        app.generator = MagicMock()
+        app.generator.generate_next_node.return_value = mock_node
+        app.db = MagicMock()
+        
+        with patch.object(app, "call_from_thread"):
+            # Call wrapped synchronous version since @work is mocked out
+            app.initialize_and_start.__wrapped__(app, model_path="dummy")
+            
+        assert app.inventory == ["Shiny Key", "Map"]
+
