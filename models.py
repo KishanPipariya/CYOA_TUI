@@ -9,5 +9,6 @@ class StoryNode(BaseModel):
     narrative: str = Field(description="The unfolding story text describing what just happened and the current situation.")
     items_gained: List[str] = Field(default_factory=list, description="Items the player just picked up or earned in this turn. Only list NEW items. If none, return [].")
     items_lost: List[str] = Field(default_factory=list, description="Items the player just used, dropped, or lost in this turn. If none, return [].")
+    npcs_present: List[str] = Field(default_factory=list, description="A list of named NPCs present in the current scene. If none, return [].")
     choices: List[Choice] = Field(description="A list of 2 to 4 choices for the user's next action.")
     is_ending: bool = Field(default=False, description="Set to true if this narrative is a definitive ending to the story (victory, death, etc). If true, choices may be empty.")

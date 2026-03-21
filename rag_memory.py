@@ -10,7 +10,7 @@ import uuid
 import logging
 from typing import Any, Optional
 
-__all__ = ["NarrativeMemory"]
+__all__ = ["NarrativeMemory", "NPCMemory"]
 
 try:
     import chromadb  # type: ignore
@@ -101,4 +101,72 @@ class NarrativeMemory:
             return results["documents"][0] if results["documents"] else []
         except Exception as e:
             print(f"RAG memory: query failed: {e}")
+            return []
+
+class NPCMemory:
+    """
+    In-memory chromadb mapping of NPC names to their specific scene embeddings.
+    """
+    def __init__(self, base_collection_name: str = "cyoa_npc_memory") -> None:
+        self._available: bool = _CHROMA_AVAILABLE
+        self._base_name: str = base_collection_name
+        self._client: Optional[Any] = None
+        self._collections: dict[str, Any] = {}
+
+    def _ensure_ready(self, npc_name: str) -> bool:
+        if not self._available:
+            return False
+        # Create a safe alphanumeric name for chroma collections
+        safe_name = "".join(c if c.isalnum() else "_" for c in npc_name).lower()
+        
+        if safe_name in self._collections:
+            return True
+        try:
+            if self._client is None:
+                self._client = chromadb.Client()
+            unique_name = f"{self._base_name}_{safe_name}_{uuid.uuid4().hex[:8]}"
+            self._collections[safe_name] = self._client.create_collection(
+                name=unique_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+            return True
+        except Exception as e:
+            print(f"RAG NPC memory: failed to initialise chromadb for {npc_name}: {e}")
+            self._available = False
+            return False
+
+    def add(self, npc_name: str, scene_id: str, narrative: str) -> None:
+        if not self._ensure_ready(npc_name):
+            return
+        safe_name = "".join(c if c.isalnum() else "_" for c in npc_name).lower()
+        if safe_name not in self._collections:
+            return
+        
+        try:
+            self._collections[safe_name].upsert(
+                ids=[scene_id],
+                documents=[narrative],
+            )
+        except Exception as e:
+            print(f"RAG NPC memory: failed to add scene {scene_id} for {npc_name}: {e}")
+
+    def query(self, npc_name: str, text: str, n: int = 2) -> list[str]:
+        if not self._ensure_ready(npc_name):
+            return []
+        safe_name = "".join(c if c.isalnum() else "_" for c in npc_name).lower()
+        if safe_name not in self._collections:
+            return []
+            
+        try:
+            collection = self._collections[safe_name]
+            count = collection.count()
+            if count == 0:
+                return []
+            results = collection.query(
+                query_texts=[text],
+                n_results=min(n, count),
+            )
+            return results["documents"][0] if results["documents"] else []
+        except Exception as e:
+            print(f"RAG NPC memory: query failed for {npc_name}: {e}")
             return []

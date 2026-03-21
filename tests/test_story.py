@@ -227,6 +227,35 @@ class TestNarrativeMemory:
         # Should not raise; collection count stays at 1
         assert mem._collection.count() == 1
 
+class TestNPCMemory:
+    def test_add_and_query_npc_returns_results(self):
+        """Adding a scene for a specific NPC and querying it should return it."""
+        from rag_memory import NPCMemory
+        mem = NPCMemory()
+        mem.add("Elara", "scene-1", "Elara hands you a glowing potion.")
+        results = mem.query("Elara", "glowing potion")
+        assert len(results) == 1
+        assert "potion" in results[0]
+
+    def test_different_npcs_have_isolated_memory(self):
+        """Memories added to one NPC should not be retrieved by another."""
+        from rag_memory import NPCMemory
+        mem = NPCMemory()
+        mem.add("Bob", "scene-b", "Bob gives you a sword.")
+        mem.add("Alice", "scene-a", "Alice gives you a shield.")
+        
+        bob_results = mem.query("Bob", "gives you")
+        assert len(bob_results) == 1
+        assert "sword" in bob_results[0]
+        
+        alice_results = mem.query("Alice", "gives you")
+        assert len(alice_results) == 1
+        assert "shield" in alice_results[0]
+
+    def test_empty_npc_memory_returns_empty_list(self):
+        from rag_memory import NPCMemory
+        mem = NPCMemory()
+        assert mem.query("UnknownNPC", "anything") == []
 
 # ── 7. Streaming token callback ───────────────────────────────────────────────
 

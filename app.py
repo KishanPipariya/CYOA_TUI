@@ -12,7 +12,8 @@ from typing import Any, Optional
 from models import StoryNode, Choice
 from llm_backend import StoryGenerator, StoryContext
 from graph_db import CYOAGraphDB
-from rag_memory import NarrativeMemory
+from rag_memory import NarrativeMemory, NPCMemory
+from ui_components import BranchScreen, ThemeSpinner
 
 __all__ = ["CYOAApp", "DEFAULT_STARTING_PROMPT"]
 
@@ -50,77 +51,7 @@ except FileNotFoundError:
     LOADING_ART = "# Welcome to the Adventure\n\n*Loading the AI model... Please wait.*"
 
 
-class BranchScreen(ModalScreen[int]):
-    """Screen to select a past scene to branch from."""
-    
-    DEFAULT_CSS = """
-    BranchScreen {
-        align: center middle;
-        background: $background 80%;
-    }
-    #branch-dialog {
-        width: 80%;
-        height: 80%;
-        border: thick $primary;
-        background: $surface;
-        padding: 1;
-    }
-    #branch-list {
-        height: 1fr;
-        border: solid $secondary;
-        margin-bottom: 1;
-    }
-    .scene-preview {
-        padding: 1;
-    }
-    """
-    
-    def __init__(self, scenes: list[dict[str, Any]], choices: list[str], **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.scenes = scenes
-        self.choices = choices
-        
-    def compose(self) -> ComposeResult:
-        with Container(id="branch-dialog"):
-            yield Label("[b]Rewind & Branch:[/b] Select a past moment to alter your fate.", id="branch-title")
-            list_view = ListView(id="branch-list")
-            yield list_view
-            yield Button("Cancel", id="cancel-branch", variant="error")
 
-    def on_mount(self) -> None:
-        list_view = self.query_one("#branch-list", ListView)
-        for i, scene in enumerate(self.scenes):
-            preview = scene["narrative"][:100].replace("\n", " ") + "..."
-            choice_text = self.choices[i] if i < len(self.choices) else "Current Scene"
-            label_text = f"Turn {i+1}: {preview}\n[i]Choice made: {choice_text}[/i]"
-            item = ListItem(Label(label_text, classes="scene-preview"))
-            item.scene_index = i
-            list_view.append(item)
-
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        idx = getattr(event.item, "scene_index", None)
-        if idx is not None:
-            self.dismiss(idx)
-            
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "cancel-branch":
-            self.dismiss(None)
-
-
-class ThemeSpinner(Static):
-    """Custom spinner that cycles through configured ASCII frames."""
-    def __init__(self, frames: list[str], **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.frames = frames
-        self._frame_idx = 0
-        
-    def on_mount(self) -> None:
-        self.update(self.frames[0])
-        self.set_interval(0.5, self.tick)
-        
-    def tick(self) -> None:
-        self._frame_idx = (self._frame_idx + 1) % len(self.frames)
-        self.update(self.frames[self._frame_idx])
 
 
 class CYOAApp(App):
@@ -169,6 +100,7 @@ class CYOAApp(App):
         self._stream_token_buffer: int = 0
         # RAG: in-memory semantic scene store
         self.memory = NarrativeMemory()
+        self.npc_memory = NPCMemory()
 
         # Fix #9: Restore dark mode preference
         config = _load_config()
@@ -406,6 +338,7 @@ class CYOAApp(App):
         self.current_node = None # Added
         # Fix #8: reset memory so the new adventure doesn't inherit old scene embeddings
         self.memory = NarrativeMemory()
+        self.npc_memory = NPCMemory()
 
         self.query_one("#story-text", Markdown).update(LOADING_ART)
         # Fix #3: use remove_children() instead of query+remove loop
@@ -432,6 +365,15 @@ class CYOAApp(App):
         # RAG: retrieve relevant past scenes and inject as memory
         if self._last_raw_narrative and self.story_context and self.generator and self.db and self.current_story_title:
             memories = self.memory.query(self._last_raw_narrative, n=3)
+            
+            # Inject NPC-specific memories based on previous scene's NPCs
+            if self.current_node and getattr(self.current_node, 'npcs_present', None):
+                for npc in self.current_node.npcs_present:
+                    npc_memories = self.npc_memory.query(npc, self._last_raw_narrative, n=2)
+                    for mem in npc_memories:
+                        if mem not in memories:
+                            memories.append(mem)
+
             self.story_context.inject_memory(memories)
 
             # Streaming: pass on_token callback so typewriter fires live
@@ -453,6 +395,11 @@ class CYOAApp(App):
             # not from display_node() on the UI thread.
             scene_id = self.current_scene_id or str(uuid.uuid4())
             self.memory.add(scene_id, node.narrative)
+            
+            # Embed NPC-specific memory
+            if getattr(node, 'npcs_present', None):
+                for npc in node.npcs_present:
+                    self.npc_memory.add(npc, scene_id, node.narrative)
 
             choices_text = [choice.text for choice in node.choices]
             prev_scene_id = self.current_scene_id
@@ -532,8 +479,15 @@ class CYOAApp(App):
         self.inventory = []
         
         self.memory = NarrativeMemory()
+        self.npc_memory = NPCMemory()
         for i in range(idx + 1):
-            self.memory.add(history["scenes"][i]["id"], history["scenes"][i]["narrative"])
+            past_scene_id = history["scenes"][i]["id"]
+            past_narrative = history["scenes"][i]["narrative"]
+            self.memory.add(past_scene_id, past_narrative)
+            
+            if "npcs_present" in history["scenes"][i] and history["scenes"][i]["npcs_present"]:
+                for npc in history["scenes"][i]["npcs_present"]:
+                    self.npc_memory.add(npc, past_scene_id, past_narrative)
             
         def rebuild_journal() -> None:
             journal_list = self.query_one("#journal-list", ListView)
