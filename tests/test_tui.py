@@ -26,6 +26,7 @@ def _mock_generator(*args, **kwargs):
         narrative="You went North.",
         choices=[Choice(text="Open Door")],
         items_gained=["Health Potion"],
+        stat_updates={"health": -10, "gold": 50},
         title="Test Adventure"
     )
     # Third generated node (ending)
@@ -154,6 +155,8 @@ async def test_choice_selection_via_keyboard(mock_app_dependencies):
         inventory_text = str(inventory_label.render())
         assert "Broken Sword" in inventory_text
         assert "Health Potion" in inventory_text
+        assert "❤️ Health: 90" in inventory_text
+        assert "🪙 Gold: 50" in inventory_text
         
         # Verify journal updated
         journal_list = app.query_one("#journal-list", ListView)
@@ -213,6 +216,8 @@ async def test_game_over_state_and_restart(mock_app_dependencies):
         assert app.turn_count == 1
         assert "You awaken in a test dungeon." in app._current_story
         assert app.inventory == ["Broken Sword"]
+        assert app.player_stats["health"] == 100
+        assert app.player_stats["gold"] == 0
 
 
 @pytest.mark.asyncio
@@ -234,6 +239,8 @@ async def test_app_restart_via_keyboard(mock_app_dependencies):
         assert app.turn_count == 1
         assert "You awaken in a test dungeon." in app._current_story
         assert app.inventory == ["Broken Sword"]
+        assert app.player_stats["health"] == 100
+        assert app.player_stats["gold"] == 0
         
         journal_list = app.query_one("#journal-list", ListView)
         assert len(list(journal_list.children)) == 0

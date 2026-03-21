@@ -24,6 +24,7 @@ DEFAULT_STARTING_PROMPT = """You are a dark fantasy interactive fiction engine.
 Describe the starting scenario where the player wakes up in a cold, unfamiliar dungeon cell.
 Provide 2-3 choices for what they can do next.
 You MUST provide a creative 'title' for this new adventure in the JSON response.
+Manage the player's stats (health, gold, reputation) using 'stat_updates'. Provide stat changes (e.g. {"health": -10, "gold": 50}) when the narrative dictates it. Low health disables risky choices, high reputation unlocks dialogue.
 When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true and provide an empty choices list.
 Ensure your output is strictly valid JSON matching the requested schema.
 """
@@ -95,6 +96,7 @@ class CYOAApp(App):
         
         # Procedural inventory tracking
         self.inventory: list[str] = []
+        self.player_stats: dict[str, int] = {"health": 100, "gold": 0, "reputation": 0}
         self._story_file: Optional[Any] = None
         self.current_node: Optional[StoryNode] = None
         self._stream_token_buffer: int = 0
@@ -115,7 +117,7 @@ class CYOAApp(App):
                 # Fix #5: Dedicated status bar between story and choices
                 with Container(id="status-bar"):
                     yield ThemeSpinner(frames=self.spinner_frames, id="loading")
-                    yield Label("🎒 Inventory: Empty", id="inventory-display")
+                    yield Label("❤️ Health: 100 | 🪙 Gold: 0 | 🌟 Rep: 0 | 🎒 Inventory: Empty", id="inventory-display")
                 with Container(id="choices-container"):
                     pass
             with Container(id="journal-panel", classes="hidden"):
@@ -159,6 +161,9 @@ class CYOAApp(App):
         for item in getattr(node, "items_lost", []):
             if item in self.inventory:
                 self.inventory.remove(item)
+
+        for stat, change in getattr(node, "stat_updates", {}).items():
+            self.player_stats[stat] = self.player_stats.get(stat, 0) + change
 
         generated_title = node.title if node.title else "Untitled Adventure"
         self.current_story_title = self.db.create_story_node_and_get_title(generated_title)
@@ -263,10 +268,9 @@ class CYOAApp(App):
         # so chromadb embedding does not block the UI event loop here.
                 
         inventory_label = self.query_one("#inventory-display", Label)
-        if self.inventory:
-            inventory_label.update(f"🎒 Inventory: {', '.join(self.inventory)}")
-        else:
-            inventory_label.update("🎒 Inventory: Empty")
+        inv_str = f"🎒 Inventory: {', '.join(self.inventory)}" if self.inventory else "🎒 Inventory: Empty"
+        stats_str = f"❤️ Health: {self.player_stats.get('health', 0)} | 🪙 Gold: {self.player_stats.get('gold', 0)} | 🌟 Rep: {self.player_stats.get('reputation', 0)}"
+        inventory_label.update(f"{stats_str} | {inv_str}")
 
         choices_container = self.query_one("#choices-container")
 
@@ -311,7 +315,7 @@ class CYOAApp(App):
         choice_text = self.current_node.choices[choice_idx].text # Modified to use current_node and index
         self.last_choice_text = choice_text
         if self.story_context: # Original if-check, kept for safety
-            self.story_context.add_turn(self.current_node.narrative, choice_text, self.inventory) # Modified
+            self.story_context.add_turn(self.current_node.narrative, choice_text, self.inventory, self.player_stats) # Modified
         self.turn_count += 1  # Fix #4
 
         # Perf #3: write choice to persistent file handle
@@ -339,6 +343,7 @@ class CYOAApp(App):
         self._last_raw_narrative = None
         self._stream_token_buffer = 0
         self.inventory = []
+        self.player_stats = {"health": 100, "gold": 0, "reputation": 0}
         self.current_node = None # Added
         # Fix #8: reset memory so the new adventure doesn't inherit old scene embeddings
         self.memory = NarrativeMemory()
@@ -350,7 +355,7 @@ class CYOAApp(App):
         self.query_one("#journal-list", ListView).clear()
 
         # Reset inventory display
-        self.query_one("#inventory-display", Label).update("🎒 Inventory: Empty") # Added
+        self.query_one("#inventory-display", Label).update("❤️ Health: 100 | 🪙 Gold: 0 | 🌟 Rep: 0 | 🎒 Inventory: Empty") # Added
 
         self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
 
@@ -399,6 +404,9 @@ class CYOAApp(App):
             for item in getattr(node, "items_lost", []):
                 if item in self.inventory:
                     self.inventory.remove(item)
+
+            for stat, change in getattr(node, "stat_updates", {}).items():
+                self.player_stats[stat] = self.player_stats.get(stat, 0) + change
 
             # Fix #4: embed the scene in the RAG store from the worker thread,
             # not from display_node() on the UI thread.
@@ -487,6 +495,7 @@ class CYOAApp(App):
         # TODO: A fully correct branch integration requires tracking `items` per-turn in Neo4j. 
         # For now, we blank it gracefully on branch, requiring the player to re-find items or the LLM to hallucinate them back.
         self.inventory = []
+        self.player_stats = {"health": 100, "gold": 0, "reputation": 0}
         
         self.memory = NarrativeMemory()
         self.npc_memory = NPCMemory()

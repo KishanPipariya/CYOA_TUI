@@ -26,6 +26,7 @@ Describe the starting scenario where the player wakes up in a cold, unfamiliar d
 Provide 2-3 choices for what they can do next.
 You MUST provide a creative 'title' for this new adventure in the JSON response.
 Manage the player's inventory using 'items_gained' and 'items_lost'. Track when they acquire or lose items. Create context-sensitive choices if they possess specific items!
+Manage the player's stats (health, gold, reputation) using 'stat_updates'. Provide stat changes (e.g. {"health": -10, "gold": 50}) when the narrative dictates it. Low health should disable risky choices, high reputation unlocks dialogue.
 When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true and provide an empty choices list.
 Ensure your output is strictly valid JSON matching the requested schema.
 """
@@ -34,11 +35,13 @@ Ensure your output is strictly valid JSON matching the requested schema.
         self.starting_prompt = starting_prompt
         self.history.append({"role": "user", "content": starting_prompt})
 
-    def add_turn(self, raw_narrative: str, user_choice: str, inventory: Optional[list[str]] = None) -> None:
+    def add_turn(self, raw_narrative: str, user_choice: str, inventory: Optional[list[str]] = None, player_stats: Optional[dict[str, int]] = None) -> None:
         """Add an assistant turn (raw narrative) and user choice, trimming old turns."""
         self.history.append({"role": "assistant", "content": raw_narrative})
         inv_str = f"Current Inventory: {', '.join(inventory) if inventory else 'Empty'}"
-        self.history.append({"role": "user", "content": f"I choose: {user_choice}\n\n[System Note: {inv_str}]"})
+        stats_str = f"Current Stats: {player_stats}" if player_stats else ""
+        sys_note = f"[System Note: {inv_str} | {stats_str}]" if stats_str else f"[System Note: {inv_str}]"
+        self.history.append({"role": "user", "content": f"I choose: {user_choice}\n\n{sys_note}"})
 
         # Sliding window: always keep system (0) + initial prompt (1)
         non_system = self.history[2:]
