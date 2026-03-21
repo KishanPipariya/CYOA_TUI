@@ -3,7 +3,7 @@ import json
 import os
 from textual.app import App, ComposeResult  # type: ignore
 from textual.containers import Container, VerticalScroll, Horizontal  # type: ignore
-from textual.widgets import Header, Footer, Markdown, Button, LoadingIndicator, ListView, ListItem, Label, Static  # type: ignore
+from textual.widgets import Header, Footer, Markdown, Button, LoadingIndicator, ListView, ListItem, Label, Static, Tree  # type: ignore
 from textual.screen import ModalScreen  # type: ignore
 from textual.reactive import reactive  # type: ignore
 from textual import work  # type: ignore
@@ -65,6 +65,7 @@ class CYOAApp(App):
         ("d", "toggle_dark", "Toggle dark mode"),
         ("b", "branch_past", "Branch from Past"),
         ("j", "toggle_journal", "Toggle Journal"),
+        ("m", "toggle_story_map", "Toggle Story Map"),
         ("q", "quit", "Quit"),
         ("r", "restart", "Restart"),
         ("1", "choose('1')", "Choice 1"),
@@ -121,6 +122,9 @@ class CYOAApp(App):
             with Container(id="journal-panel", classes="hidden"):
                 yield Label("In-Game Journal", id="journal-title")
                 yield ListView(id="journal-list")
+            with Container(id="story-map-panel", classes="hidden"):
+                yield Label("Story Map", id="story-map-title")
+                yield Tree("Story", id="story-map-tree")
         yield Footer()
 
     def watch_turn_count(self, count: int) -> None:
@@ -171,6 +175,7 @@ class CYOAApp(App):
         
         def on_complete(sid: str) -> None:
             self.current_scene_id = sid
+            self.update_story_map()
             
         self.db.save_scene_async(
             narrative=node.narrative,
@@ -360,6 +365,11 @@ class CYOAApp(App):
         panel = self.query_one("#journal-panel")
         panel.toggle_class("hidden")
 
+    def action_toggle_story_map(self) -> None:
+        """Toggle the visibility of the story map panel."""
+        panel = self.query_one("#story-map-panel")
+        panel.toggle_class("hidden")
+
     @work(exclusive=True, thread=True)
     def generate_next_step(self) -> None:
         # RAG: retrieve relevant past scenes and inject as memory
@@ -407,6 +417,7 @@ class CYOAApp(App):
 
             def on_complete(sid: str) -> None:
                 self.current_scene_id = sid
+                self.update_story_map()
 
             self.db.save_scene_async(
                 narrative=node.narrative,
@@ -507,4 +518,52 @@ class CYOAApp(App):
         )
         
         self.call_from_thread(self.display_node, node)
+        self.update_story_map()
+
+    @work(exclusive=True, thread=True)
+    def update_story_map(self) -> None:
+        if not self.db or not self.current_story_title:
+            return
+        
+        tree_data = self.db.get_story_tree(self.current_story_title)
+        if not tree_data:
+            return
+            
+        def rebuild_tree() -> None:
+            try:
+                tree = self.query_one("#story-map-tree", Tree)
+            except Exception:
+                return
+            tree.clear()
+            
+            nodes = tree_data.get("nodes", {})
+            edges = tree_data.get("edges", {})
+            root_id = tree_data.get("root_id")
+            
+            if not root_id:
+                return
+                
+            def add_children(parent_node: Any, scene_id: str) -> None:
+                scene = nodes[scene_id]
+                preview = scene["narrative"][:25].replace("\\n", " ").strip() + "..."
+                if scene_id == self.current_scene_id:
+                    label = f"[b][green]> {preview}[/green][/b]"
+                else:
+                    label = preview
+                    
+                tree_node = parent_node.add(label, expand=True)
+                
+                for edge in edges.get(scene_id, []):
+                    choice_text = edge['choice']
+                    choice_preview = choice_text[:15] + "..." if len(choice_text) > 15 else choice_text
+                    choice_label = f"[dim][i]- {choice_preview}[/i][/dim]"
+                    choice_node = tree_node.add(choice_label, expand=True)
+                    add_children(choice_node, edge["target_id"])
+                    
+            tree.root.label = "Story Nodes"
+            tree.root.expand()
+            if root_id in nodes:
+                add_children(tree.root, root_id)
+            
+        self.call_from_thread(rebuild_tree)
 

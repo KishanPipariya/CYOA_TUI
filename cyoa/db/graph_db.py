@@ -274,6 +274,53 @@ class CYOAGraphDB:
 
         return ordered
 
+    def get_story_tree(self, story_title: str) -> dict:
+        """
+        Returns all nodes and edges for the given story to build a topological tree.
+        Format:
+        {
+          "root_id": "...",
+          "nodes": { scene_id: {"narrative": "...", "id": "..."} },
+          "edges": { source_id: [ {"target_id": "...", "choice": "..."} ] }
+        }
+        """
+        if not self.driver:
+            return {}
+        
+        query = """
+        MATCH (story:Story {title: $story_title})<-[:BELONGS_TO]-(scene:Scene)
+        OPTIONAL MATCH (scene)-[r:LEADS_TO]->(next:Scene)
+        RETURN scene.id AS id, scene.narrative AS narrative, 
+               next.id AS next_id, r.action_text AS choice
+        """
+        nodes = {}
+        edges = {}
+        has_incoming = set()
+        
+        with self.driver.session() as session:
+            result = session.run(query, story_title=story_title)
+            for record in result:
+                sid = record["id"]
+                nxt = record["next_id"]
+                if sid not in nodes:
+                    nodes[sid] = {"id": sid, "narrative": record["narrative"]}
+                if sid not in edges:
+                    edges[sid] = []
+                if nxt:
+                    edges[sid].append({"target_id": nxt, "choice": record["choice"]})
+                    has_incoming.add(nxt)
+
+        if not nodes:
+            return {}
+
+        root_id = None
+        for n in nodes:
+            if n not in has_incoming:
+                root_id = n
+                break
+                
+        return {"root_id": root_id, "nodes": nodes, "edges": edges}
+
 
 # Example Usage
 if __name__ == "__main__":

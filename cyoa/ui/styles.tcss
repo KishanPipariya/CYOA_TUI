@@ -12,7 +12,7 @@ Screen {
     width: 2fr;
 }
 
-#journal-panel {
+#journal-panel, #story-map-panel {
     width: 1fr;
     max-width: 40;
     border-left: vkey $secondary;
@@ -20,7 +20,7 @@ Screen {
     background: $surface;
 }
 
-#journal-title {
+#journal-title, #story-map-title {
     text-align: center;
     text-style: bold;
     color: $primary;
@@ -35,6 +35,11 @@ Screen {
 #journal-list Label {
     width: 100%;
     content-align: left middle;
+}
+
+#story-map-tree {
+    height: 1fr;
+    background: transparent;
 }
 
 /* ── Story Panel ───────────────────────────────────────────── */
