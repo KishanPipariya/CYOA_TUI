@@ -7,6 +7,7 @@ from textual.containers import Container
 from cyoa.ui.app import CYOAApp
 from cyoa.core.models import StoryNode, Choice
 from cyoa.db.graph_db import CYOAGraphDB
+from cyoa.ui.components import ConfirmScreen, HelpScreen
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -89,8 +90,8 @@ async def test_app_startup_and_loading_state(mock_app_dependencies):
         choices_container = app.query_one("#choices-container", Container)
         buttons = list(choices_container.query(Button))
         assert len(buttons) == 2
-        assert str(buttons[0].label) == "Go North"
-        assert str(buttons[1].label) == "Go South"
+        assert str(buttons[0].label) == "[1] Go North"
+        assert str(buttons[1].label) == "[2] Go South"
         
         # Verify inventory was updated
         inventory_label = app.query_one("#inventory-display", Label)
@@ -148,7 +149,7 @@ async def test_choice_selection_via_keyboard(mock_app_dependencies):
         choices_container = app.query_one("#choices-container", Container)
         buttons = list(choices_container.query(Button))
         assert len(buttons) == 1
-        assert str(buttons[0].label) == "Open Door"
+        assert str(buttons[0].label) == "[1] Open Door"
         
         # Verify inventory accumulated the new item
         inventory_label = app.query_one("#inventory-display", Label)
@@ -184,7 +185,7 @@ async def test_choice_selection_via_click(mock_app_dependencies):
         choices_container = app.query_one("#choices-container", Container)
         buttons = list(choices_container.query(Button))
         assert len(buttons) == 1
-        assert str(buttons[0].label) == "Open Door"
+        assert str(buttons[0].label) == "[1] Open Door"
 
 
 @pytest.mark.asyncio
@@ -232,8 +233,12 @@ async def test_app_restart_via_keyboard(mock_app_dependencies):
         
         assert app.turn_count == 2
         
-        # Press R
+        # Press R — now shows confirmation dialog
         await pilot.press("r")
+        await pilot.pause(0.1)
+        
+        # Confirm the restart
+        await pilot.press("y")
         await pilot.pause(0.2) # Node 1 again
         
         assert app.turn_count == 1
@@ -244,3 +249,80 @@ async def test_app_restart_via_keyboard(mock_app_dependencies):
         
         journal_list = app.query_one("#journal-list", ListView)
         assert len(list(journal_list.children)) == 0
+
+
+@pytest.mark.asyncio
+async def test_restart_confirmation_dialog(mock_app_dependencies):
+    """Test that pressing 'r' shows a confirmation dialog instead of immediately restarting."""
+    app = CYOAApp(model_path="dummy_path.gguf")
+    
+    async with app.run_test() as pilot:
+        await pilot.pause(0.2)
+        
+        # Press 'r' — should show confirm dialog, NOT restart
+        await pilot.press("r")
+        await pilot.pause(0.1)
+        
+        # The ConfirmScreen should be pushed
+        assert isinstance(app.screen, ConfirmScreen)
+        
+        # Dismiss with 'n' (No) — should return to the game unchanged
+        await pilot.press("n")
+        await pilot.pause(0.1)
+        assert not isinstance(app.screen, ConfirmScreen)
+        # Story should still be the original
+        assert "You awaken in a test dungeon." in app._current_story
+
+
+@pytest.mark.asyncio
+async def test_quit_confirmation_dialog(mock_app_dependencies):
+    """Test that pressing 'q' shows a confirmation dialog instead of immediately quitting."""
+    app = CYOAApp(model_path="dummy_path.gguf")
+    
+    async with app.run_test() as pilot:
+        await pilot.pause(0.2)
+        
+        # Press 'q' — should show confirm dialog
+        await pilot.press("q")
+        await pilot.pause(0.1)
+        
+        assert isinstance(app.screen, ConfirmScreen)
+        
+        # Cancel via Escape
+        await pilot.press("escape")
+        await pilot.pause(0.1)
+        assert not isinstance(app.screen, ConfirmScreen)
+
+
+@pytest.mark.asyncio
+async def test_help_screen(mock_app_dependencies):
+    """Test that pressing 'h' opens the help screen and Escape closes it."""
+    app = CYOAApp(model_path="dummy_path.gguf")
+    
+    async with app.run_test() as pilot:
+        await pilot.pause(0.2)
+        
+        await pilot.press("h")
+        await pilot.pause(0.1)
+        
+        assert isinstance(app.screen, HelpScreen)
+        
+        await pilot.press("escape")
+        await pilot.pause(0.1)
+        assert not isinstance(app.screen, HelpScreen)
+
+
+@pytest.mark.asyncio
+async def test_choice_buttons_have_number_labels(mock_app_dependencies):
+    """Test that choice buttons display numbered labels like [1], [2], etc."""
+    app = CYOAApp(model_path="dummy_path.gguf")
+    
+    async with app.run_test() as pilot:
+        await pilot.pause(0.2)
+        
+        choices_container = app.query_one("#choices-container", Container)
+        buttons = list(choices_container.query(Button))
+        
+        assert len(buttons) == 2
+        assert str(buttons[0].label).startswith("[1]")
+        assert str(buttons[1].label).startswith("[2]")

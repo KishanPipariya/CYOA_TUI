@@ -11,7 +11,7 @@ from cyoa.core.models import StoryNode, Choice
 from cyoa.llm.llm_backend import StoryGenerator, StoryContext
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
-from cyoa.ui.components import BranchScreen, ThemeSpinner
+from cyoa.ui.components import BranchScreen, ThemeSpinner, ConfirmScreen, HelpScreen
 
 __all__ = ["CYOAApp", "DEFAULT_STARTING_PROMPT"]
 
@@ -66,8 +66,9 @@ class CYOAApp(App):
         ("b", "branch_past", "Branch from Past"),
         ("j", "toggle_journal", "Toggle Journal"),
         ("m", "toggle_story_map", "Toggle Story Map"),
-        ("q", "quit", "Quit"),
-        ("r", "restart", "Restart"),
+        ("h", "show_help", "Help"),
+        ("q", "request_quit", "Quit"),
+        ("r", "request_restart", "Restart"),
         ("1", "choose('1')", "Choice 1"),
         ("2", "choose('2')", "Choice 2"),
         ("3", "choose('3')", "Choice 3"),
@@ -222,10 +223,24 @@ class CYOAApp(App):
                 self._stream_token_buffer = 0
                 story_md.update(self._current_story)
 
-    def show_loading(self) -> None:
-        """Clear choice buttons, show spinner, append 'shifting' text."""
-        # Perf #6: remove_children() is O(1) vs query(Button) DOM traversal
-        self.query_one("#choices-container").remove_children()
+    def show_loading(self, selected_label: str | None = None) -> None:
+        """Clear choice buttons, show spinner, append 'shifting' text.
+        
+        If selected_label is given, all other buttons are removed and the
+        selected one is kept visible but disabled so the player sees which
+        choice was picked.
+        """
+        choices_container = self.query_one("#choices-container")
+        if selected_label is not None:
+            # Keep only the selected button, disable and dim it
+            for btn in list(choices_container.query(Button)):
+                if str(btn.label) != selected_label:
+                    btn.remove()
+                else:
+                    btn.disabled = True
+                    btn.variant = "default"
+        else:
+            choices_container.remove_children()
         self.query_one("#loading").remove_class("hidden")
 
         if not self._loading_suffix_shown:
@@ -273,6 +288,8 @@ class CYOAApp(App):
         inventory_label.update(f"{stats_str} | {inv_str}")
 
         choices_container = self.query_one("#choices-container")
+        # Clear any leftover stale buttons (e.g. the disabled selected-choice button)
+        choices_container.remove_children()
 
         if node.is_ending:
             end_btn = Button("✦ Start a New Adventure", id="btn-new-adventure", variant="success")
@@ -281,7 +298,8 @@ class CYOAApp(App):
 
         for i, choice in enumerate(node.choices): # Modified to enumerate
             btn_id = f"choice-{uuid.uuid4().hex[:8]}"
-            btn = Button(str(choice.text), id=btn_id, variant="primary")
+            label = f"[{i + 1}] {choice.text}"
+            btn = Button(label, id=btn_id, variant="primary")
             btn.action_text = str(i) # Modified to store index
             choices_container.mount(btn)
 
@@ -313,6 +331,7 @@ class CYOAApp(App):
             return
 
         choice_text = self.current_node.choices[choice_idx].text # Modified to use current_node and index
+        selected_label = f"[{choice_idx + 1}] {choice_text}"
         self.last_choice_text = choice_text
         if self.story_context: # Original if-check, kept for safety
             self.story_context.add_turn(self.current_node.narrative, choice_text, self.inventory, self.player_stats) # Modified
@@ -330,7 +349,7 @@ class CYOAApp(App):
         journal_list.append(ListItem(Label(f"Turn {self.turn_count}: {choice_text}")))
         journal_list.scroll_end(animate=False)
         
-        self.show_loading()
+        self.show_loading(selected_label=selected_label)
         self.generate_next_step()
 
     # Fix #2: In-app restart without reloading the model
@@ -358,6 +377,27 @@ class CYOAApp(App):
         self.query_one("#inventory-display", Label).update("❤️ Health: 100 | 🪙 Gold: 0 | 🌟 Rep: 0 | 🎒 Inventory: Empty") # Added
 
         self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
+
+    # UX: Confirmation before restart
+    def action_request_restart(self) -> None:
+        """Show a confirmation dialog before restarting the adventure."""
+        def on_confirm(confirmed: bool | None) -> None:
+            if confirmed:
+                self.run_worker(self.action_restart(), exclusive=True)
+        self.push_screen(ConfirmScreen("[b]Restart the adventure?[/b]\n\nAll progress will be lost."), on_confirm)
+
+    # UX: Confirmation before quit
+    def action_request_quit(self) -> None:
+        """Show a confirmation dialog before quitting."""
+        def on_confirm(confirmed: bool | None) -> None:
+            if confirmed:
+                self.exit()
+        self.push_screen(ConfirmScreen("[b]Quit the game?[/b]\n\nUnsaved progress will be lost."), on_confirm)
+
+    # UX: Help screen
+    def action_show_help(self) -> None:
+        """Show the help screen with keybindings and game mechanics."""
+        self.push_screen(HelpScreen())
 
     # Fix #9: Persist dark mode preference when toggled
     def action_toggle_dark(self) -> None:

@@ -1,11 +1,11 @@
 from typing import Any
 from textual.app import ComposeResult
-from textual.containers import Container
-from textual.widgets import Button, ListView, ListItem, Label, Static
+from textual.containers import Container, Horizontal
+from textual.widgets import Button, ListView, ListItem, Label, Static, Markdown
 from textual.screen import ModalScreen
 from textual.markup import escape
 
-__all__ = ["BranchScreen", "ThemeSpinner"]
+__all__ = ["BranchScreen", "ThemeSpinner", "ConfirmScreen", "HelpScreen"]
 
 class BranchScreen(ModalScreen[int]):
     """Screen to select a past scene to branch from."""
@@ -78,3 +78,138 @@ class ThemeSpinner(Static):
     def tick(self) -> None:
         self._frame_idx = (self._frame_idx + 1) % len(self.frames)
         self.update(escape(self.frames[self._frame_idx]))
+
+
+class ConfirmScreen(ModalScreen[bool]):
+    """A simple Yes/No confirmation dialog."""
+
+    DEFAULT_CSS = """
+    ConfirmScreen {
+        align: center middle;
+        background: $background 80%;
+    }
+    #confirm-dialog {
+        width: 50;
+        height: auto;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #confirm-message {
+        text-align: center;
+        margin-bottom: 1;
+    }
+    #confirm-buttons {
+        align: center middle;
+        height: auto;
+    }
+    #confirm-buttons Button {
+        width: auto;
+        min-width: 12;
+        margin: 0 1;
+    }
+    """
+
+    BINDINGS = [
+        ("y", "confirm", "Yes"),
+        ("n", "cancel", "No"),
+        ("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, message: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._message = message
+
+    def compose(self) -> ComposeResult:
+        with Container(id="confirm-dialog"):
+            yield Label(self._message, id="confirm-message")
+            with Horizontal(id="confirm-buttons"):
+                yield Button("Yes (y)", id="btn-confirm-yes", variant="error")
+                yield Button("No (n)", id="btn-confirm-no", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-confirm-yes":
+            self.dismiss(True)
+        else:
+            self.dismiss(False)
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
+HELP_TEXT = """\
+# ⌨️ Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| **1 – 4** | Select a choice by number |
+| **d** | Toggle dark / light mode |
+| **j** | Toggle the Journal panel |
+| **m** | Toggle the Story Map panel |
+| **b** | Branch from a past scene |
+| **r** | Restart the adventure |
+| **h** | Show this help screen |
+| **q** | Quit the game |
+
+---
+
+# 📊 Player Stats
+
+| Stat | Description |
+|------|-------------|
+| ❤️ **Health** | Your vitality. Low health disables risky choices. |
+| 🪙 **Gold** | Currency earned through the adventure. |
+| 🌟 **Reputation** | Your standing — high rep unlocks dialogue. |
+| 🎒 **Inventory** | Items you carry. Some unlock special choices! |
+
+---
+
+*Press Escape or click Close to return to the adventure.*
+"""
+
+
+class HelpScreen(ModalScreen[None]):
+    """Full-screen help overlay showing keybindings and game mechanics."""
+
+    DEFAULT_CSS = """
+    HelpScreen {
+        align: center middle;
+        background: $background 80%;
+    }
+    #help-dialog {
+        width: 70;
+        height: 80%;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #help-content {
+        height: 1fr;
+        overflow-y: auto;
+    }
+    #btn-help-close {
+        width: 100%;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS = [
+        ("escape", "close", "Close"),
+        ("h", "close", "Close"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Container(id="help-dialog"):
+            with Container(id="help-content"):
+                yield Markdown(HELP_TEXT, id="help-text")
+            yield Button("Close (Esc)", id="btn-help-close", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-help-close":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
