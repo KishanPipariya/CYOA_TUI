@@ -3,6 +3,7 @@ from textual.app import ComposeResult
 from textual.containers import Container
 from textual.widgets import Button, ListView, ListItem, Label, Static
 from textual.screen import ModalScreen
+from textual.markup import escape
 
 __all__ = ["BranchScreen", "ThemeSpinner"]
 
@@ -71,9 +72,9 @@ class ThemeSpinner(Static):
         self._frame_idx = 0
         
     def on_mount(self) -> None:
-        self.update(self.frames[0])
+        self.update(escape(self.frames[0]))
         self.set_interval(0.5, self.tick)
         
     def tick(self) -> None:
         self._frame_idx = (self._frame_idx + 1) % len(self.frames)
-        self.update(self.frames[self._frame_idx])
+        self.update(escape(self.frames[self._frame_idx]))
