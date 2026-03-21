@@ -14,7 +14,7 @@ __all__ = ["NarrativeMemory", "NPCMemory"]
 
 try:
     import chromadb  # type: ignore
-    from events import bus
+    from cyoa.core.events import bus
     _CHROMA_AVAILABLE = True
     logger = logging.getLogger(__name__)
 except ImportError:

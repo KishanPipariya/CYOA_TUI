@@ -9,11 +9,11 @@ from textual.reactive import reactive  # type: ignore
 from textual import work  # type: ignore
 from typing import Any, Optional
 
-from models import StoryNode, Choice
-from llm_backend import StoryGenerator, StoryContext
-from graph_db import CYOAGraphDB
-from rag_memory import NarrativeMemory, NPCMemory
-from ui_components import BranchScreen, ThemeSpinner
+from cyoa.core.models import StoryNode, Choice
+from cyoa.llm.llm_backend import StoryGenerator, StoryContext
+from cyoa.db.graph_db import CYOAGraphDB
+from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
+from cyoa.ui.components import BranchScreen, ThemeSpinner
 
 __all__ = ["CYOAApp", "DEFAULT_STARTING_PROMPT"]
 

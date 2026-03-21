@@ -1,6 +1,6 @@
 import logging
 from typing import Optional, Any
-from events import bus
+from cyoa.core.events import bus
 
 logger = logging.getLogger(__name__)
 

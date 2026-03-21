@@ -7,11 +7,11 @@ actual LLM model or requiring a Neo4j instance.
 import pytest  # type: ignore
 from unittest.mock import patch, MagicMock
 
-from models import StoryNode, Choice
-from llm_backend import StoryContext, MAX_CONTEXT_TURNS
-from graph_db import CYOAGraphDB
-from theme_loader import load_theme, list_themes
-from rag_memory import NarrativeMemory
+from cyoa.core.models import StoryNode, Choice
+from cyoa.llm.llm_backend import StoryContext, MAX_CONTEXT_TURNS
+from cyoa.db.graph_db import CYOAGraphDB
+from cyoa.core.theme_loader import load_theme, list_themes
+from cyoa.db.rag_memory import NarrativeMemory
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -68,9 +68,9 @@ class TestStoryContext:
 class TestStoryGeneratorFallback:
     def test_bad_json_returns_fallback_node(self):
         """If LLM returns invalid JSON, generate_next_node should return a valid fallback StoryNode."""
-        from llm_backend import StoryGenerator
+        from cyoa.llm.llm_backend import StoryGenerator
 
-        with patch("llm_backend.Llama") as MockLlama:
+        with patch("cyoa.llm.llm_backend.Llama") as MockLlama:
             mock_llm = MagicMock()
             mock_llm.create_chat_completion.return_value = {
                 "choices": [{"message": {"content": "NOT VALID JSON {"}}]
@@ -92,14 +92,14 @@ class TestStoryGeneratorFallback:
     def test_valid_json_returns_parsed_node(self):
         """If LLM returns valid JSON, generate_next_node should return a proper StoryNode."""
         import json
-        from llm_backend import StoryGenerator
+        from cyoa.llm.llm_backend import StoryGenerator
 
         payload = StoryNode(
             narrative="A torch flickers.",
             choices=[Choice(text="Pick it up"), Choice(text="Leave it")]
         ).model_dump()
 
-        with patch("llm_backend.Llama") as MockLlama:
+        with patch("cyoa.llm.llm_backend.Llama") as MockLlama:
             mock_llm = MagicMock()
             mock_llm.create_chat_completion.return_value = {
                 "choices": [{"message": {"content": json.dumps(payload)}}]
@@ -230,7 +230,7 @@ class TestNarrativeMemory:
 class TestNPCMemory:
     def test_add_and_query_npc_returns_results(self):
         """Adding a scene for a specific NPC and querying it should return it."""
-        from rag_memory import NPCMemory
+        from cyoa.db.rag_memory import NPCMemory
         mem = NPCMemory()
         mem.add("Elara", "scene-1", "Elara hands you a glowing potion.")
         results = mem.query("Elara", "glowing potion")
@@ -239,7 +239,7 @@ class TestNPCMemory:
 
     def test_different_npcs_have_isolated_memory(self):
         """Memories added to one NPC should not be retrieved by another."""
-        from rag_memory import NPCMemory
+        from cyoa.db.rag_memory import NPCMemory
         mem = NPCMemory()
         mem.add("Bob", "scene-b", "Bob gives you a sword.")
         mem.add("Alice", "scene-a", "Alice gives you a shield.")
@@ -253,7 +253,7 @@ class TestNPCMemory:
         assert "shield" in alice_results[0]
 
     def test_empty_npc_memory_returns_empty_list(self):
-        from rag_memory import NPCMemory
+        from cyoa.db.rag_memory import NPCMemory
         mem = NPCMemory()
         assert mem.query("UnknownNPC", "anything") == []
 
@@ -298,7 +298,7 @@ class TestStreamingCallback:
     def test_stream_narrative_extractor(self):
         """_stream_with_callback should extract narrative characters correctly."""
         import json
-        from llm_backend import StoryGenerator
+        from cyoa.llm.llm_backend import StoryGenerator
 
         payload = {
             "title": None,
@@ -331,7 +331,7 @@ class TestStreamingCallback:
 class TestThemeSpinner:
     def test_spinner_cycles_frames(self):
         """ThemeSpinner should update its frame index on each tick."""
-        from app import ThemeSpinner
+        from cyoa.ui.app import ThemeSpinner
         
         frames = ["[A]", "[B]", "[C]"]
         spinner = ThemeSpinner(frames=frames)
@@ -350,7 +350,7 @@ class TestThemeSpinner:
 class TestBranchingLogic:
     def test_restore_to_scene_rebuilds_context(self):
         """Restoring to a past scene should rebuild the StoryContext and memory correctly."""
-        from app import CYOAApp
+        from cyoa.ui.app import CYOAApp
         
         history = {
             "scenes": [
@@ -396,7 +396,7 @@ class TestBranchingLogic:
 
     def test_action_branch_past_aborts_if_no_history(self):
         """action_branch_past should return early if there is no db or current scene."""
-        from app import CYOAApp
+        from cyoa.ui.app import CYOAApp
         app = CYOAApp(model_path="dummy")
         
         # db is None
@@ -435,8 +435,8 @@ class TestProceduralItemSystem:
 
     def test_app_updates_inventory_state(self):
         """CYOAApp should extract the items list from the generated StoryNode and update state."""
-        from app import CYOAApp
-        from models import Choice, StoryNode
+        from cyoa.ui.app import CYOAApp
+        from cyoa.core.models import Choice, StoryNode
         
         app = CYOAApp(model_path="dummy")
         

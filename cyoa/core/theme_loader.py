@@ -3,7 +3,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-THEMES_DIR = Path(__file__).parent / "themes"
+THEMES_DIR = Path(__file__).parent.parent.parent / "themes"
 
 
 def load_theme(name: str) -> dict[str, Any]:

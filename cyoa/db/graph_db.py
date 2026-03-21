@@ -6,7 +6,7 @@ from neo4j import GraphDatabase  # type: ignore
 from neo4j.exceptions import ServiceUnavailable, AuthError  # type: ignore
 
 import logging
-from events import bus
+from cyoa.core.events import bus
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

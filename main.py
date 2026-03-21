@@ -4,8 +4,8 @@ from dotenv import load_dotenv  # type: ignore
 # Load .env before anything that reads os.getenv (graph_db, llm_backend)
 load_dotenv()
 
-from app import CYOAApp, DEFAULT_STARTING_PROMPT  # noqa: E402 (must follow load_dotenv)
-from theme_loader import load_theme, list_themes   # noqa: E402
+from cyoa.ui.app import CYOAApp, DEFAULT_STARTING_PROMPT  # noqa: E402 (must follow load_dotenv)
+from cyoa.core.theme_loader import load_theme, list_themes   # noqa: E402
 
 
 def main() -> None:

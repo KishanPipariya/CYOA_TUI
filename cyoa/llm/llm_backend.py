@@ -3,7 +3,7 @@ import os
 import re
 from typing import Callable, Optional
 from llama_cpp import Llama  # type: ignore
-from models import StoryNode
+from cyoa.core.models import StoryNode
 
 __all__ = ["StoryContext", "StoryGenerator"]
 
