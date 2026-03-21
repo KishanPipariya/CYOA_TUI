@@ -27,7 +27,7 @@ class EventBus:
             for callback in self._subscribers[event_name]:
                 try:
                     callback(**kwargs)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.error(f"Error executing callback {callback.__name__} for event {event_name}: {e}")
                     
     def clear(self) -> None:

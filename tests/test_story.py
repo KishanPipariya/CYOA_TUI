@@ -8,7 +8,7 @@ import pytest  # type: ignore
 from unittest.mock import patch, MagicMock
 
 from cyoa.core.models import StoryNode, Choice
-from cyoa.llm.llm_backend import StoryContext, MAX_CONTEXT_TURNS
+from cyoa.llm.llm_backend import StoryContext
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.core.theme_loader import load_theme, list_themes
 from cyoa.db.rag_memory import NarrativeMemory

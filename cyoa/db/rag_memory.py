@@ -65,8 +65,8 @@ class NarrativeMemory:
                 metadata={"hnsw:space": "cosine"},
             )
             return True
-        except Exception as e:
-            print(f"RAG memory: failed to initialise chromadb: {e}")
+        except Exception as e:  # noqa: BLE001
+            logger.error("RAG memory: failed to initialise chromadb: %s", e)
             self._available = False
             return False
 
@@ -79,8 +79,8 @@ class NarrativeMemory:
                 ids=[scene_id],
                 documents=[narrative],
             )
-        except Exception as e:
-            print(f"RAG memory: failed to add scene {scene_id}: {e}")
+        except Exception as e:  # noqa: BLE001
+            logger.error("RAG memory: failed to add scene %s: %s", scene_id, e)
 
     def query(self, text: str, n: int = 3) -> list[str]:
         """
@@ -99,8 +99,8 @@ class NarrativeMemory:
                 n_results=n,
             )
             return results["documents"][0] if results["documents"] else []
-        except Exception as e:
-            print(f"RAG memory: query failed: {e}")
+        except Exception as e:  # noqa: BLE001
+            logger.error("RAG memory: query failed: %s", e)
             return []
 
 class NPCMemory:
@@ -130,8 +130,8 @@ class NPCMemory:
                 metadata={"hnsw:space": "cosine"},
             )
             return True
-        except Exception as e:
-            print(f"RAG NPC memory: failed to initialise chromadb for {npc_name}: {e}")
+        except Exception as e:  # noqa: BLE001
+            logger.error("RAG NPC memory: failed to initialise chromadb for %s: %s", npc_name, e)
             self._available = False
             return False
 
@@ -147,8 +147,8 @@ class NPCMemory:
                 ids=[scene_id],
                 documents=[narrative],
             )
-        except Exception as e:
-            print(f"RAG NPC memory: failed to add scene {scene_id} for {npc_name}: {e}")
+        except Exception as e:  # noqa: BLE001
+            logger.error("RAG NPC memory: failed to add scene %s for %s: %s", scene_id, npc_name, e)
 
     def query(self, npc_name: str, text: str, n: int = 2) -> list[str]:
         if not self._ensure_ready(npc_name):
@@ -167,6 +167,6 @@ class NPCMemory:
                 n_results=min(n, count),
             )
             return results["documents"][0] if results["documents"] else []
-        except Exception as e:
-            print(f"RAG NPC memory: query failed for {npc_name}: {e}")
+        except Exception as e:  # noqa: BLE001
+            logger.error("RAG NPC memory: query failed for %s: %s", npc_name, e)
             return []

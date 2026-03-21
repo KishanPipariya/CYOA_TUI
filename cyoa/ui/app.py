@@ -1,13 +1,11 @@
 import uuid
 import json
-import os
 from textual.app import App, ComposeResult  # type: ignore
 from textual.containers import Container, VerticalScroll, Horizontal  # type: ignore
-from textual.widgets import Header, Footer, Markdown, Button, LoadingIndicator, ListView, ListItem, Label, Static, Tree  # type: ignore
-from textual.screen import ModalScreen  # type: ignore
+from textual.widgets import Header, Footer, Markdown, Button, ListView, ListItem, Label, Tree  # type: ignore
 from textual.reactive import reactive  # type: ignore
 from textual import work  # type: ignore
-from typing import Any, Optional
+from typing import Any, Optional, ClassVar
 
 from cyoa.core.models import StoryNode, Choice
 from cyoa.llm.llm_backend import StoryGenerator, StoryContext
@@ -20,6 +18,7 @@ __all__ = ["CYOAApp", "DEFAULT_STARTING_PROMPT"]
 # Fix #1: Only re-render Markdown every N streamed characters to avoid
 # re-parsing the full story string on every single token.
 _STREAM_RENDER_THROTTLE = 8
+MAX_CHOICE_PREVIEW_LEN = 15
 
 DEFAULT_STARTING_PROMPT = """You are a dark fantasy interactive fiction engine.
 Describe the starting scenario where the player wakes up in a cold, unfamiliar dungeon cell.
@@ -61,7 +60,7 @@ class CYOAApp(App):
     CSS_PATH = "styles.tcss"
 
     # Fix #1: Number key bindings to select choices
-    BINDINGS = [
+    BINDINGS: ClassVar[list[tuple[str, str, str]]] = [
         ("d", "toggle_dark", "Toggle dark mode"),
         ("b", "branch_past", "Branch from Past"),
         ("j", "toggle_journal", "Toggle Journal"),
@@ -371,7 +370,7 @@ class CYOAApp(App):
         panel.toggle_class("hidden")
 
     @work(exclusive=True, thread=True)
-    def generate_next_step(self) -> None:
+    def generate_next_step(self) -> None:  # noqa: C901
         # RAG: retrieve relevant past scenes and inject as memory
         if self._last_raw_narrative and self.story_context and self.generator and self.db and self.current_story_title:
             memories = self.memory.query(self._last_raw_narrative, n=3)
@@ -532,7 +531,7 @@ class CYOAApp(App):
         def rebuild_tree() -> None:
             try:
                 tree = self.query_one("#story-map-tree", Tree)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 return
             tree.clear()
             
@@ -555,7 +554,7 @@ class CYOAApp(App):
                 
                 for edge in edges.get(scene_id, []):
                     choice_text = edge['choice']
-                    choice_preview = choice_text[:15] + "..." if len(choice_text) > 15 else choice_text
+                    choice_preview = choice_text[:MAX_CHOICE_PREVIEW_LEN] + "..." if len(choice_text) > MAX_CHOICE_PREVIEW_LEN else choice_text
                     choice_label = f"[dim][i]- {choice_preview}[/i][/dim]"
                     choice_node = tree_node.add(choice_label, expand=True)
                     add_children(choice_node, edge["target_id"])

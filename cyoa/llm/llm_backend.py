@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import logging
 from typing import Callable, Optional
 from llama_cpp import Llama  # type: ignore
 from cyoa.core.models import StoryNode
@@ -12,6 +13,7 @@ MAX_CONTEXT_TURNS = int(os.getenv("LLM_MAX_TURNS", "10"))
 
 # Regex to find the start of the "narrative" value in streaming JSON
 _NARRATIVE_START_RE = re.compile(r'"narrative"\s*:\s*"')
+logger = logging.getLogger(__name__)
 
 
 class StoryContext:
@@ -120,8 +122,8 @@ class StoryGenerator:
         try:
             data = json.loads(content)
             return StoryNode(**data)
-        except Exception as e:
-            print(f"Failed to parse LLM output: {e}\nOutput was: {content}")
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
+            logger.error("Failed to parse LLM output: %s\nOutput was: %s", e, content)
             return StoryNode(
                 narrative=(
                     "The universe encounters an anomaly (LLM failed to format its response). "
@@ -134,7 +136,7 @@ class StoryGenerator:
         self,
         stream_iter,
         on_token: Callable[[str], None],
-    ) -> str:
+    ) -> str:  # noqa: C901, PLR0912
         """
         Consume the streaming response, fire `on_token` with each new character
         of the narrative field as it appears, and return the complete JSON string.
@@ -153,7 +155,6 @@ class StoryGenerator:
             if not token:
                 continue
 
-            prev_len = len(buffer)
             buffer += token
 
             if not in_narrative and not narrative_done:

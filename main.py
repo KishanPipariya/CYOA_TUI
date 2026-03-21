@@ -4,7 +4,7 @@ from dotenv import load_dotenv  # type: ignore
 # Load .env before anything that reads os.getenv (graph_db, llm_backend)
 load_dotenv()
 
-from cyoa.ui.app import CYOAApp, DEFAULT_STARTING_PROMPT  # noqa: E402 (must follow load_dotenv)
+from cyoa.ui.app import CYOAApp  # noqa: E402 (must follow load_dotenv)
 from cyoa.core.theme_loader import load_theme, list_themes   # noqa: E402
 
 
@@ -32,8 +32,8 @@ def main() -> None:
             starting_prompt = theme["prompt"]
             spinner_frames = theme.get("spinner_frames", ["[-]", "[\\]", "[|]", "[/]"])
         except FileNotFoundError as e:
-            print(f"Error: {e}")
-            raise SystemExit(1)
+            import sys
+            sys.exit(f"Error: {e}")
 
     app = CYOAApp(model_path=args.model, starting_prompt=starting_prompt, spinner_frames=spinner_frames)
     app.run()

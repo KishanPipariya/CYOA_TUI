@@ -40,7 +40,7 @@ class CYOAGraphDB:
         except AuthError:
             logger.error("Failed to connect to Neo4j: Authentication failed. Check username and password.")
             self.driver = None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Unexpected Graph DB connection error: {e}")
             self.driver = None
         
@@ -170,7 +170,7 @@ class CYOAGraphDB:
 
     def save_scene_async(self, narrative: str, available_choices: list[str],
                          story_title: str, source_scene_id: Optional[str],
-                         choice_text: Optional[str], on_complete: Optional[Callable[[str], None]] = None) -> None:
+                         choice_text: Optional[str], on_complete: Optional[Callable[[str], None]] = None) -> None:  # noqa: PLR0913
         """
         Writes a new scene node (and optional edge from previous scene) to Neo4j
         in a background daemon thread so it doesn't block the UI.
@@ -330,8 +330,8 @@ if __name__ == "__main__":
         scene1 = db.create_scene_node("You wake up in a dark forest.", ["Walk north."], story_title)
         scene2 = db.create_scene_node("You find an abandoned cabin.", [], story_title)
         db.create_choice_edge(scene1, scene2, "Walk north.")
-        print(f"Graph initialized with nodes {scene1} and {scene2}")
-        print(db.get_scene_history_path(scene2))
+        print(f"Graph initialized with nodes {scene1} and {scene2}")  # noqa: T201
+        print(db.get_scene_history_path(scene2))  # noqa: T201
     except Exception as e:
         print(f"Error: {e}")
     finally:
