@@ -17,11 +17,15 @@ logger = logging.getLogger(__name__)
 
 
 class StoryContext:
-    def __init__(self, starting_prompt: str, max_turns: int = MAX_CONTEXT_TURNS) -> None:
+    def __init__(
+        self, starting_prompt: str, max_turns: int = MAX_CONTEXT_TURNS
+    ) -> None:
         self.max_turns: int = max_turns
         self.history: list[dict[str, str]] = [
-            {"role": "system", "content": (
-                """You are a dark fantasy interactive fiction engine.
+            {
+                "role": "system",
+                "content": (
+                    """You are a dark fantasy interactive fiction engine.
 Describe the starting scenario where the player wakes up in a cold, unfamiliar dungeon cell.
 Provide 2-3 choices for what they can do next.
 You MUST provide a creative 'title' for this new adventure in the JSON response.
@@ -30,18 +34,31 @@ Manage the player's stats (health, gold, reputation) using 'stat_updates'. Provi
 When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true and provide an empty choices list.
 Ensure your output is strictly valid JSON matching the requested schema.
 """
-            )}
+                ),
+            }
         ]
         self.starting_prompt = starting_prompt
         self.history.append({"role": "user", "content": starting_prompt})
 
-    def add_turn(self, raw_narrative: str, user_choice: str, inventory: Optional[list[str]] = None, player_stats: Optional[dict[str, int]] = None) -> None:
+    def add_turn(
+        self,
+        raw_narrative: str,
+        user_choice: str,
+        inventory: Optional[list[str]] = None,
+        player_stats: Optional[dict[str, int]] = None,
+    ) -> None:
         """Add an assistant turn (raw narrative) and user choice, trimming old turns."""
         self.history.append({"role": "assistant", "content": raw_narrative})
         inv_str = f"Current Inventory: {', '.join(inventory) if inventory else 'Empty'}"
         stats_str = f"Current Stats: {player_stats}" if player_stats else ""
-        sys_note = f"[System Note: {inv_str} | {stats_str}]" if stats_str else f"[System Note: {inv_str}]"
-        self.history.append({"role": "user", "content": f"I choose: {user_choice}\n\n{sys_note}"})
+        sys_note = (
+            f"[System Note: {inv_str} | {stats_str}]"
+            if stats_str
+            else f"[System Note: {inv_str}]"
+        )
+        self.history.append(
+            {"role": "user", "content": f"I choose: {user_choice}\n\n{sys_note}"}
+        )
 
         # Sliding window: always keep system (0) + initial prompt (1)
         non_system = self.history[2:]
@@ -57,9 +74,8 @@ Ensure your output is strictly valid JSON matching the requested schema.
         if not memories:
             return
 
-        memory_text = (
-            "[Memory — relevant past scenes for context]\n"
-            + "\n---\n".join(memories)
+        memory_text = "[Memory — relevant past scenes for context]\n" + "\n---\n".join(
+            memories
         )
         new_block = {"role": "system", "content": memory_text}
 
@@ -86,27 +102,29 @@ class StoryGenerator:
             n_threads=cpu_threads,
             n_gpu_layers=-1,
             flash_attn=True,
-            verbose=False
+            verbose=False,
         )
         self._schema = StoryNode.model_json_schema()
         self._temperature = float(os.getenv("LLM_TEMPERATURE", "0.6"))
         self._max_tokens = int(os.getenv("LLM_MAX_TOKENS", "512"))
 
-    def generate_next_node(
+    async def generate_next_node_async(
         self,
         context: StoryContext,
-        on_token: Optional[Callable[[str], None]] = None,
+        on_token_chunk: Optional[Callable[[str], None]] = None,
     ) -> StoryNode:
         """
-        Generate the next story node.
+        Generate the next story node asynchronously.
 
-        If `on_token` is provided, stream tokens and call it with each new
-        character of the narrative as it streams in (typewriter effect).
+        If `on_token_chunk` is provided, stream tokens and call it with chunked text
+        of the narrative as it streams in (typewriter effect).
         The complete JSON is still assembled and validated after streaming.
         """
-        stream = on_token is not None
+        stream = on_token_chunk is not None
+        import asyncio
 
-        response = self.llm.create_chat_completion(
+        response = await asyncio.to_thread(
+            self.llm.create_chat_completion,
             messages=context.history,
             response_format={
                 "type": "json_object",
@@ -117,8 +135,8 @@ class StoryGenerator:
             stream=stream,
         )
 
-        if stream and on_token is not None:
-            content = self._stream_with_callback(response, on_token)
+        if stream and on_token_chunk is not None:
+            content = await self._stream_with_callback_async(response, on_token_chunk)
         else:
             content = response["choices"][0]["message"]["content"]
 
@@ -132,70 +150,92 @@ class StoryGenerator:
                     "The universe encounters an anomaly (LLM failed to format its response). "
                     "You find yourself back where you started."
                 ),
-                choices=[{"text": "Try doing something different."}]
+                choices=[{"text": "Try doing something different."}],
             )
 
-    def _stream_with_callback(
+    async def _stream_with_callback_async(
         self,
         stream_iter,
-        on_token: Callable[[str], None],
+        on_token_chunk: Callable[[str], None],
     ) -> str:  # noqa: C901, PLR0912
         """
-        Consume the streaming response, fire `on_token` with each new character
-        of the narrative field as it appears, and return the complete JSON string.
+        Consume the streaming response in a background thread to prevent blocking
+        the asyncio event loop, and queue chunks back for processing.
         """
+        import asyncio
+        loop = asyncio.get_running_loop()
+        q = asyncio.Queue()
+
+        def producer():
+            try:
+                for chunk in stream_iter:
+                    delta = chunk["choices"][0].get("delta", {})
+                    token = delta.get("content", "")
+                    if token:
+                        loop.call_soon_threadsafe(q.put_nowait, ("token", token))
+                loop.call_soon_threadsafe(q.put_nowait, ("done", None))
+            except Exception as e:
+                loop.call_soon_threadsafe(q.put_nowait, ("error", e))
+
+        _ = asyncio.create_task(asyncio.to_thread(producer))
+
         buffer = ""
         in_narrative = False
         narrative_done = False
         escape_next = False
-        # Fix #6: track how much of buffer we've already searched for the
-        # narrative key, so we only search the new tail each iteration.
         search_offset = 0
 
-        for chunk in stream_iter:
-            delta = chunk["choices"][0].get("delta", {})
-            token = delta.get("content", "")
-            if not token:
-                continue
+        while True:
+            msg_type, val = await q.get()
+            if msg_type == "error":
+                logger.error("Error in LLM generator: %s", val)
+                break
+            if msg_type == "done":
+                break
 
+            token = val
             buffer += token
 
             if not in_narrative and not narrative_done:
-                # Fix #6: search only from where we left off (minus a small
-                # overlap to handle keys split across chunk boundaries)
                 search_from = max(0, search_offset - 15)
                 match = _NARRATIVE_START_RE.search(buffer, search_from)
                 if match:
                     in_narrative = True
-                    tail = buffer[match.end():]
+                    tail = buffer[match.end() :]
+                    chunk_buf = ""
                     for ch in tail:
                         if escape_next:
                             escape_next = False
-                            on_token(ch)
+                            chunk_buf += ch
                         elif ch == "\\":
                             escape_next = True
-                            on_token(ch)
+                            chunk_buf += ch
                         elif ch == '"':
                             in_narrative = False
                             narrative_done = True
                             break
                         else:
-                            on_token(ch)
+                            chunk_buf += ch
+                    if chunk_buf:
+                        on_token_chunk(chunk_buf)
                 else:
                     search_offset = len(buffer)
             elif in_narrative:
+                chunk_buf = ""
                 for ch in token:
                     if escape_next:
                         escape_next = False
-                        on_token(ch)
+                        chunk_buf += ch
                     elif ch == "\\":
                         escape_next = True
-                        on_token(ch)
+                        chunk_buf += ch
                     elif ch == '"':
                         in_narrative = False
                         narrative_done = True
                         break
                     else:
-                        on_token(ch)
+                        chunk_buf += ch
+                if chunk_buf:
+                    on_token_chunk(chunk_buf)
 
         return buffer

@@ -5,11 +5,18 @@ from textual.widgets import Button, ListView, ListItem, Label, Static, Markdown
 from textual.screen import ModalScreen
 from textual.markup import escape
 
-__all__ = ["BranchScreen", "ThemeSpinner", "ConfirmScreen", "HelpScreen", "LoadGameScreen"]
+__all__ = [
+    "BranchScreen",
+    "ThemeSpinner",
+    "ConfirmScreen",
+    "HelpScreen",
+    "LoadGameScreen",
+]
+
 
 class BranchScreen(ModalScreen[int]):
     """Screen to select a past scene to branch from."""
-    
+
     DEFAULT_CSS = """
     BranchScreen {
         align: center middle;
@@ -31,15 +38,20 @@ class BranchScreen(ModalScreen[int]):
         padding: 1;
     }
     """
-    
-    def __init__(self, scenes: list[dict[str, Any]], choices: list[str], **kwargs: Any) -> None:
+
+    def __init__(
+        self, scenes: list[dict[str, Any]], choices: list[str], **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self.scenes = scenes
         self.choices = choices
-        
+
     def compose(self) -> ComposeResult:
         with Container(id="branch-dialog"):
-            yield Label("[b]Rewind & Branch:[/b] Select a past moment to alter your fate.", id="branch-title")
+            yield Label(
+                "[b]Rewind & Branch:[/b] Select a past moment to alter your fate.",
+                id="branch-title",
+            )
             list_view = ListView(id="branch-list")
             yield list_view
             yield Button("Cancel", id="cancel-branch", variant="error")
@@ -49,7 +61,7 @@ class BranchScreen(ModalScreen[int]):
         for i, scene in enumerate(self.scenes):
             preview = scene["narrative"][:100].replace("\n", " ") + "..."
             choice_text = self.choices[i] if i < len(self.choices) else "Current Scene"
-            label_text = f"Turn {i+1}: {preview}\n[i]Choice made: {choice_text}[/i]"
+            label_text = f"Turn {i + 1}: {preview}\n[i]Choice made: {choice_text}[/i]"
             item = ListItem(Label(label_text, classes="scene-preview"))
             item.scene_index = i
             list_view.append(item)
@@ -58,7 +70,7 @@ class BranchScreen(ModalScreen[int]):
         idx = getattr(event.item, "scene_index", None)
         if idx is not None:
             self.dismiss(idx)
-            
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel-branch":
             self.dismiss(None)
@@ -66,15 +78,16 @@ class BranchScreen(ModalScreen[int]):
 
 class ThemeSpinner(Static):
     """Custom spinner that cycles through configured ASCII frames."""
+
     def __init__(self, frames: list[str], **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.frames = frames
         self._frame_idx = 0
-        
+
     def on_mount(self) -> None:
         self.update(escape(self.frames[0]))
         self.set_interval(0.5, self.tick)
-        
+
     def tick(self) -> None:
         self._frame_idx = (self._frame_idx + 1) % len(self.frames)
         self.update(escape(self.frames[self._frame_idx]))
@@ -258,7 +271,9 @@ class LoadGameScreen(ModalScreen[str]):
 
     def compose(self) -> ComposeResult:
         with Container(id="load-dialog"):
-            yield Label("[b]📂 Load Game[/b] \u2014 Select a save file", id="load-title")
+            yield Label(
+                "[b]📂 Load Game[/b] \u2014 Select a save file", id="load-title"
+            )
             yield ListView(id="load-list")
             yield Button("Cancel (Esc)", id="btn-load-cancel", variant="error")
 
