@@ -1,4 +1,4 @@
-# Chains of the Forsaken (3)
+# Chains of the Forsaken (5)
 
 You awaken in a dimly lit, cold dungeon cell. The air is thick with the scent of damp stone and despair. Chains are attached to the walls, and a small, barred window lets in a sliver of moonlight. Your hands are cuffed, and you feel a sharp pain in your side where a rusty blade grazed you. You are not sure how you got here, but you know you must escape.
 

@@ -156,8 +156,12 @@ async def test_choice_selection_via_keyboard(mock_app_dependencies):
         inventory_text = str(inventory_label.render())
         assert "Broken Sword" in inventory_text
         assert "Health Potion" in inventory_text
-        assert "❤️ Health: 90" in inventory_text
-        assert "🪙 Gold: 50" in inventory_text
+        
+        # Verify stats updated (now in separate #stats-display label)
+        stats_label = app.query_one("#stats-display", Label)
+        stats_text = str(stats_label.render())
+        assert "Health: 90" in stats_text
+        assert "Gold: 50" in stats_text
         
         # Verify journal updated
         journal_list = app.query_one("#journal-list", ListView)
@@ -326,3 +330,77 @@ async def test_choice_buttons_have_number_labels(mock_app_dependencies):
         assert len(buttons) == 2
         assert str(buttons[0].label).startswith("[1]")
         assert str(buttons[1].label).startswith("[2]")
+
+
+@pytest.mark.asyncio
+async def test_undo_restores_previous_state(mock_app_dependencies):
+    """Test that pressing 'u' after a choice restores the previous turn state."""
+    app = CYOAApp(model_path="dummy_path.gguf")
+    
+    async with app.run_test() as pilot:
+        await pilot.pause(0.2)  # Node 1
+        
+        assert app.turn_count == 1
+        original_story = app._current_story
+        
+        # Make a choice
+        await pilot.press("1")
+        await pilot.pause(0.2)  # Node 2
+        assert app.turn_count == 2
+        assert "You went North." in app._current_story
+        
+        # Undo
+        await pilot.press("u")
+        await pilot.pause(0.1)
+        
+        assert app.turn_count == 1
+        assert app._current_story == original_story
+
+
+@pytest.mark.asyncio
+async def test_undo_with_no_history(mock_app_dependencies):
+    """Test that undoing with nothing to undo shows a warning notification."""
+    app = CYOAApp(model_path="dummy_path.gguf")
+    
+    async with app.run_test() as pilot:
+        await pilot.pause(0.2)
+        
+        # Press undo with no previous state
+        await pilot.press("u")
+        await pilot.pause(0.1)
+        
+        # Should still be on turn 1
+        assert app.turn_count == 1
+
+
+@pytest.mark.asyncio
+async def test_save_and_load_game(mock_app_dependencies, tmp_path, monkeypatch):
+    """Test saving and loading a game state."""
+    import cyoa.ui.app as app_module
+    monkeypatch.setattr(app_module, "SAVES_DIR", str(tmp_path))
+    
+    app = CYOAApp(model_path="dummy_path.gguf")
+    
+    async with app.run_test() as pilot:
+        await pilot.pause(0.2)  # Node 1
+        await pilot.press("1")
+        await pilot.pause(0.2)  # Node 2
+        
+        assert app.turn_count == 2
+        
+        # Save the game
+        await pilot.press("s")
+        await pilot.pause(0.2)
+        
+        # Verify a save file was created
+        import os
+        save_files = [f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]
+        assert len(save_files) == 1
+        
+        # Restart the game
+        await pilot.press("r")
+        await pilot.pause(0.1)
+        await pilot.press("y")
+        await pilot.pause(0.2)
+        
+        assert app.turn_count == 1

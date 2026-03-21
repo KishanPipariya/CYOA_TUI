@@ -215,4 +215,4 @@ __marimo__/
 tasks.md
 
 # Secrets — never commit the actual .env, only .env.example
-.env
+.envsaves/

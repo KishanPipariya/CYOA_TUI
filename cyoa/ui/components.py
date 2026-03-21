@@ -5,7 +5,7 @@ from textual.widgets import Button, ListView, ListItem, Label, Static, Markdown
 from textual.screen import ModalScreen
 from textual.markup import escape
 
-__all__ = ["BranchScreen", "ThemeSpinner", "ConfirmScreen", "HelpScreen"]
+__all__ = ["BranchScreen", "ThemeSpinner", "ConfirmScreen", "HelpScreen", "LoadGameScreen"]
 
 class BranchScreen(ModalScreen[int]):
     """Screen to select a past scene to branch from."""
@@ -150,6 +150,9 @@ HELP_TEXT = """\
 | **j** | Toggle the Journal panel |
 | **m** | Toggle the Story Map panel |
 | **b** | Branch from a past scene |
+| **u** | Undo last choice |
+| **s** | Save game |
+| **l** | Load a saved game |
 | **r** | Restart the adventure |
 | **h** | Show this help screen |
 | **q** | Quit the game |
@@ -212,4 +215,69 @@ class HelpScreen(ModalScreen[None]):
             self.dismiss(None)
 
     def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class LoadGameScreen(ModalScreen[str]):
+    """Modal screen listing available save files for loading."""
+
+    DEFAULT_CSS = """
+    LoadGameScreen {
+        align: center middle;
+        background: $background 80%;
+    }
+    #load-dialog {
+        width: 70;
+        height: 70%;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #load-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    #load-list {
+        height: 1fr;
+        border: solid $secondary;
+        margin-bottom: 1;
+    }
+    .save-entry {
+        padding: 0 1;
+    }
+    """
+
+    BINDINGS = [
+        ("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, save_files: list[str], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._save_files = save_files
+
+    def compose(self) -> ComposeResult:
+        with Container(id="load-dialog"):
+            yield Label("[b]📂 Load Game[/b] \u2014 Select a save file", id="load-title")
+            yield ListView(id="load-list")
+            yield Button("Cancel (Esc)", id="btn-load-cancel", variant="error")
+
+    def on_mount(self) -> None:
+        list_view = self.query_one("#load-list", ListView)
+        for save_file in self._save_files:
+            display_name = save_file.replace(".json", "").replace("_", " ")
+            item = ListItem(Label(f"💾 {display_name}", classes="save-entry"))
+            item.save_filename = save_file
+            list_view.append(item)
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        filename = getattr(event.item, "save_filename", None)
+        if filename:
+            self.dismiss(filename)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-load-cancel":
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
         self.dismiss(None)

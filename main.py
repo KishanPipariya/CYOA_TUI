@@ -26,16 +26,18 @@ def main() -> None:
     if args.prompt:
         starting_prompt = args.prompt
         spinner_frames = ["[-]", "[\\]", "[|]", "[/]"]
+        accent_color = None
     else:
         try:
             theme = load_theme(args.theme)
             starting_prompt = theme["prompt"]
             spinner_frames = theme.get("spinner_frames", ["[-]", "[\\]", "[|]", "[/]"])
+            accent_color = theme.get("accent_color")
         except FileNotFoundError as e:
             import sys
             sys.exit(f"Error: {e}")
 
-    app = CYOAApp(model_path=args.model, starting_prompt=starting_prompt, spinner_frames=spinner_frames)
+    app = CYOAApp(model_path=args.model, starting_prompt=starting_prompt, spinner_frames=spinner_frames, accent_color=accent_color)
     app.run()
 
 

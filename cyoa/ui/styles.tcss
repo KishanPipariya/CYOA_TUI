@@ -51,12 +51,33 @@ Screen {
     background: $boost;
 }
 
-/* ── Status Bar (loading indicator row) ───────────────────── */
-/* Fix #5: Dedicated status bar between story and choices */
+/* ── Status Bar (two-row stats + inventory) ──────────────── */
 #status-bar {
     height: auto;
     padding: 0 1;
     margin: 0 1;
+}
+
+#stats-display {
+    height: 1;
+    width: 100%;
+}
+
+#inventory-display {
+    height: 1;
+    width: 100%;
+    color: $text-muted;
+}
+
+/* Health color classes */
+.health-high {
+    color: $success;
+}
+.health-mid {
+    color: $warning;
+}
+.health-low {
+    color: $error;
 }
 
 ThemeSpinner {
@@ -85,6 +106,11 @@ Button {
 
 /* Ending button gets a special success variant treatment */
 #btn-new-adventure {
+    margin-top: 1;
+}
+
+/* ── Error Display ──────────────────────────────────────────── */
+#btn-retry {
     margin-top: 1;
 }
 
