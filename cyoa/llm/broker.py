@@ -8,8 +8,9 @@ from typing import Callable, Optional, List, Dict, Any, Union
 
 from cyoa.core.models import StoryNode, Choice
 from cyoa.llm.providers import LLMProvider, LlamaCppProvider, OllamaProvider
+from cyoa.core.constants import CHARS_PER_TOKEN
 
-__all__ = ["StoryContext", "ModelBroker", "StoryGenerator", "SpeculationCache"]
+__all__ = ["StoryContext", "ModelBroker", "SpeculationCache"]
 
 # Configurable via .env / environment — defaults used if not set
 DEFAULT_TOKEN_BUDGET = int(os.getenv("LLM_TOKEN_BUDGET", "2048"))
@@ -19,8 +20,6 @@ DEFAULT_TOKEN_BUDGET = int(os.getenv("LLM_TOKEN_BUDGET", "2048"))
 # hard sliding-window truncation kicks in.
 SUMMARIZATION_THRESHOLD = float(os.getenv("LLM_SUMMARY_THRESHOLD", "0.8"))
 
-# Rough characters-per-token estimate (conservative for English prose).
-_CHARS_PER_TOKEN = 4
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,7 @@ class StoryContext:
         token_counter: Optional[Callable[[str], int]] = None,
     ) -> None:
         self.token_budget = token_budget
-        self.token_counter = token_counter or (lambda x: len(x) // _CHARS_PER_TOKEN)
+        self.token_counter = token_counter or (lambda x: len(x) // CHARS_PER_TOKEN)
         self.starting_prompt = starting_prompt
         self.history: list[dict[str, str]] = [
             {"role": "user", "content": starting_prompt}
@@ -370,7 +369,10 @@ class ModelBroker:
                 "The universe encounters an anomaly (LLM failed to format its response). "
                 "You find yourself back where you started."
             ),
-            choices=[Choice(text="Try doing something different.")],
+            choices=[
+                Choice(text="Try doing something different."),
+                Choice(text="Observe your surroundings"),
+            ],
         )
 
     async def _stream_with_callback_async(
@@ -422,7 +424,3 @@ class ModelBroker:
     def close(self) -> None:
         """Shut down the underlying model provider."""
         self.provider.close()
-
-
-# Alias for backward compatibility during transition
-StoryGenerator = ModelBroker

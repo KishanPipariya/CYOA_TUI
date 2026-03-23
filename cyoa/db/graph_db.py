@@ -8,7 +8,7 @@ from neo4j.exceptions import ServiceUnavailable, AuthError  # type: ignore
 import logging
 from cyoa.core.events import bus
 
-logging.basicConfig(level=logging.INFO)
+
 logger = logging.getLogger(__name__)
 
 
@@ -350,19 +350,4 @@ class CYOAGraphDB:
         return {"root_id": root_id, "nodes": nodes, "edges": edges}
 
 
-# Example Usage
-if __name__ == "__main__":
-    db = CYOAGraphDB()
-    try:
-        story_title = db.create_story_node_and_get_title("The Dark Forest Escape")
-        scene1 = db.create_scene_node(
-            "You wake up in a dark forest.", ["Walk north."], story_title
-        )
-        scene2 = db.create_scene_node("You find an abandoned cabin.", [], story_title)
-        db.create_choice_edge(scene1, scene2, "Walk north.")
-        print(f"Graph initialized with nodes {scene1} and {scene2}")  # noqa: T201
-        print(db.get_scene_history_path(scene2))  # noqa: T201
-    except Exception as e:
-        print(f"Error: {e}")
-    finally:
-        db.close()
+# Example Usage removed for production cleanup.

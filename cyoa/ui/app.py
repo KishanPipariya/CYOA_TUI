@@ -21,81 +21,36 @@ from typing import Any, Optional, ClassVar
 import asyncio
 
 from cyoa.core.models import StoryNode, Choice
-from cyoa.llm.llm_backend import ModelBroker, StoryContext, DEFAULT_TOKEN_BUDGET, SpeculationCache
+from cyoa.llm.broker import ModelBroker, StoryContext, DEFAULT_TOKEN_BUDGET, SpeculationCache
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
 from cyoa.ui.components import BranchScreen, ThemeSpinner, ConfirmScreen, HelpScreen
 from cyoa.ui.ascii_art import SCENE_ART
+from cyoa.core.events import bus
+from cyoa.core import constants, utils
 
-__all__ = ["CYOAApp", "DEFAULT_STARTING_PROMPT"]
-
-# Adaptive streaming throttle: base value increases as story grows
-_STREAM_RENDER_THROTTLE_BASE = 8
-_STREAM_RENDER_THROTTLE_MAX = 48
-MAX_CHOICE_PREVIEW_LEN = 15
-SAVES_DIR = "saves"
+__all__ = ["CYOAApp"]
 
 
 def _adaptive_throttle(story_length: int) -> int:
     """Return a throttle value that increases with story length to avoid
     expensive Markdown re-parses on long stories."""
     if story_length < 2000:
-        return _STREAM_RENDER_THROTTLE_BASE
+        return constants.STREAM_RENDER_THROTTLE_BASE
     elif story_length < 5000:
         return 16
     elif story_length < 10000:
         return 32
-    return _STREAM_RENDER_THROTTLE_MAX
-
-
-# Error marker used to detect fallback nodes from LLM failures
-_ERROR_NARRATIVE_PREFIX = "The universe encounters an anomaly"
-
-# Keywords used to match ASCII art scenes to narrative content
-_SCENE_KEYWORDS: dict[str, list[str]] = {
-    "dungeon": ["dungeon", "cell", "prison", "chains", "shackles"],
-    "forest": ["forest", "woods", "trees", "grove", "woodland"],
-    "castle": ["castle", "throne", "tower", "battlements", "keep"],
-    "town": ["town", "village", "market", "tavern", "inn", "shop"],
-    "cave": ["cave", "cavern", "grotto", "underground", "stalactite"],
-    "mountain": ["mountain", "peak", "cliff", "ridge", "summit"],
-    "ruins": ["ruins", "ruin", "ancient", "crumbling", "temple"],
-}
+    return constants.STREAM_RENDER_THROTTLE_MAX
 
 
 def _detect_scene_art(narrative: str) -> str | None:
     """Return ASCII art matching keywords found in the narrative, or None."""
     lower = narrative.lower()
-    for scene_key, keywords in _SCENE_KEYWORDS.items():
+    for scene_key, keywords in constants.SCENE_KEYWORDS.items():
         if any(kw in lower for kw in keywords):
             return SCENE_ART.get(scene_key)
     return None
-
-
-DEFAULT_STARTING_PROMPT = """You are a dark fantasy interactive fiction engine.
-Describe the starting scenario where the player wakes up in a cold, unfamiliar dungeon cell.
-Provide 2-3 choices for what they can do next.
-You MUST provide a creative 'title' for this new adventure in the JSON response.
-Manage the player's stats (health, gold, reputation) using 'stat_updates'. Provide stat changes (e.g. {"health": -10, "gold": 50}) when the narrative dictates it. Low health disables risky choices, high reputation unlocks dialogue.
-When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true and provide an empty choices list.
-Ensure your output is strictly valid JSON matching the requested schema.
-"""
-
-CONFIG_FILE = ".config.json"
-
-
-# Fix #9: Persist dark mode preference
-def _load_config() -> dict[str, Any]:
-    try:
-        with open(CONFIG_FILE, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-def _save_config(data: dict[str, Any]) -> None:
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(data, f)
 
 
 # Load the ASCII art for the initial screen
@@ -135,7 +90,7 @@ class CYOAApp(App):
     def __init__(
         self,
         model_path: str,
-        starting_prompt: str = DEFAULT_STARTING_PROMPT,
+        starting_prompt: str = constants.DEFAULT_STARTING_PROMPT,
         spinner_frames: Optional[list[str]] = None,
         accent_color: Optional[str] = None,
         **kwargs: Any,
@@ -160,7 +115,6 @@ class CYOAApp(App):
         # Procedural inventory tracking
         self.inventory: list[str] = []
         self.player_stats: dict[str, int] = {"health": 100, "gold": 0, "reputation": 0}
-        self._story_file: Optional[Any] = None
         self.current_node: Optional[StoryNode] = None
         self._stream_token_buffer: int = 0
         # RAG: in-memory semantic scene store
@@ -172,7 +126,7 @@ class CYOAApp(App):
         self._undo_snapshot: Optional[dict[str, Any]] = None
 
         # Restore dark mode preference
-        config = _load_config()
+        config = utils.load_config()
         self.dark = config.get("dark", True)
 
         # Apply theme accent color if specified
@@ -243,8 +197,6 @@ class CYOAApp(App):
         self.workers.cancel_all()
         if self.generator:
             self.generator.close()
-        if self._story_file:
-            self._story_file.close()
 
     @work(exclusive=True)
     async def initialize_and_start(self, model_path: str) -> None:
@@ -285,12 +237,7 @@ class CYOAApp(App):
             self.db.create_story_node_and_get_title, generated_title
         )
 
-        with open("story.md", "w", encoding="utf-8") as f:
-            f.write(f"# {self.current_story_title}\n\n")
-        # Perf #3: Open the story log once and keep it open for the session
-        if self._story_file:
-            self._story_file.close()
-        self._story_file = open("story.md", "a", encoding="utf-8")
+        bus.emit("story_started", title=self.current_story_title)
 
         choices_text = [choice.text for choice in node.choices]
 
@@ -298,7 +245,8 @@ class CYOAApp(App):
             self.current_scene_id = sid
             self.update_story_map()
 
-        self.db.save_scene_async(
+        bus.emit(
+            "scene_generated",
             narrative=node.narrative,
             available_choices=choices_text,
             story_title=self.current_story_title,
@@ -405,10 +353,10 @@ class CYOAApp(App):
 
         # Color-coded health indicator
         if health <= 0:
-            health_tag = f"💀 Health: {health} [DEAD]"
+            health_tag = f"💀 Health: {health} [[DEAD]]"
             css_class = "health-low"
         elif health < 30:
-            health_tag = f"❤️ Health: {health} [LOW]"
+            health_tag = f"❤️ Health: {health} [[LOW]]"
             css_class = "health-low"
         elif health < 70:
             health_tag = f"❤️ Health: {health}"
@@ -433,7 +381,7 @@ class CYOAApp(App):
         """Render a newly generated StoryNode to the UI (after streaming completes)."""
         self.query_one("#loading").add_class("hidden")
 
-        is_error = node.narrative.startswith(_ERROR_NARRATIVE_PREFIX)
+        is_error = node.narrative.startswith(constants.ERROR_NARRATIVE_PREFIX)
 
         story_md = self.query_one("#story-text", Markdown)
 
@@ -480,10 +428,6 @@ class CYOAApp(App):
         story_container = self.query_one("#story-container")
         self.set_timer(0.05, lambda: story_container.scroll_end(animate=False))
 
-        if self._story_file:
-            self._story_file.write(f"{node.narrative}\n\n")
-            self._story_file.flush()
-
         # memory.add() moved to worker thread (generate_next_step)
         # so chromadb embedding does not block the UI event loop here.
 
@@ -512,7 +456,7 @@ class CYOAApp(App):
             return
 
         for i, choice in enumerate(node.choices):
-            btn_id = f"choice-{uuid.uuid4().hex[:8]}"
+            btn_id = f"choice-t{self.turn_count}-{i}"
             label = f"[{i + 1}] {choice.text}"
             btn = Button(label, id=btn_id, variant="primary")
             choices_container.mount(btn)
@@ -532,23 +476,23 @@ class CYOAApp(App):
             self.generate_next_step()
             return
 
-        # Find which choice button was actually clicked
-        buttons = [
-            b
-            for b in self.query_one("#choices-container").query(Button)
-            if b.id not in ("btn-retry", "btn-new-adventure")
-        ]
-        if event.button in buttons:
-            choice_idx = buttons.index(event.button)
-            self._trigger_choice(choice_idx)
+        # Find which choice button was actually clicked by its ID (choice-t1-0, etc)
+        button_id = event.button.id
+        if button_id and button_id.startswith("choice-"):
+            try:
+                # Part 0: 'choice', Part 1: 'tX', Part 2: '0'
+                choice_idx = int(button_id.split("-")[-1])
+                self._trigger_choice(choice_idx)
+            except (ValueError, IndexError):
+                pass
 
     # Fix #1: Keyboard number shortcut to select a choice
     def action_choose(self, number: str) -> None:
         """Select a choice by its 1-based index using number keys."""
-        buttons = list(self.query_one("#choices-container").query(Button))
         idx = int(number) - 1
-        if 0 <= idx < len(buttons):
-            # Modified to pass index to _trigger_choice
+        # Check if the specifically indexed choice button exists for this turn
+        query = self.query(f"#choice-t{self.turn_count}-{idx}")
+        if query:
             self._trigger_choice(idx)
 
     def _trigger_choice(self, choice_idx: int) -> None:
@@ -585,10 +529,7 @@ class CYOAApp(App):
             )
         self.turn_count += 1
 
-        # Write choice to persistent file handle
-        if self._story_file:
-            self._story_file.write(f"> **You chose:** {choice_text}\n\n---\n\n")
-            self._story_file.flush()
+        bus.emit("choice_made", choice_text=choice_text)
 
         self._current_story += f"\n\n> **You chose:** {choice_text}"
 
@@ -722,12 +663,12 @@ class CYOAApp(App):
             self.notify("Nothing to save yet.", severity="warning", timeout=2)
             return
 
-        os.makedirs(SAVES_DIR, exist_ok=True)
+        os.makedirs(constants.SAVES_DIR, exist_ok=True)
         # Build a safe filename from the story title
         safe_title = "".join(
             c if c.isalnum() or c in " _-" else "_" for c in self.current_story_title
         )
-        save_path = os.path.join(SAVES_DIR, f"{safe_title}_turn{self.turn_count}.json")
+        save_path = os.path.join(constants.SAVES_DIR, f"{safe_title}_turn{self.turn_count}.json")
 
         save_data = {
             "version": 1,
@@ -758,13 +699,13 @@ class CYOAApp(App):
     # UX: Load game from JSON
     def action_load_game(self) -> None:
         """Show available save files and load a selected one."""
-        if not os.path.isdir(SAVES_DIR):
+        if not os.path.isdir(constants.SAVES_DIR):
             self.notify("No saves found.", severity="warning", timeout=2)
             return
 
         save_files = sorted(
-            [f for f in os.listdir(SAVES_DIR) if f.endswith(".json")],
-            key=lambda f: os.path.getmtime(os.path.join(SAVES_DIR, f)),
+            [f for f in os.listdir(constants.SAVES_DIR) if f.endswith(".json")],
+            key=lambda f: os.path.getmtime(os.path.join(constants.SAVES_DIR, f)),
             reverse=True,
         )
         if not save_files:
@@ -775,7 +716,7 @@ class CYOAApp(App):
 
         def on_selected(save_file: str | None) -> None:
             if save_file:
-                self._restore_from_save(os.path.join(SAVES_DIR, save_file))
+                self._restore_from_save(os.path.join(constants.SAVES_DIR, save_file))
 
         self.push_screen(LoadGameScreen(save_files), on_selected)
 
@@ -787,6 +728,8 @@ class CYOAApp(App):
         except (OSError, json.JSONDecodeError) as e:
             self.notify(f"Load failed: {e}", severity="error", timeout=3)
             return
+
+        bus.emit("story_started", title=self.current_story_title)
 
         self.turn_count = data.get("turn_count", 1)
         self._current_story = data.get("current_story_text", LOADING_ART)
@@ -832,7 +775,7 @@ class CYOAApp(App):
     # Persist dark mode preference when toggled
     def action_toggle_dark(self) -> None:
         self.dark = not self.dark
-        _save_config({"dark": self.dark})
+        utils.save_config({"dark": self.dark})
 
     def action_toggle_journal(self) -> None:
         """Toggle the visibility of the side journal panel."""
@@ -940,7 +883,8 @@ class CYOAApp(App):
                 self.current_scene_id = sid
                 self.update_story_map()
 
-            self.db.save_scene_async(
+            bus.emit(
+                "scene_generated",
                 narrative=node.narrative,
                 available_choices=choices_text,
                 story_title=self.current_story_title,
@@ -989,9 +933,8 @@ class CYOAApp(App):
             f"\n\n***\n\n**[Time fractures... you return to Turn {idx + 1}]**"
         )
         self._current_story += fracture_msg
-        if self._story_file:
-            self._story_file.write(f"{fracture_msg}\n\n")
-            self._story_file.flush()
+        
+        bus.emit("choice_made", choice_text=f"Time fracture back to Turn {idx + 1}")
 
         self.query_one("#story-text", Markdown).update(self._current_story)
         story_container = self.query_one("#story-container")

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field  # type: ignore
+from pydantic import BaseModel, Field, model_validator  # type: ignore
 from typing import List, Optional, Dict
 
 
@@ -38,3 +38,12 @@ class StoryNode(BaseModel):
         default=False,
         description="Set to true if this narrative is a definitive ending to the story (victory, death, etc). If true, choices may be empty.",
     )
+
+    @model_validator(mode="after")
+    def validate_choices_count(self) -> "StoryNode":
+        if not self.is_ending:
+            if not (2 <= len(self.choices) <= 4):
+                raise ValueError(
+                    f"Non-ending narrative must have 2 to 4 choices, but got {len(self.choices)}."
+                )
+        return self

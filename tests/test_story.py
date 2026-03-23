@@ -9,7 +9,7 @@ import pytest  # type: ignore
 from unittest.mock import patch, MagicMock
 
 from cyoa.core.models import StoryNode, Choice
-from cyoa.llm.llm_backend import StoryContext
+from cyoa.llm.broker import StoryContext
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.core.theme_loader import load_theme, list_themes
 from cyoa.db.rag_memory import NarrativeMemory
@@ -140,6 +140,46 @@ class TestStoryContext:
         assert "<rolling_summary>" in sys_msg
         assert "MY UNIQUE SUMMARY" in sys_msg
 
+    def test_pruning_removes_memories_when_over_budget(self):
+        """History and memories should be pruned when exceeding budget."""
+        # Setup context where system + history + 1 memory > budget
+        # but system + history + 0 memories <= budget
+        ctx = StoryContext(
+            starting_prompt="Start",
+            token_budget=100,
+            token_counter=lambda x: 20 if len(x) > 5 else 5
+        )
+        ctx.add_turn("Narrative 1", "Choice 1")
+        # History is now: Prompt (25), Assistant (25), User (25) = 75 tokens
+        # Adding 2 memories of 20 tokens each = 40. Total = 115 (> 100)
+        ctx.inject_memory(["Memory 1 Content", "Memory 2 Content"])
+
+        # Pruning should trigger
+        ctx._prune_history()
+
+        # Should have kept only the highest priority memory or none to stay under 100
+        # In our case, 1 memory makes it 75 + 20 = 95 (<= 100)
+        assert len(ctx.memories) == 1
+        assert "Memory 1" in ctx.memories[0]
+
+    def test_stats_and_inventory_rendered_in_system_prompt(self):
+        """System prompt should include both inventory and player stats."""
+        # Mock the template render to see what's passed in
+        ctx = StoryContext(starting_prompt="Start")
+        ctx.inventory = ["Key", "Sword"]
+        ctx.player_stats = {"health": 42, "gold": 100}
+
+        msgs = ctx.get_messages()
+        sys_content = msgs[0]["content"]
+
+        # Since we use a real Jinja template in StoryContext, we check if the content is there
+        # but system_prompt.j2 might be complex. Let's assume it renders basic strings.
+        assert "Key" in sys_content
+        assert "Sword" in sys_content
+        assert "42" in sys_content
+        assert "100" in sys_content
+
+
 
 # ── 2. LLM JSON parse failure graceful fallback ───────────────────────────────
 
@@ -148,7 +188,7 @@ class TestModelBrokerFallback:
     @pytest.mark.asyncio
     async def test_bad_json_returns_fallback_node(self):
         """If LLM returns invalid JSON, generate_next_node_async should return a valid fallback StoryNode."""
-        from cyoa.llm.llm_backend import ModelBroker
+        from cyoa.llm.broker import ModelBroker
         from cyoa.llm.providers import LLMProvider
         from unittest.mock import AsyncMock
 
@@ -166,7 +206,7 @@ class TestModelBrokerFallback:
     async def test_valid_json_returns_parsed_node(self):
         """If LLM returns valid JSON, generate_next_node_async should return a proper StoryNode."""
         import json
-        from cyoa.llm.llm_backend import ModelBroker
+        from cyoa.llm.broker import ModelBroker
         from cyoa.llm.providers import LLMProvider
         from unittest.mock import AsyncMock
 
@@ -188,7 +228,7 @@ class TestModelBrokerFallback:
     @pytest.mark.asyncio
     async def test_generate_summary_async_calls_llm(self):
         """generate_summary_async should invoke generator with the summary prompt."""
-        from cyoa.llm.llm_backend import ModelBroker
+        from cyoa.llm.broker import ModelBroker
         from cyoa.llm.providers import LLMProvider
         from unittest.mock import AsyncMock
 
@@ -209,6 +249,52 @@ class TestModelBrokerFallback:
         call_args = mock_provider.generate_text.call_args[1]
         sys_prompt = call_args["messages"][0]["content"]
         assert "precise narrative archivist" in sys_prompt
+
+    @pytest.mark.asyncio
+    async def test_repair_loop_success_on_second_attempt(self):
+        """ModelBroker should retry if JSON is invalid and succeed if the second attempt is valid."""
+        from cyoa.llm.broker import ModelBroker
+        from cyoa.llm.providers import LLMProvider
+        from unittest.mock import AsyncMock
+        import json
+
+        mock_provider = MagicMock(spec=LLMProvider)
+        # First call returns garbage, second returns valid JSON
+        mock_provider.generate_json = AsyncMock(side_effect=[
+            "GARBAGE {",
+            json.dumps({"narrative": "Repaired!", "choices": [{"text": "OK"}, {"text": "Cancel"}]})
+        ])
+
+        broker = ModelBroker(provider=mock_provider)
+        ctx = StoryContext("start")
+        node = await broker.generate_next_node_async(ctx)
+
+        assert node.narrative == "Repaired!"
+        assert mock_provider.generate_json.call_count == 2
+
+        # Verify the second call included the error message
+        repair_messages = mock_provider.generate_json.call_args_list[1][1]["messages"]
+        assert any("Your previous output was invalid JSON" in m["content"] for m in repair_messages)
+
+    @pytest.mark.asyncio
+    async def test_repair_loop_exhaustion_returns_fallback(self):
+        """ModelBroker should return a fallback node if all repair attempts fail."""
+        from cyoa.llm.broker import ModelBroker
+        from cyoa.llm.providers import LLMProvider
+        from unittest.mock import AsyncMock
+
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate_json = AsyncMock(return_value="STILL GARBAGE")
+
+        # Set repair attempts to 1 (total 2 tries)
+        with patch.dict("os.environ", {"LLM_REPAIR_ATTEMPTS": "1"}):
+            broker = ModelBroker(provider=mock_provider)
+            ctx = StoryContext("start")
+            node = await broker.generate_next_node_async(ctx)
+
+            assert "anomaly" in node.narrative
+            assert mock_provider.generate_json.call_count == 2
+
 
 
 # ── 3. Graph DB offline graceful degradation ──────────────────────────────────
@@ -403,13 +489,13 @@ class TestStreamingCallback:
     async def test_stream_narrative_extractor(self):
         """_stream_with_callback_async should extract narrative characters correctly."""
         import json
-        from cyoa.llm.llm_backend import ModelBroker
+        from cyoa.llm.broker import ModelBroker
         from cyoa.llm.providers import LLMProvider
 
         payload = {
             "title": None,
             "narrative": "A torch flickers in the dark.",
-            "choices": [{"text": "Run"}],
+            "choices": [{"text": "Run"}, {"text": "Hide"}],
             "is_ending": False,
         }
         json_str = json.dumps(payload)
@@ -437,7 +523,7 @@ class TestStreamingCallback:
     @pytest.mark.asyncio
     async def test_stream_resilience(self):
         """Verify extractor handles weird spacing and newlines using jiter."""
-        from cyoa.llm.llm_backend import ModelBroker
+        from cyoa.llm.broker import ModelBroker
         from cyoa.llm.providers import LLMProvider
 
         # Weird spacing, newlines, and escaping that would break a simple regex
@@ -516,9 +602,9 @@ class TestBranchingLogic:
         # can be driven in isolation without loading the real LLM.
         mock_gen = MagicMock()
         mock_gen.generate_next_node_async = AsyncMock(
-            return_value=MagicMock(
+            return_value=StoryNode(
                 narrative="You stand up.",
-                choices=[],
+                choices=[Choice(text="Walk"), Choice(text="Wait")],
                 is_ending=False,
                 items_gained=[],
                 items_lost=[],
@@ -623,7 +709,7 @@ class TestProceduralItemSystem:
 
         mock_node = StoryNode(
             narrative="You found a shiny key.",
-            choices=[Choice(text="Take key")],
+            choices=[Choice(text="Take key"), Choice(text="Leave it")],
             items_gained=["Shiny Key", "Map"],
             items_lost=[],
         )

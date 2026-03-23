@@ -1,11 +1,16 @@
 import argparse
+import sys
+import os
 from dotenv import load_dotenv  # type: ignore
 
-# Load .env before anything that reads os.getenv (graph_db, llm_backend)
+# Load .env before anything that reads os.getenv (graph_db)
 load_dotenv()
 
-from cyoa.ui.app import CYOAApp  # noqa: E402 (must follow load_dotenv)
+from cyoa.ui.app import CYOAApp  # noqa: E402
 from cyoa.core.theme_loader import load_theme, list_themes  # noqa: E402
+from cyoa.db.story_logger import StoryLogger  # noqa: E402
+# Import core constants to keep things consistent
+from cyoa.core.constants import DEFAULT_STARTING_PROMPT, STORY_LOG_FILE  # noqa: E402
 
 
 def main() -> None:
@@ -36,13 +41,14 @@ def main() -> None:
     else:
         try:
             theme = load_theme(args.theme)
-            starting_prompt = theme["prompt"]
+            starting_prompt = theme.get("prompt", DEFAULT_STARTING_PROMPT)
             spinner_frames = theme.get("spinner_frames", ["[-]", "[\\]", "[|]", "[/]"])
             accent_color = theme.get("accent_color")
         except FileNotFoundError as e:
-            import sys
-
             sys.exit(f"Error: {e}")
+
+    # Initialize a global log listener
+    logger_service = StoryLogger(filepath=STORY_LOG_FILE)
 
     app = CYOAApp(
         model_path=args.model,
@@ -56,7 +62,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        import os
+        logger_service.close()
         os._exit(0)
 
 
