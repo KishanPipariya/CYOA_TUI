@@ -19,13 +19,18 @@ from cyoa.db.rag_memory import NarrativeMemory
 
 
 @pytest.fixture(autouse=True)
-def mock_textual_workers(monkeypatch):
+def mock_textual_workers(request, monkeypatch):
     """
     Textual's @work decorator tries to create async tasks which fails in
     synchronous pytest environments with 'no running event loop'.
     We mock Worker._start to simply run the coroutine synchronously if needed,
     or just mock it entirely since we test the sync logic directly.
+
+    Tests using app.run_test() must opt out with @pytest.mark.no_worker_mock
+    so that real Textual workers can execute inside the pilot.
     """
+    if request.node.get_closest_marker("no_worker_mock"):
+        return  # Let real Textual workers run for run_test()-based tests
     from textual.worker import Worker  # type: ignore
 
     monkeypatch.setattr(Worker, "_start", lambda *args, **kwargs: None)
@@ -45,38 +50,39 @@ def _make_node(
 
 class TestStoryContext:
     def test_history_within_max_turns(self):
-        """History should never exceed (system + initial_prompt + max_turns*2) messages."""
+        """History should never exceed (initial_prompt + max_turns*2) messages."""
         ctx = StoryContext(starting_prompt="Start", max_turns=3)
         for i in range(10):
             ctx.add_turn(f"Narrative {i}", f"Choice {i}")
 
-        # system + initial user + 3 turn pairs = 2 + 6 = 8
-        assert len(ctx.history) == 8
+        # initial user + 3 turn pairs = 1 + 6 = 7
+        assert len(ctx.history) == 7
 
     def test_system_and_initial_prompt_preserved(self):
-        """System message and starting prompt must always remain."""
+        """Initial user prompt must always remain."""
         ctx = StoryContext(starting_prompt="My prompt", max_turns=2)
         for i in range(8):
             ctx.add_turn("narrative", "choice")
 
-        assert ctx.history[0]["role"] == "system"
-        assert ctx.history[1]["content"] == "My prompt"
+        assert ctx.history[0]["role"] == "user"
+        assert ctx.history[0]["content"] == "My prompt"
 
     def test_no_trim_when_under_limit(self):
         """History should not trim if turns are within the window."""
         ctx = StoryContext(starting_prompt="Start", max_turns=5)
         ctx.add_turn("n1", "c1")
         ctx.add_turn("n2", "c2")
-        # 2 + 2*2 = 6 messages — under limit of 2 + 5*2 = 12
-        assert len(ctx.history) == 6
+        # 1 + 2*2 = 5 messages — under limit of 1 + 5*2 = 11
+        assert len(ctx.history) == 5
 
 
 # ── 2. LLM JSON parse failure graceful fallback ───────────────────────────────
 
 
 class TestStoryGeneratorFallback:
-    def test_bad_json_returns_fallback_node(self):
-        """If LLM returns invalid JSON, generate_next_node should return a valid fallback StoryNode."""
+    @pytest.mark.asyncio
+    async def test_bad_json_returns_fallback_node(self):
+        """If LLM returns invalid JSON, generate_next_node_async should return a valid fallback StoryNode."""
         from cyoa.llm.llm_backend import StoryGenerator
 
         with patch("cyoa.llm.llm_backend.Llama") as MockLlama:
@@ -93,13 +99,14 @@ class TestStoryGeneratorFallback:
             gen._max_tokens = 512
 
             ctx = StoryContext("start")
-            node = gen.generate_next_node(ctx)
+            node = await gen.generate_next_node_async(ctx)
 
         assert isinstance(node, StoryNode)
         assert len(node.choices) >= 1  # fallback always has a choice
 
-    def test_valid_json_returns_parsed_node(self):
-        """If LLM returns valid JSON, generate_next_node should return a proper StoryNode."""
+    @pytest.mark.asyncio
+    async def test_valid_json_returns_parsed_node(self):
+        """If LLM returns valid JSON, generate_next_node_async should return a proper StoryNode."""
         import json
         from cyoa.llm.llm_backend import StoryGenerator
 
@@ -122,7 +129,7 @@ class TestStoryGeneratorFallback:
             gen._max_tokens = 512
 
             ctx = StoryContext("start")
-            node = gen.generate_next_node(ctx)
+            node = await gen.generate_next_node_async(ctx)
 
         assert node.narrative == "A torch flickers."
         assert len(node.choices) == 2
@@ -203,76 +210,84 @@ class TestThemeLoader:
 
 
 class TestNarrativeMemory:
-    def test_add_and_query_returns_results(self):
+    @pytest.mark.asyncio
+    async def test_add_and_query_returns_results(self):
         """Adding a scene and querying with similar text should return it."""
         mem = NarrativeMemory()
-        mem.add("scene-1", "You discover a hidden door behind a bookshelf.")
-        results = mem.query("secret passage behind shelf")
+        await mem.add_async("scene-1", "You discover a hidden door behind a bookshelf.")
+        results = await mem.query_async("secret passage behind shelf")
         assert len(results) == 1
         assert "bookshelf" in results[0]
 
-    def test_empty_memory_returns_empty_list(self):
+    @pytest.mark.asyncio
+    async def test_empty_memory_returns_empty_list(self):
         """Querying an empty memory store should return []."""
         mem = NarrativeMemory()
-        results = mem.query("anything")
+        results = await mem.query_async("anything")
         assert results == []
 
-    def test_n_limits_results(self):
+    @pytest.mark.asyncio
+    async def test_n_limits_results(self):
         """Query with n=2 should return at most 2 results."""
         mem = NarrativeMemory()
         for i in range(5):
-            mem.add(f"scene-{i}", f"Scene {i}: You see something interesting.")
-        results = mem.query("interesting scene", n=2)
+            await mem.add_async(f"scene-{i}", f"Scene {i}: You see something interesting.")
+        results = await mem.query_async("interesting scene", n=2)
         assert len(results) <= 2
 
-    def test_lazy_init_defers_client_creation(self):
+    @pytest.mark.asyncio
+    async def test_lazy_init_defers_client_creation(self):
         """Fix #7: _collection should be None until the first add() triggers lazy init."""
         mem = NarrativeMemory()
         assert mem._collection is None, "Client should not be created at __init__ time"
-        mem.add("scene-lazy", "A dark corridor stretches ahead.")
-        assert mem._collection is not None, "_collection should exist after first add()"
+        await mem.add_async("scene-lazy", "A dark corridor stretches ahead.")
+        assert mem._collection is not None, "_collection should exist after first add_async()"
 
-    def test_duplicate_id_upserts(self):
+    @pytest.mark.asyncio
+    async def test_duplicate_id_upserts(self):
         """Adding the same scene_id twice should not raise and should have 1 entry."""
         mem = NarrativeMemory()
-        mem.add("scene-x", "First version.")
-        mem.add("scene-x", "Updated version.")
+        await mem.add_async("scene-x", "First version.")
+        await mem.add_async("scene-x", "Updated version.")
         # Should not raise; collection count stays at 1
         assert mem._collection.count() == 1
 
 
 class TestNPCMemory:
-    def test_add_and_query_npc_returns_results(self):
+    @pytest.mark.asyncio
+    async def test_add_and_query_npc_returns_results(self):
         """Adding a scene for a specific NPC and querying it should return it."""
         from cyoa.db.rag_memory import NPCMemory
 
         mem = NPCMemory()
-        mem.add("Elara", "scene-1", "Elara hands you a glowing potion.")
-        results = mem.query("Elara", "glowing potion")
+        await mem.add_async("Elara", "scene-1", "Elara hands you a glowing potion.")
+        results = await mem.query_async("Elara", "glowing potion")
         assert len(results) == 1
         assert "potion" in results[0]
 
-    def test_different_npcs_have_isolated_memory(self):
+    @pytest.mark.asyncio
+    async def test_different_npcs_have_isolated_memory(self):
         """Memories added to one NPC should not be retrieved by another."""
         from cyoa.db.rag_memory import NPCMemory
 
         mem = NPCMemory()
-        mem.add("Bob", "scene-b", "Bob gives you a sword.")
-        mem.add("Alice", "scene-a", "Alice gives you a shield.")
+        await mem.add_async("Bob", "scene-b", "Bob gives you a sword.")
+        await mem.add_async("Alice", "scene-a", "Alice gives you a shield.")
 
-        bob_results = mem.query("Bob", "gives you")
+        bob_results = await mem.query_async("Bob", "gives you")
         assert len(bob_results) == 1
         assert "sword" in bob_results[0]
 
-        alice_results = mem.query("Alice", "gives you")
+        alice_results = await mem.query_async("Alice", "gives you")
         assert len(alice_results) == 1
         assert "shield" in alice_results[0]
 
-    def test_empty_npc_memory_returns_empty_list(self):
+    @pytest.mark.asyncio
+    async def test_empty_npc_memory_returns_empty_list(self):
         from cyoa.db.rag_memory import NPCMemory
 
         mem = NPCMemory()
-        assert mem.query("UnknownNPC", "anything") == []
+        assert await mem.query_async("UnknownNPC", "anything") == []
 
 
 # ── 7. Streaming token callback ───────────────────────────────────────────────
@@ -280,26 +295,21 @@ class TestNPCMemory:
 
 class TestStreamingCallback:
     def test_inject_memory_inserts_before_last_user(self):
-        """inject_memory() should insert a system block before the last user message."""
+        """inject_memory() should update the memories state."""
         ctx = StoryContext(starting_prompt="Start", max_turns=5)
         ctx.add_turn("Narrative one.", "Go left")
 
         # Inject memory after first turn
         ctx.inject_memory(["You once saw a torch flicker."])
 
-        # Find the injected memory block
-        memory_msgs = [
-            m for m in ctx.history if m["role"] == "system" and "Memory" in m["content"]
-        ]
-        assert len(memory_msgs) == 1
-        assert "torch flicker" in memory_msgs[0]["content"]
+        assert len(ctx.memories) == 1
+        assert "torch flicker" in ctx.memories[0]
 
     def test_inject_memory_empty_is_noop(self):
-        """inject_memory([]) should not modify context history."""
+        """inject_memory([]) should update state properly."""
         ctx = StoryContext(starting_prompt="Start", max_turns=5)
-        before_len = len(ctx.history)
         ctx.inject_memory([])
-        assert len(ctx.history) == before_len
+        assert len(ctx.memories) == 0
 
     def test_inject_memory_replaces_existing_block(self):
         """inject_memory() called twice should replace, not accumulate, the memory block."""
@@ -309,19 +319,13 @@ class TestStreamingCallback:
         ctx.inject_memory(["Memory A."])
         ctx.inject_memory(["Memory B."])  # should replace A, not add a second block
 
-        memory_msgs = [
-            m
-            for m in ctx.history
-            if m["role"] == "system" and m["content"].startswith("[Memory")
-        ]
-        assert len(memory_msgs) == 1, (
-            "There should be exactly one memory block after two injects"
-        )
-        assert "Memory B" in memory_msgs[0]["content"]
-        assert "Memory A" not in memory_msgs[0]["content"]
+        assert len(ctx.memories) == 1
+        assert "Memory B" in ctx.memories[0]
+        assert "Memory A" not in ctx.memories[0]
 
-    def test_stream_narrative_extractor(self):
-        """_stream_with_callback should extract narrative characters correctly."""
+    @pytest.mark.asyncio
+    async def test_stream_narrative_extractor(self):
+        """_stream_with_callback_async should extract narrative characters correctly."""
         import json
         from cyoa.llm.llm_backend import StoryGenerator
 
@@ -344,7 +348,7 @@ class TestStreamingCallback:
         received = []
 
         gen = StoryGenerator.__new__(StoryGenerator)
-        result = gen._stream_with_callback(iter(chunks), on_token=received.append)
+        result = await gen._stream_with_callback_async(iter(chunks), on_token_chunk=received.append)
 
         extracted = "".join(received)
         assert "torch" in extracted
@@ -376,8 +380,11 @@ class TestThemeSpinner:
 
 
 class TestBranchingLogic:
-    def test_restore_to_scene_rebuilds_context(self):
+    @pytest.mark.asyncio
+    @pytest.mark.no_worker_mock
+    async def test_restore_to_scene_rebuilds_context(self):
         """Restoring to a past scene should rebuild the StoryContext and memory correctly."""
+        from unittest.mock import AsyncMock
         from cyoa.ui.app import CYOAApp
 
         history = {
@@ -401,43 +408,60 @@ class TestBranchingLogic:
             "choices": ["Stand", "Walk left"],
         }
 
-        app = CYOAApp(model_path="dummy")
-        app.current_scene_id = "scene-3"
-        app._current_story = (
-            "You wake up.\n\nYou stand up.\n\nYou walk left into a wall."
+        # Provide a mock generator that never produces real nodes so restore_to_scene
+        # can be driven in isolation without loading the real LLM.
+        mock_gen = MagicMock()
+        mock_gen.generate_next_node_async = AsyncMock(
+            return_value=MagicMock(
+                narrative="You stand up.",
+                choices=[],
+                is_ending=False,
+                items_gained=[],
+                items_lost=[],
+                stat_updates={},
+                title=None,
+            )
         )
 
-        # In a headless pytest environment without an event loop, we must mock out
-        # both UI node queries (which fail without being mounted). We also mock
-        # call_from_thread to do NOTHING for the final `display_node` call because
-        # that method manipulates the DOM. The `pre_update` callback we can execute instantly.
-        def mock_call_from_thread(callback, *args, **kwargs):
-            if callback.__name__ == "pre_update":
-                # Run the pre_update synchronous closure
-                callback(*args, **kwargs)
-            # Ignore display_node or show_branch_screen as they need real text DOM
-
         with (
-            patch.object(app, "call_from_thread", side_effect=mock_call_from_thread),
-            patch.object(app, "query_one"),
-            patch.object(app, "set_timer"),
+            patch("cyoa.ui.app.StoryGenerator", return_value=mock_gen),
+            patch("cyoa.ui.app.CYOAGraphDB") as mock_db_cls,
         ):
-            # 0-based idx: idx=1 implies restoring to scene-2
-            # Since restore_to_scene is a @work worker, call the unwrapped original function directly for sync testing
-            app.restore_to_scene.__wrapped__(app, idx=1, history=history)
+            mock_db = mock_db_cls.return_value
+            mock_db.create_story_node_and_get_title.return_value = "Test Story"
+            mock_db.get_story_tree.return_value = None
+            mock_db.save_scene_async.side_effect = (
+                lambda on_complete=None, **kw: on_complete("sid") if on_complete else None
+            )
 
-            # Check context
-            assert app.current_scene_id == "scene-2"
-            assert app.last_choice_text == "Stand"
-            assert app._last_raw_narrative == "You stand up."
+            app = CYOAApp(model_path="dummy")
+            app.current_scene_id = "scene-3"
+            app._current_story = (
+                "You wake up.\n\nYou stand up.\n\nYou walk left into a wall."
+            )
 
-            # Context history should correctly have prompt + (narrative, choice) pairs up to idx
-            assert app.story_context is not None
-            assert (
-                len(app.story_context.history) == 4
-            )  # System + User Prompt + Assistant Scene 1 + User Choice 1
-            assert "You wake up." in app.story_context.history[2]["content"]
-            assert "Stand" in app.story_context.history[3]["content"]
+            async with app.run_test() as pilot:
+                # Allow the initial startup worker to settle
+                await pilot.pause(0.2)
+
+                # restore_to_scene is a @work coroutine — calling it schedules a Worker;
+                # do NOT await it, just call it and give the event loop time to run it.
+                app.restore_to_scene(idx=1, history=history)
+                # Give the worker two ticks to fully execute and flush state
+                await pilot.pause(0.3)
+
+                # Check context
+                assert app.current_scene_id == "scene-2"
+                assert app.last_choice_text == "Stand"
+                assert app._last_raw_narrative == "You stand up."
+
+                # Context history should correctly have prompt + (narrative, choice) pairs up to idx
+                assert app.story_context is not None
+                assert (
+                    len(app.story_context.history) == 3
+                )  # User Prompt + Assistant Scene 1 + User Choice 1
+                assert "You wake up." in app.story_context.history[1]["content"]
+                assert "Stand" in app.story_context.history[2]["content"]
 
     def test_action_branch_past_aborts_if_no_history(self):
         """action_branch_past should return early if there is no db or current scene."""
@@ -470,31 +494,29 @@ class TestProceduralItemSystem:
             "You found a sword.", "Take sword", inventory=["Iron Sword", "Torch"]
         )
 
-        last_user_msg = ctx.history[-1]
-        assert last_user_msg["role"] == "user"
-        assert "Take sword" in last_user_msg["content"]
-        assert (
-            "[System Note: Current Inventory: Iron Sword, Torch]"
-            in last_user_msg["content"]
-        )
+        messages = ctx.get_messages()
+        sys_msg = messages[0]
+        assert sys_msg["role"] == "system"
+        assert "Current Inventory: Iron Sword, Torch" in sys_msg["content"]
 
     def test_story_context_handles_empty_inventory(self):
         """StoryContext should format gracefully when inventory is empty."""
         ctx = StoryContext(starting_prompt="Start", max_turns=5)
         ctx.add_turn("You found nothing.", "Wait", inventory=[])
 
-        last_user_msg = ctx.history[-1]
-        assert last_user_msg["role"] == "user"
-        assert "[System Note: Current Inventory: Empty]" in last_user_msg["content"]
+        messages = ctx.get_messages()
+        sys_msg = messages[0]
+        assert sys_msg["role"] == "system"
+        assert "Current Inventory: Empty" in sys_msg["content"]
 
-    def test_app_updates_inventory_state(self):
+    @pytest.mark.asyncio
+    @pytest.mark.no_worker_mock
+    async def test_app_updates_inventory_state(self):
         """CYOAApp should extract the items list from the generated StoryNode and update state."""
+        from unittest.mock import AsyncMock
         from cyoa.ui.app import CYOAApp
         from cyoa.core.models import Choice, StoryNode
 
-        app = CYOAApp(model_path="dummy")
-
-        # Mock generator to return a node with items
         mock_node = StoryNode(
             narrative="You found a shiny key.",
             choices=[Choice(text="Take key")],
@@ -502,12 +524,28 @@ class TestProceduralItemSystem:
             items_lost=[],
         )
 
-        app.generator = MagicMock()
-        app.generator.generate_next_node.return_value = mock_node
-        app.db = MagicMock()
+        mock_gen = MagicMock()
+        mock_gen.generate_next_node_async = AsyncMock(return_value=mock_node)
 
-        with patch.object(app, "call_from_thread"):
-            # Call wrapped synchronous version since @work is mocked out
-            app.initialize_and_start.__wrapped__(app, model_path="dummy")
+        # Use a factory callable (matching test_tui.py's _mock_generator pattern)
+        # so StoryGenerator(...) instantiation returns the pre-built mock_gen.
+        def mock_generator_factory(*args, **kwargs):
+            return mock_gen
 
-        assert app.inventory == ["Shiny Key", "Map"]
+        with (
+            patch("cyoa.ui.app.StoryGenerator", new=mock_generator_factory),
+            patch("cyoa.ui.app.CYOAGraphDB") as mock_db_cls,
+        ):
+            mock_db = mock_db_cls.return_value
+            mock_db.create_story_node_and_get_title.return_value = "Test Story"
+            mock_db.get_story_tree.return_value = None
+            mock_db.save_scene_async.side_effect = (
+                lambda on_complete=None, **kw: on_complete("sid") if on_complete else None
+            )
+
+            app = CYOAApp(model_path="dummy")
+            async with app.run_test() as pilot:
+                # Give the initialize_and_start @work task time to fully complete
+                await pilot.pause(0.5)
+
+                assert app.inventory == ["Shiny Key", "Map"]

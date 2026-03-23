@@ -2,6 +2,8 @@ import json
 import os
 import re
 import logging
+import pathlib
+import jinja2
 from typing import Callable, Optional
 from llama_cpp import Llama  # type: ignore
 from cyoa.core.models import StoryNode
@@ -20,25 +22,18 @@ class StoryContext:
     def __init__(
         self, starting_prompt: str, max_turns: int = MAX_CONTEXT_TURNS
     ) -> None:
-        self.max_turns: int = max_turns
-        self.history: list[dict[str, str]] = [
-            {
-                "role": "system",
-                "content": (
-                    """You are a dark fantasy interactive fiction engine.
-Describe the starting scenario where the player wakes up in a cold, unfamiliar dungeon cell.
-Provide 2-3 choices for what they can do next.
-You MUST provide a creative 'title' for this new adventure in the JSON response.
-Manage the player's inventory using 'items_gained' and 'items_lost'. Track when they acquire or lose items. Create context-sensitive choices if they possess specific items!
-Manage the player's stats (health, gold, reputation) using 'stat_updates'. Provide stat changes (e.g. {"health": -10, "gold": 50}) when the narrative dictates it. Low health should disable risky choices, high reputation unlocks dialogue.
-When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true and provide an empty choices list.
-Ensure your output is strictly valid JSON matching the requested schema.
-"""
-                ),
-            }
-        ]
+        self.max_turns = max_turns
         self.starting_prompt = starting_prompt
-        self.history.append({"role": "user", "content": starting_prompt})
+        self.history: list[dict[str, str]] = [
+            {"role": "user", "content": starting_prompt}
+        ]
+        self.inventory: list[str] = []
+        self.player_stats: dict[str, int] = {}
+        self.memories: list[str] = []
+
+        template_dir = pathlib.Path(__file__).parent / "templates"
+        self.jinja_env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_dir))
+        self.system_template = self.jinja_env.get_template("system_prompt.j2")
 
     def add_turn(
         self,
@@ -49,47 +44,26 @@ Ensure your output is strictly valid JSON matching the requested schema.
     ) -> None:
         """Add an assistant turn (raw narrative) and user choice, trimming old turns."""
         self.history.append({"role": "assistant", "content": raw_narrative})
-        inv_str = f"Current Inventory: {', '.join(inventory) if inventory else 'Empty'}"
-        stats_str = f"Current Stats: {player_stats}" if player_stats else ""
-        sys_note = (
-            f"[System Note: {inv_str} | {stats_str}]"
-            if stats_str
-            else f"[System Note: {inv_str}]"
-        )
-        self.history.append(
-            {"role": "user", "content": f"I choose: {user_choice}\n\n{sys_note}"}
-        )
+        self.history.append({"role": "user", "content": f"I choose: {user_choice}"})
 
-        # Sliding window: always keep system (0) + initial prompt (1)
-        non_system = self.history[2:]
-        if len(non_system) > self.max_turns * 2:
-            self.history = self.history[:2] + non_system[2:]
+        if inventory is not None:
+            self.inventory = inventory
+        if player_stats is not None:
+            self.player_stats = player_stats
+
+        # Sliding window: keep only initial prompt (0) and max_turns tail
+        if len(self.history) > self.max_turns * 2 + 1:
+            self.history = [self.history[0]] + self.history[-(self.max_turns * 2):]
 
     def inject_memory(self, memories: list[str]) -> None:
-        """
-        Fix #5: Insert or REPLACE a memory block in context history.
-        Replaces any existing memory block rather than accumulating duplicates,
-        which would inflate token count rapidly across many turns.
-        """
-        if not memories:
-            return
+        """Store memories to be injected dynamically into the system prompt."""
+        self.memories = memories
 
-        memory_text = "[Memory — relevant past scenes for context]\n" + "\n---\n".join(
-            memories
+    def get_messages(self) -> list[dict[str, str]]:
+        system_content = self.system_template.render(
+            inventory=self.inventory, stats=self.player_stats, memories=self.memories
         )
-        new_block = {"role": "system", "content": memory_text}
-
-        # Check if a memory block already exists; replace it in-place
-        for i, msg in enumerate(self.history):
-            if msg["role"] == "system" and msg["content"].startswith("[Memory"):
-                self.history[i] = new_block
-                return
-
-        # No existing block — insert before the last user message
-        insert_idx = len(self.history) - 1
-        while insert_idx > 0 and self.history[insert_idx]["role"] != "user":
-            insert_idx -= 1
-        self.history.insert(insert_idx, new_block)
+        return [{"role": "system", "content": system_content}] + self.history
 
 
 class StoryGenerator:
@@ -125,7 +99,7 @@ class StoryGenerator:
 
         response = await asyncio.to_thread(
             self.llm.create_chat_completion,
-            messages=context.history,
+            messages=context.get_messages(),
             response_format={
                 "type": "json_object",
                 "schema": self._schema,

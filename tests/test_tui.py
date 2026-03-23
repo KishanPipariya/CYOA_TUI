@@ -40,9 +40,9 @@ def _mock_generator(*args, **kwargs):
 
     async def side_effect_func_async(context, *args, **kwargs):
         history_len = len(context.history)
-        if history_len <= 2:
+        if history_len <= 1:
             return node1  # new adventure / restart
-        elif history_len == 4:
+        elif history_len == 3:
             return node2  # first choice made
         else:
             return node3  # second choice made / ending
