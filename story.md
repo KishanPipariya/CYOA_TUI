@@ -1,4 +1,4 @@
-# Shadows of the Forgotten Prison (19)
+# Shadows of the Forgotten Prison (21)
 
 > **You chose:** Search the cell for any items that might help you escape or survive a little longer.
 
@@ -8,11 +8,7 @@
 
 ---
 
-> **You chose:** Attempt to pry open the cell door with the metal strip and nails found in the cell. Risk alerting the guards or causing irreparable damage to the cell door, potentially sealing your fate if unsuccessful. (Health: -10, Gold: 0, Reputation: -5, Items: ['metal strip'])
-
----
-
-> **You chose:** Hide and wait for the guards to pass by, then continue exploring the cell for any other potential escape routes or items of use.
+> **You chose:** Attempt to use the strip of metal to pick the lock on the cell door. This action carries a risk of injury due to the poor quality of the metal strip, but it might work with a bit of luck. If successful, you could potentially escape the cell. If you fail, you might damage the strip and lose the chance to use it again. Do you want to try it now or look for another way to escape first (risk: 50%)?
 
 ---
 

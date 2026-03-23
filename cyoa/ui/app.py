@@ -476,8 +476,9 @@ class CYOAApp(App):
         """
         try:
             container = self.query_one("#story-container")
-            # A small threshold (2.0) accounts for layout offsets or padding.
-            return container.scroll_y >= container.max_scroll_y - 2
+            # A more lenient threshold (8.0) accounts for layout offsets, 
+            # varied line heights, and padding, making the scroll more "sticky".
+            return container.scroll_y >= container.max_scroll_y - 8
         except Exception:
             return True
 
@@ -531,15 +532,10 @@ class CYOAApp(App):
         if is_error and "⚠️" not in node.narrative:
             self._current_story += "\n\n> ⚠️ **An error occurred.** The story engine could not generate a valid response."
 
-        at_bottom = self._is_at_bottom()
         try:
             self.query_one("#story-text", Markdown).update(self._current_story)
         except Exception:
             pass
-
-        # Smart following: only scroll to the new node if the user was already at the bottom
-        if at_bottom:
-            self._scroll_to_bottom()
 
         # memory.add() moved to worker thread (generate_next_step)
         # so chromadb embedding does not block the UI event loop here.
@@ -559,6 +555,7 @@ class CYOAApp(App):
                 label = f"[{i + 1}] {choice.text}"
                 btn = Button(label, id=btn_id, variant="default")
                 choices_container.mount(btn)
+            self._scroll_to_bottom()
             return
 
         if node.is_ending:
@@ -566,6 +563,7 @@ class CYOAApp(App):
                 "✦ Start a New Adventure", id="btn-new-adventure", variant="success"
             )
             choices_container.mount(end_btn)
+            self._scroll_to_bottom()
             return
 
         for i, choice in enumerate(node.choices):
@@ -576,6 +574,9 @@ class CYOAApp(App):
 
         # Trigger background speculation for the current node's choices
         self.speculate_all_choices(node)
+
+        # Ensure the view is at the bottom after narrative and choices are fully rendered
+        self._scroll_to_bottom()
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         # Handle the end-game "New Adventure" button
@@ -619,14 +620,16 @@ class CYOAApp(App):
 
         # [UI IMPROVEMENT] Instantly deflate UI: remove other choices and show spinner
         choice_text = self.current_node.choices[choice_idx].text
+
+        # Ensure previous turn's typing is finished before starting a new turn
+        self.action_skip_typewriter()
+        self._current_story += f"\n\n> **You chose:** {choice_text}"
+
         selected_label = f"[{choice_idx + 1}] {choice_text}"
         self.show_loading(selected_label=selected_label)
-        
+
         # Yield to the event loop so the TUI renders the button removals IMMEDIATELY
         await asyncio.sleep(0.01)
-
-        # NEW: Ensure previous turn's typing is finished before starting a new turn
-        self.action_skip_typewriter()
 
         # Snapshot state for undo before making changes
         self._undo_snapshot = {
@@ -653,7 +656,8 @@ class CYOAApp(App):
 
         bus.emit("choice_made", choice_text=choice_text)
 
-        self._current_story += f"\n\n> **You chose:** {choice_text}"
+        # Choices are already appended to _current_story in the "Instantly deflate" section above
+        # self._current_story += f"\n\n> **You chose:** {choice_text}"
 
         # Append enriched choice to the journal (includes narrative summary)
         journal_list = self.query_one("#journal-list", ListView)
