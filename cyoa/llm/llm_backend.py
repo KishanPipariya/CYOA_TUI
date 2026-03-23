@@ -177,6 +177,8 @@ class ModelBroker:
         self._max_tokens = int(os.getenv("LLM_MAX_TOKENS", "512"))
         # Maximum tokens for the "Story So Far" summary paragraph.
         self._summary_max_tokens = int(os.getenv("LLM_SUMMARY_MAX_TOKENS", "200"))
+        # Number of recursive repair attempts if JSON structure or schema fails
+        self._repair_attempts = int(os.getenv("LLM_REPAIR_ATTEMPTS", "2"))
 
     def _create_provider_from_env(
         self, model_path: Optional[str] = None, n_ctx: Optional[int] = None
@@ -256,33 +258,77 @@ class ModelBroker:
     ) -> StoryNode:
         """
         Generate the next story node asynchronously.
+        Includes a repair loop for resilient JSON extraction.
         """
         stream = on_token_chunk is not None
+        messages = context.get_messages()
+        attempts = 0
+        max_attempts = self._repair_attempts + 1
 
-        if stream and on_token_chunk is not None:
-            content = await self._stream_with_callback_async(
-                context.get_messages(), on_token_chunk
-            )
-        else:
-            content = await self.provider.generate_json(
-                messages=context.get_messages(),
-                schema=self._schema,
-                temperature=self._temperature,
-                max_tokens=self._max_tokens,
-            )
+        last_error = None
+        content = ""
 
-        try:
-            data = json.loads(content)
-            return StoryNode(**data)
-        except (json.JSONDecodeError, TypeError, ValueError) as e:
-            logger.error("Failed to parse LLM output: %s\nOutput was: %s", e, content)
-            return StoryNode(
-                narrative=(
-                    "The universe encounters an anomaly (LLM failed to format its response). "
-                    "You find yourself back where you started."
-                ),
-                choices=[{"text": "Try doing something different."}],
-            )
+        while attempts < max_attempts:
+            try:
+                if attempts == 0 and stream and on_token_chunk is not None:
+                    # Initial attempt with streaming
+                    content = await self._stream_with_callback_async(
+                        messages, on_token_chunk
+                    )
+                else:
+                    # Non-streaming for initial (if requested) or repair attempts
+                    content = await self.provider.generate_json(
+                        messages=messages,
+                        schema=self._schema,
+                        temperature=self._temperature if attempts == 0 else 0.2,
+                        max_tokens=self._max_tokens,
+                    )
+
+                data = json.loads(content)
+                # Pydantic validation via StoryNode constructor
+                return StoryNode(**data)
+
+            except (json.JSONDecodeError, TypeError, ValueError, Exception) as e:
+                attempts += 1
+                last_error = e
+                if attempts >= max_attempts:
+                    break
+
+                logger.warning(
+                    "JSON repair attempt %d/%d for error: %s. Content snippet: %s",
+                    attempts,
+                    self._repair_attempts,
+                    e,
+                    content[:100],
+                )
+
+                # Append the faulty response and a correction prompt for the next attempt
+                messages = list(messages)
+                messages.append({"role": "assistant", "content": content})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Your previous output was invalid JSON. Fix the following error: {e}. "
+                            "Respond with ONLY the corrected JSON. Do not change the narrative content."
+                        ),
+                    }
+                )
+
+        # Final fallback if all attempts fail
+        logger.error(
+            "Failed to parse LLM output after %d attempts: %s\nLast output was: %s",
+            attempts,
+            last_error,
+            content,
+        )
+        return StoryNode(
+            narrative=(
+                "The universe encounters an anomaly (LLM failed to format its response). "
+                "You find yourself back where you started."
+            ),
+            choices=[{"text": "Try doing something different."}],
+        )
 
     async def _stream_with_callback_async(
         self,

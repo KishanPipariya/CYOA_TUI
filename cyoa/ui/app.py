@@ -414,18 +414,18 @@ class CYOAApp(App):
                 self._current_story = self._current_story[: -len(suffix)]
             self._current_story += f"\n\n---\n\n{art_block}{node.narrative}"
         else:
-            # Streaming already updated _current_story incrementally;
-            # insert art before the streamed narrative if we have some.
-            if art_block:
-                # Find where the last separator or start of stream was
-                last_sep = self._current_story.rfind("\n\n---\n\n")
-                if last_sep != -1:
-                    insert_pos = last_sep + len("\n\n---\n\n")
-                    self._current_story = (
-                        self._current_story[:insert_pos]
-                        + art_block
-                        + self._current_story[insert_pos:]
-                    )
+            # Streaming happened (partially or fully). Ensure the narrative is complete
+            # and correctly formatted, replacing any partial failed stream that might
+            # have occurred before a successful Repair Loop.
+            last_sep = self._current_story.rfind("\n\n---\n\n")
+            if last_sep != -1:
+                # Everything before the separator (the user choice etc) stays.
+                # Everything after is replaced by art_block + node.narrative.
+                prefix = self._current_story[: last_sep + len("\n\n---\n\n")]
+                self._current_story = prefix + art_block + node.narrative
+            else:
+                # This must be the first node of the game
+                self._current_story = art_block + node.narrative
         self._loading_suffix_shown = False
 
         # For errors, wrap the narrative with a warning block
