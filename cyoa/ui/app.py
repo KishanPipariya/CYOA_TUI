@@ -811,6 +811,22 @@ class CYOAApp(App):
 
             self.story_context.inject_memory(memories)
 
+            # ── Rolling Summarization ────────────────────────────────────────
+            # When the context is ~80 % full, compress the oldest turn pairs
+            # into a concise "Story So Far" paragraph so narrative momentum is
+            # never lost when the sliding window trims old content.
+            if self.story_context.needs_summarization():
+                self.notify(
+                    "📜 Archiving old chapters…",
+                    severity="information",
+                    timeout=4,
+                )
+                turns_to_compress = self.story_context.get_turns_for_summary()
+                summary = await self.generator.generate_summary_async(turns_to_compress)
+                if summary:
+                    self.story_context.set_rolling_summary(summary)
+            # ────────────────────────────────────────────────────────────────
+
             # Streaming: pass on_token callback so typewriter fires live
             def on_token(partial: str) -> None:
                 self._stream_narrative(partial)

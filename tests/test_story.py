@@ -75,6 +75,58 @@ class TestStoryContext:
         # 1 + 2*2 = 5 messages — under limit of 1 + 5*2 = 11
         assert len(ctx.history) == 5
 
+    def test_needs_summarization_trigger(self):
+        """needs_summarization should return True at 80% of max_turns."""
+        ctx = StoryContext(starting_prompt="Start", max_turns=10)
+        # 0.8 * 10 = 8 turn pairs
+        for i in range(7):
+            ctx.add_turn(f"n{i}", f"c{i}")
+        assert ctx.needs_summarization(threshold=0.8) is False
+
+        ctx.add_turn("n7", "c7")  # 8th pair
+        assert ctx.needs_summarization(threshold=0.8) is True
+
+    def test_get_turns_for_summary_identifies_older_half(self):
+        """get_turns_for_summary should return only the oldest turn pairs."""
+        ctx = StoryContext(starting_prompt="Start", max_turns=4)
+        # Add 4 turn pairs. keep_pairs = 4//2 = 2.
+        # Older half = index 0, 1 (pair 1 & 2). Newer half = 2, 3 (pair 3 & 4).
+        for i in range(4):
+            ctx.add_turn(f"narrative {i}", f"choice {i}")
+
+        turns = ctx.get_turns_for_summary()
+        # 4 turns total, keep 2 pairs = 4 messages. Summary should have (4*2 - 4) = 4 messages.
+        assert len(turns) == 4
+        assert "narrative 0" in turns[0]["content"]
+        assert "narrative 1" in turns[2]["content"]
+        # FRESH turns should NOT be in the summary tail
+        assert "narrative 2" not in [t["content"] for t in turns]
+
+    def test_set_rolling_summary_truncates_history(self):
+        """set_rolling_summary should store the summary string and prune history correctly."""
+        ctx = StoryContext(starting_prompt="Start", max_turns=4)
+        for i in range(4):
+            ctx.add_turn(f"n{i}", f"c{i}")
+
+        ctx.set_rolling_summary("The story so far: stuff happened.")
+        assert ctx.rolling_summary == "The story so far: stuff happened."
+
+        # Should preserve: Initial prompt (1) + freshest max_turns/2 pairs (2 pairs = 4 msgs) = 5 total
+        assert len(ctx.history) == 5
+        assert ctx.history[0]["content"] == "Start"
+        # The oldest were n0, n1. The freshest were n2, n3.
+        assert "n2" in ctx.history[1]["content"]
+        assert "n3" in ctx.history[3]["content"]
+
+    def test_system_prompt_includes_summary(self):
+        """get_messages should render the rolling_summary in the system prompt."""
+        ctx = StoryContext(starting_prompt="Start", max_turns=4)
+        ctx.set_rolling_summary("MY UNIQUE SUMMARY")
+        msgs = ctx.get_messages()
+        sys_msg = msgs[0]["content"]
+        assert "<rolling_summary>" in sys_msg
+        assert "MY UNIQUE SUMMARY" in sys_msg
+
 
 # ── 2. LLM JSON parse failure graceful fallback ───────────────────────────────
 
@@ -133,6 +185,35 @@ class TestStoryGeneratorFallback:
 
         assert node.narrative == "A torch flickers."
         assert len(node.choices) == 2
+
+    @pytest.mark.asyncio
+    async def test_generate_summary_async_calls_llm(self):
+        """generate_summary_async should invoke chat completion with the summary prompt."""
+        from cyoa.llm.llm_backend import StoryGenerator
+
+        with patch("cyoa.llm.llm_backend.Llama") as MockLlama:
+            mock_llm = MagicMock()
+            mock_llm.create_chat_completion.return_value = {
+                "choices": [{"message": {"content": "Summary result."}}]
+            }
+            MockLlama.return_value = mock_llm
+
+            gen = StoryGenerator.__new__(StoryGenerator)
+            gen.llm = mock_llm
+            gen._summary_max_tokens = 200
+
+            turns = [
+                {"role": "assistant", "content": "Scene 1"},
+                {"role": "user", "content": "Choice 1"},
+            ]
+            summary = await gen.generate_summary_async(turns)
+
+            assert summary == "Summary result."
+            assert mock_llm.create_chat_completion.called
+            # Verify system instruction presence
+            call_args = mock_llm.create_chat_completion.call_args[1]
+            sys_prompt = call_args["messages"][0]["content"]
+            assert "precise narrative archivist" in sys_prompt
 
 
 # ── 3. Graph DB offline graceful degradation ──────────────────────────────────
@@ -355,6 +436,26 @@ class TestStreamingCallback:
         assert "dark" in extracted
         # Full JSON still reconstructable
         assert json.loads(result)["narrative"] == "A torch flickers in the dark."
+
+    @pytest.mark.asyncio
+    async def test_stream_resilience(self):
+        """Verify extractor handles weird spacing and newlines using jiter."""
+        from cyoa.llm.llm_backend import StoryGenerator
+
+        # Weird spacing, newlines, and escaping that would break a simple regex
+        json_str = '{"title": null,  "narrative" \n : \n  "The dragon said, \\"Return my gold!\\"." , "choices": []}'
+        
+        chunks = []
+        for ch in json_str:
+            chunks.append({"choices": [{"delta": {"content": ch}}]})
+        
+        received = []
+        gen = StoryGenerator.__new__(StoryGenerator)
+        result = await gen._stream_with_callback_async(iter(chunks), on_token_chunk=received.append)
+        
+        extracted = "".join(received)
+        assert extracted == 'The dragon said, "Return my gold!".'
+        assert "gold" in extracted
 
 
 # ── 8. New UI Components: Branching and Animated Spinner ───────────────────────

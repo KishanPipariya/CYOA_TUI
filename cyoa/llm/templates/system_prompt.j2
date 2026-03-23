@@ -29,3 +29,10 @@ Current Stats: {{ stats | tojson }}
 {% endfor %}
 </memory_retrieval>
 {% endif %}
+{% if rolling_summary %}
+
+<rolling_summary>
+[Story So Far — compressed summary of earlier events]
+{{ rolling_summary }}
+</rolling_summary>
+{% endif %}

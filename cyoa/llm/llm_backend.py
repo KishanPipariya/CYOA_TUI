@@ -1,6 +1,6 @@
+import jiter
 import json
 import os
-import re
 import logging
 import pathlib
 import jinja2
@@ -13,8 +13,14 @@ __all__ = ["StoryContext", "StoryGenerator"]
 # Configurable via .env / environment — defaults used if not set
 MAX_CONTEXT_TURNS = int(os.getenv("LLM_MAX_TURNS", "10"))
 
-# Regex to find the start of the "narrative" value in streaming JSON
-_NARRATIVE_START_RE = re.compile(r'"narrative"\s*:\s*"')
+# Rolling summarization fires when the number of stored turn *pairs* reaches
+# this fraction of max_turns. At 0.8 we still have 20% headroom before the
+# hard sliding-window truncation kicks in.
+SUMMARIZATION_THRESHOLD = float(os.getenv("LLM_SUMMARY_THRESHOLD", "0.8"))
+
+# Rough characters-per-token estimate (conservative for English prose).
+_CHARS_PER_TOKEN = 4
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,10 +36,16 @@ class StoryContext:
         self.inventory: list[str] = []
         self.player_stats: dict[str, int] = {}
         self.memories: list[str] = []
+        # Rolling summarization: paragraph produced by compressing old turns.
+        self.rolling_summary: Optional[str] = None
 
         template_dir = pathlib.Path(__file__).parent / "templates"
         self.jinja_env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_dir))
         self.system_template = self.jinja_env.get_template("system_prompt.j2")
+
+    # ------------------------------------------------------------------
+    # Turn management
+    # ------------------------------------------------------------------
 
     def add_turn(
         self,
@@ -59,9 +71,62 @@ class StoryContext:
         """Store memories to be injected dynamically into the system prompt."""
         self.memories = memories
 
+    def set_rolling_summary(self, summary: str) -> None:
+        """Store a compressed narrative summary produced by the summarization agent.
+
+        After summarization the oldest turn *pairs* (excluding the initial
+        prompt) are pruned to reclaim context space.  The half that were
+        summarized is removed; the remaining recent half stays intact so the
+        LLM always has raw dialogue for the freshest turns.
+        """
+        self.rolling_summary = summary
+
+        # Drop the oldest half of the turn pairs (everything except the
+        # initial prompt and the freshest max_turns//2 pairs).
+        keep_pairs = max(1, self.max_turns // 2)
+        # history[0] is the initial user prompt; turn pairs start at index 1.
+        tail = self.history[1:]  # list of (assistant, user) pairs flattened
+        if len(tail) > keep_pairs * 2:
+            self.history = [self.history[0]] + tail[-(keep_pairs * 2):]
+
+    # ------------------------------------------------------------------
+    # Summarization trigger
+    # ------------------------------------------------------------------
+
+    def needs_summarization(self, threshold: float = SUMMARIZATION_THRESHOLD) -> bool:
+        """Return True when stored turn pairs reach *threshold* fraction of max_turns.
+
+        The check is based purely on message count, not token count, which
+        keeps it fast and free of tokenizer dependencies.  At 0.8 (default)
+        we still have 20 % headroom before the hard sliding-window truncation
+        would fire.
+        """
+        # Number of complete turn pairs currently in history (excluding the initial prompt).
+        turn_pairs = (len(self.history) - 1) // 2
+        return turn_pairs >= int(self.max_turns * threshold)
+
+    def get_turns_for_summary(self) -> list[dict[str, str]]:
+        """Return the oldest turn pairs that should be compressed.
+
+        We hand the *older* half to the summariser and keep the *newer* half
+        as raw dialogue.  This guarantees the LLM always has the freshest
+        turns verbatim while very old context is compressed.
+        """
+        tail = self.history[1:]  # exclude opening user prompt
+        keep_pairs = max(1, self.max_turns // 2)
+        summarise_tail = tail[: -(keep_pairs * 2)] if keep_pairs * 2 < len(tail) else tail
+        return summarise_tail
+
+    # ------------------------------------------------------------------
+    # Message assembly
+    # ------------------------------------------------------------------
+
     def get_messages(self) -> list[dict[str, str]]:
         system_content = self.system_template.render(
-            inventory=self.inventory, stats=self.player_stats, memories=self.memories
+            inventory=self.inventory,
+            stats=self.player_stats,
+            memories=self.memories,
+            rolling_summary=self.rolling_summary,
         )
         return [{"role": "system", "content": system_content}] + self.history
 
@@ -81,6 +146,84 @@ class StoryGenerator:
         self._schema = StoryNode.model_json_schema()
         self._temperature = float(os.getenv("LLM_TEMPERATURE", "0.6"))
         self._max_tokens = int(os.getenv("LLM_MAX_TOKENS", "512"))
+        # Maximum tokens for the "Story So Far" summary paragraph.
+        self._summary_max_tokens = int(os.getenv("LLM_SUMMARY_MAX_TOKENS", "200"))
+
+    async def generate_summary_async(self, turns_to_compress: list[dict[str, str]]) -> str:
+        """Compress a sequence of (assistant, user) turn messages into a dense
+        narrative paragraph suitable for a rolling context window.
+
+        The resulting text is injected as the ``<rolling_summary>`` block in
+        the system prompt, replacing the raw turns that it covers.  This keeps
+        narrative momentum without consuming precious context tokens.
+
+        Parameters
+        ----------
+        turns_to_compress:
+            A flat list of ``{role, content}`` dicts representing the old turns
+            (obtained from :meth:`StoryContext.get_turns_for_summary`).
+
+        Returns
+        -------
+        str
+            A concise paragraph of ≤ ``_summary_max_tokens`` tokens describing
+            the summarised story arc.  Falls back to a joined plaintext
+            representation of the turns if the LLM call fails.
+        """
+        import asyncio
+
+        if not turns_to_compress:
+            return ""
+
+        # Build a compact textual representation of the turns to compress.
+        compressed_text_parts: list[str] = []
+        for msg in turns_to_compress:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "assistant":
+                compressed_text_parts.append(f"[Story]: {content}")
+            elif role == "user":
+                compressed_text_parts.append(f"[Player]: {content}")
+        turns_blob = "\n".join(compressed_text_parts)
+
+        summarizer_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a precise narrative archivist. "
+                    "Given a sequence of story events and player choices, "
+                    "write a single concise paragraph (2-4 sentences) summarising "
+                    "the key plot events, character state, and decisions made. "
+                    "Focus on facts and actions — no embellishment. "
+                    "Write in past tense, third person."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Summarise the following story events into a single paragraph:\n\n"
+                    f"{turns_blob}"
+                ),
+            },
+        ]
+
+        try:
+            response = await asyncio.to_thread(
+                self.llm.create_chat_completion,
+                messages=summarizer_messages,
+                temperature=0.3,  # Lower temp for factual fidelity
+                max_tokens=self._summary_max_tokens,
+                stream=False,
+            )
+            summary = response["choices"][0]["message"]["content"].strip()
+            logger.info("Rolling summary generated (%d chars).", len(summary))
+            return summary
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Rolling summarization failed: %s — using plaintext fallback.", exc)
+            # Graceful fallback: join turns into a very short plain-text blob
+            return " ".join(
+                msg["content"][:80] for msg in turns_to_compress if msg.get("content")
+            )
 
     async def generate_next_node_async(
         self,
@@ -131,7 +274,7 @@ class StoryGenerator:
         self,
         stream_iter,
         on_token_chunk: Callable[[str], None],
-    ) -> str:  # noqa: C901, PLR0912
+    ) -> str:
         """
         Consume the streaming response in a background thread to prevent blocking
         the asyncio event loop, and queue chunks back for processing.
@@ -154,10 +297,7 @@ class StoryGenerator:
         _ = asyncio.create_task(asyncio.to_thread(producer))
 
         buffer = ""
-        in_narrative = False
-        narrative_done = False
-        escape_next = False
-        search_offset = 0
+        last_sent_narrative_len = 0
 
         while True:
             msg_type, val = await q.get()
@@ -170,46 +310,23 @@ class StoryGenerator:
             token = val
             buffer += token
 
-            if not in_narrative and not narrative_done:
-                search_from = max(0, search_offset - 15)
-                match = _NARRATIVE_START_RE.search(buffer, search_from)
-                if match:
-                    in_narrative = True
-                    tail = buffer[match.end() :]
-                    chunk_buf = ""
-                    for ch in tail:
-                        if escape_next:
-                            escape_next = False
-                            chunk_buf += ch
-                        elif ch == "\\":
-                            escape_next = True
-                            chunk_buf += ch
-                        elif ch == '"':
-                            in_narrative = False
-                            narrative_done = True
-                            break
-                        else:
-                            chunk_buf += ch
-                    if chunk_buf:
-                        on_token_chunk(chunk_buf)
-                else:
-                    search_offset = len(buffer)
-            elif in_narrative:
-                chunk_buf = ""
-                for ch in token:
-                    if escape_next:
-                        escape_next = False
-                        chunk_buf += ch
-                    elif ch == "\\":
-                        escape_next = True
-                        chunk_buf += ch
-                    elif ch == '"':
-                        in_narrative = False
-                        narrative_done = True
-                        break
-                    else:
-                        chunk_buf += ch
-                if chunk_buf:
-                    on_token_chunk(chunk_buf)
+            try:
+                # We use partial_mode="trailing-strings" so jiter doesn't truncate
+                # the string we're currently receiving. It returns what's been
+                # parsed so far as a Python dict/object.
+                parsed = jiter.from_json(buffer.encode(), partial_mode="trailing-strings")
+
+                if isinstance(parsed, dict) and "narrative" in parsed:
+                    current_narrative = parsed["narrative"]
+                    if isinstance(current_narrative, str):
+                        # Only send the *new* part of the narrative to the UI.
+                        new_content = current_narrative[last_sent_narrative_len:]
+                        if new_content:
+                            on_token_chunk(new_content)
+                            last_sent_narrative_len = len(current_narrative)
+            except (ValueError, jiter.JiterError):
+                # JSON not yet parseable at all, or "narrative" key not yet fully present.
+                # This is normal during the first several tokens of the stream.
+                continue
 
         return buffer
