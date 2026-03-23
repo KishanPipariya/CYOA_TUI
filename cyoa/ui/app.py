@@ -13,6 +13,7 @@ from textual.widgets import (
     ListItem,
     Label,
     Tree,
+    Static,
 )  # type: ignore
 from textual.reactive import reactive  # type: ignore
 from textual import work  # type: ignore
@@ -168,6 +169,7 @@ class CYOAApp(App):
             with Container(id="main-container"):
                 with VerticalScroll(id="story-container"):
                     yield Markdown(LOADING_ART, id="story-text")
+                    yield Static("", id="scene-art")
                 # Dedicated status bar between story and choices
                 with Container(id="status-bar"):
                     yield ThemeSpinner(frames=self.spinner_frames, id="loading")
@@ -495,9 +497,15 @@ class CYOAApp(App):
 
         story_md = self.query_one("#story-text", Markdown)
 
-        # Detect and prepend matching ASCII art for this scene
+        # Detect and update the separate ASCII art widget
         art = _detect_scene_art(node.narrative) if not is_error else None
-        art_block = f"\n```\n{art}\n```\n" if art else ""
+        art_widget = self.query_one("#scene-art", Static)
+        if art:
+            art_widget.update(art)
+            art_widget.remove_class("hidden")
+        else:
+            art_widget.update("")
+            art_widget.add_class("hidden")
 
         # Fallback/Cache hit: nothing happened in _stream_narrative
         if self._loading_suffix_shown:
@@ -507,33 +515,21 @@ class CYOAApp(App):
                 self._current_story = self._current_story[: -len(suffix)]
 
             sep = "\n\n---\n\n" if self._current_story != LOADING_ART else ""
-            self._typewriter_queue.put_nowait(f"{sep}{art_block}{node.narrative}")
+            self._typewriter_queue.put_nowait(f"{sep}{node.narrative}")
         else:
-            # Streaming happened. To ensure ASCII art is included and any partial
-            # stream is cleaned up, we sync to the finalized narrative.
-            # We skip the narrator to avoid "double-typing" or missing art.
+            # Streaming happened. Sync to the finalized narrative.
             self.action_skip_typewriter()
 
             last_sep = self._current_story.rfind("\n\n---\n\n")
             if last_sep != -1:
                 prefix = self._current_story[: last_sep + len("\n\n---\n\n")]
-                self._current_story = prefix + art_block + node.narrative
+                self._current_story = prefix + node.narrative
             else:
                 # First node or missing separator
-                self._current_story = art_block + node.narrative
+                self._current_story = node.narrative
         
-        try:
-            self.query_one("#story-text", Markdown).update(self._current_story)
-        except Exception:
-            pass
-
-        if is_error:
-            error_display = self._current_story
-            # Append a visual error marker if not already present
-            if "⚠️" not in node.narrative:
-                error_suffix = "\n\n> ⚠️ **An error occurred.** The story engine could not generate a valid response."
-                error_display = self._current_story + error_suffix
-                self._current_story = error_display
+        if is_error and "⚠️" not in node.narrative:
+            self._current_story += "\n\n> ⚠️ **An error occurred.** The story engine could not generate a valid response."
 
         at_bottom = self._is_at_bottom()
         try:
@@ -690,6 +686,8 @@ class CYOAApp(App):
         self.npc_memory = NPCMemory()
 
         self.query_one("#story-text", Markdown).update(LOADING_ART)
+        self.query_one("#scene-art", Static).update("")
+        self.query_one("#scene-art", Static).add_class("hidden")
         # Fix #3: use remove_children() instead of query+remove loop
         self.query_one("#choices-container").remove_children()
         self.query_one("#journal-list", ListView).clear()
@@ -767,7 +765,18 @@ class CYOAApp(App):
         self._scroll_to_bottom()
         choices_container = self.query_one("#choices-container")
         choices_container.remove_children()
+
+        # Restore art for the undone node
+        art_widget = self.query_one("#scene-art", Static)
         if self.current_node:
+            art = _detect_scene_art(self.current_node.narrative)
+            if art:
+                art_widget.update(art)
+                art_widget.remove_class("hidden")
+            else:
+                art_widget.update("")
+                art_widget.add_class("hidden")
+
             for i, choice in enumerate(self.current_node.choices):
                 btn_id = f"choice-{uuid.uuid4().hex[:8]}"
                 label = f"[{i + 1}] {choice.text}"

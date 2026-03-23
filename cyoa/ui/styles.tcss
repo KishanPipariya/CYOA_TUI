@@ -64,6 +64,16 @@ Screen {
     background: $boost;
 }
 
+#scene-art {
+    width: 100%;
+    height: auto;
+    color: $accent;
+    text-align: center;
+    /* Use monospace for ASCII art if possible, though labels usually default to terminal font */
+    text-style: bold;
+    margin-top: 1;
+}
+
 /* ── Status Bar (two-row stats + inventory) ──────────────── */
 #status-bar {
     height: auto;
