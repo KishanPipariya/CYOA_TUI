@@ -49,18 +49,28 @@ def _make_node(
 
 
 class TestStoryContext:
-    def test_history_within_max_turns(self):
-        """History should never exceed (initial_prompt + max_turns*2) messages."""
-        ctx = StoryContext(starting_prompt="Start", max_turns=3)
-        for i in range(10):
+    def test_history_within_budget(self):
+        """History should be pruned when exceeding token budget."""
+        # Each turn is 2 messages (assistant + user).
+        # We'll use a mock counter: roles are 5 tokens each, content is 20 tokens each.
+        # System prompt + initial prompt + 1 turn pair = (~50 + 25 + 50) = ~125 tokens.
+        # A budget of 150 should only allow 1 turn pair to stay in history.
+        ctx = StoryContext(
+            starting_prompt="Start",
+            token_budget=150,
+            token_counter=lambda x: 20 if len(x) > 5 else 5
+        )
+        for i in range(5):
             ctx.add_turn(f"Narrative {i}", f"Choice {i}")
 
-        # initial user + 3 turn pairs = 1 + 6 = 7
-        assert len(ctx.history) == 7
+        # Should have initial prompt (1) + latest turn pair (2) = 3 messages
+        assert len(ctx.history) == 3
+        # The latest turn should be preserved
+        assert "Narrative 4" in ctx.history[1]["content"]
 
     def test_system_and_initial_prompt_preserved(self):
         """Initial user prompt must always remain."""
-        ctx = StoryContext(starting_prompt="My prompt", max_turns=2)
+        ctx = StoryContext(starting_prompt="My prompt")
         for i in range(8):
             ctx.add_turn("narrative", "choice")
 
@@ -68,59 +78,62 @@ class TestStoryContext:
         assert ctx.history[0]["content"] == "My prompt"
 
     def test_no_trim_when_under_limit(self):
-        """History should not trim if turns are within the window."""
-        ctx = StoryContext(starting_prompt="Start", max_turns=5)
+        """History should not trim if tokens are within budget."""
+        ctx = StoryContext(starting_prompt="Start", token_budget=1000)
         ctx.add_turn("n1", "c1")
         ctx.add_turn("n2", "c2")
-        # 1 + 2*2 = 5 messages — under limit of 1 + 5*2 = 11
+        # 1 + 2*2 = 5 messages — should all fit in 1000 tokens
         assert len(ctx.history) == 5
 
     def test_needs_summarization_trigger(self):
-        """needs_summarization should return True at 80% of max_turns."""
-        ctx = StoryContext(starting_prompt="Start", max_turns=10)
-        # 0.8 * 10 = 8 turn pairs
-        for i in range(7):
-            ctx.add_turn(f"n{i}", f"c{i}")
-        assert ctx.needs_summarization(threshold=0.8) is False
-
-        ctx.add_turn("n7", "c7")  # 8th pair
+        """needs_summarization should return True at 80% of token_budget."""
+        # 0.8 * 100 = 80 tokens
+        ctx = StoryContext(
+            starting_prompt="Start",
+            token_budget=100,
+            token_counter=lambda x: 10
+        )
+        # initial prompt = 10 (role) + 10 (content) = 20
+        # messages after 1st turn = system (20) + prompt (20) + turn1 (40) = 80
+        ctx.add_turn("n0", "c0")
         assert ctx.needs_summarization(threshold=0.8) is True
 
-    def test_get_turns_for_summary_identifies_older_half(self):
-        """get_turns_for_summary should return only the oldest turn pairs."""
-        ctx = StoryContext(starting_prompt="Start", max_turns=4)
-        # Add 4 turn pairs. keep_pairs = 4//2 = 2.
-        # Older half = index 0, 1 (pair 1 & 2). Newer half = 2, 3 (pair 3 & 4).
-        for i in range(4):
+    def test_get_turns_for_summary_identifies_older_tail(self):
+        """get_turns_for_summary should return all but the 3 most recent turn pairs."""
+        ctx = StoryContext(starting_prompt="Start")
+        # Add 5 turn pairs.
+        for i in range(5):
             ctx.add_turn(f"narrative {i}", f"choice {i}")
 
         turns = ctx.get_turns_for_summary()
-        # 4 turns total, keep 2 pairs = 4 messages. Summary should have (4*2 - 4) = 4 messages.
+        # 5 pairs total, keep 3 recent = 2 pairs for summary = 4 messages.
         assert len(turns) == 4
         assert "narrative 0" in turns[0]["content"]
         assert "narrative 1" in turns[2]["content"]
-        # FRESH turns should NOT be in the summary tail
+        # Recent turns should NOT be in the summary tail
         assert "narrative 2" not in [t["content"] for t in turns]
 
     def test_set_rolling_summary_truncates_history(self):
         """set_rolling_summary should store the summary string and prune history correctly."""
-        ctx = StoryContext(starting_prompt="Start", max_turns=4)
+        # Use a tight budget so that adding a summary forces pruning
+        ctx = StoryContext(
+            starting_prompt="Start",
+            token_budget=100,
+            token_counter=lambda x: 10
+        )
         for i in range(4):
             ctx.add_turn(f"n{i}", f"c{i}")
 
         ctx.set_rolling_summary("The story so far: stuff happened.")
         assert ctx.rolling_summary == "The story so far: stuff happened."
 
-        # Should preserve: Initial prompt (1) + freshest max_turns/2 pairs (2 pairs = 4 msgs) = 5 total
-        assert len(ctx.history) == 5
+        # Should have pruned to fit budget.
+        assert len(ctx.history) < 9
         assert ctx.history[0]["content"] == "Start"
-        # The oldest were n0, n1. The freshest were n2, n3.
-        assert "n2" in ctx.history[1]["content"]
-        assert "n3" in ctx.history[3]["content"]
 
     def test_system_prompt_includes_summary(self):
         """get_messages should render the rolling_summary in the system prompt."""
-        ctx = StoryContext(starting_prompt="Start", max_turns=4)
+        ctx = StoryContext(starting_prompt="Start")
         ctx.set_rolling_summary("MY UNIQUE SUMMARY")
         msgs = ctx.get_messages()
         sys_msg = msgs[0]["content"]
@@ -359,7 +372,7 @@ class TestNPCMemory:
 class TestStreamingCallback:
     def test_inject_memory_inserts_before_last_user(self):
         """inject_memory() should update the memories state."""
-        ctx = StoryContext(starting_prompt="Start", max_turns=5)
+        ctx = StoryContext(starting_prompt="Start")
         ctx.add_turn("Narrative one.", "Go left")
 
         # Inject memory after first turn
@@ -370,13 +383,13 @@ class TestStreamingCallback:
 
     def test_inject_memory_empty_is_noop(self):
         """inject_memory([]) should update state properly."""
-        ctx = StoryContext(starting_prompt="Start", max_turns=5)
+        ctx = StoryContext(starting_prompt="Start")
         ctx.inject_memory([])
         assert len(ctx.memories) == 0
 
     def test_inject_memory_replaces_existing_block(self):
         """inject_memory() called twice should replace, not accumulate, the memory block."""
-        ctx = StoryContext(starting_prompt="Start", max_turns=5)
+        ctx = StoryContext(starting_prompt="Start")
         ctx.add_turn("Narrative one.", "Go left")
 
         ctx.inject_memory(["Memory A."])
@@ -580,7 +593,7 @@ class TestBranchingLogic:
 class TestProceduralItemSystem:
     def test_story_context_formats_inventory(self):
         """StoryContext should properly inject the inventory state into the user prompt."""
-        ctx = StoryContext(starting_prompt="Start", max_turns=5)
+        ctx = StoryContext(starting_prompt="Start")
         ctx.add_turn(
             "You found a sword.", "Take sword", inventory=["Iron Sword", "Torch"]
         )
@@ -592,7 +605,7 @@ class TestProceduralItemSystem:
 
     def test_story_context_handles_empty_inventory(self):
         """StoryContext should format gracefully when inventory is empty."""
-        ctx = StoryContext(starting_prompt="Start", max_turns=5)
+        ctx = StoryContext(starting_prompt="Start")
         ctx.add_turn("You found nothing.", "Wait", inventory=[])
 
         messages = ctx.get_messages()

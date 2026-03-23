@@ -12,10 +12,10 @@ from cyoa.llm.providers import LLMProvider, LlamaCppProvider, OllamaProvider
 __all__ = ["StoryContext", "ModelBroker", "StoryGenerator"]
 
 # Configurable via .env / environment — defaults used if not set
-MAX_CONTEXT_TURNS = int(os.getenv("LLM_MAX_TURNS", "10"))
+DEFAULT_TOKEN_BUDGET = int(os.getenv("LLM_TOKEN_BUDGET", "2048"))
 
 # Rolling summarization fires when the number of stored turn *pairs* reaches
-# this fraction of max_turns. At 0.8 we still have 20% headroom before the
+# this fraction of token_budget. At 0.8 we still have 20% headroom before the
 # hard sliding-window truncation kicks in.
 SUMMARIZATION_THRESHOLD = float(os.getenv("LLM_SUMMARY_THRESHOLD", "0.8"))
 
@@ -27,9 +27,13 @@ logger = logging.getLogger(__name__)
 
 class StoryContext:
     def __init__(
-        self, starting_prompt: str, max_turns: int = MAX_CONTEXT_TURNS
+        self,
+        starting_prompt: str,
+        token_budget: int = DEFAULT_TOKEN_BUDGET,
+        token_counter: Optional[Callable[[str], int]] = None,
     ) -> None:
-        self.max_turns = max_turns
+        self.token_budget = token_budget
+        self.token_counter = token_counter or (lambda x: len(x) // _CHARS_PER_TOKEN)
         self.starting_prompt = starting_prompt
         self.history: list[dict[str, str]] = [
             {"role": "user", "content": starting_prompt}
@@ -64,9 +68,43 @@ class StoryContext:
         if player_stats is not None:
             self.player_stats = player_stats
 
-        # Sliding window: keep only initial prompt (0) and max_turns tail
-        if len(self.history) > self.max_turns * 2 + 1:
-            self.history = [self.history[0]] + self.history[-(self.max_turns * 2):]
+        # Sliding window: keep only initial prompt (0) and as many tail turns as fit in budget
+        self._prune_history()
+
+    def _prune_history(self) -> None:
+        """Prune story history and memories to fit within the token budget.
+        
+        Prioritizes:
+        1. System Prompt & Persona
+        2. Rolling Summary
+        3. Latest Turn pair
+        4. Top 1 RAG Memory
+        5. Oldest turns (dropped first)
+        """
+        # Phase 1: Prune oldest turns from history (always keep initial prompt and latest pair)
+        while len(self.history) > 3:
+            if self.count_total_tokens() <= self.token_budget:
+                break
+            # history[0] is opening prompt; pop(1) twice removes the oldest Turn pair (assistant + user)
+            self.history.pop(1)
+            self.history.pop(1)
+
+        # Phase 2: Dynamic RAG Scaling (Prune memories if still over budget)
+        while len(self.memories) > 1:
+            if self.count_total_tokens() <= self.token_budget:
+                break
+            # Remove lowest priority memories (keep only the first one if necessary)
+            self.memories.pop()
+
+    def count_total_tokens(self) -> int:
+        """Calculate the total token count of the current message stack."""
+        messages = self.get_messages()
+        total = 0
+        for msg in messages:
+            # We count roles too for a more accurate estimate
+            total += self.token_counter(msg.get("role", ""))
+            total += self.token_counter(msg.get("content", ""))
+        return total
 
     def inject_memory(self, memories: list[str]) -> None:
         """Store memories to be injected dynamically into the system prompt."""
@@ -75,48 +113,33 @@ class StoryContext:
     def set_rolling_summary(self, summary: str) -> None:
         """Store a compressed narrative summary produced by the summarization agent.
 
-        After summarization the oldest turn *pairs* (excluding the initial
-        prompt) are pruned to reclaim context space.  The half that were
-        summarized is removed; the remaining recent half stays intact so the
-        LLM always has raw dialogue for the freshest turns.
+        After summarization the oldest summarized turns are pruned to reclaim context space.
         """
         self.rolling_summary = summary
-
-        # Drop the oldest half of the turn pairs (everything except the
-        # initial prompt and the freshest max_turns//2 pairs).
-        keep_pairs = max(1, self.max_turns // 2)
-        # history[0] is the initial user prompt; turn pairs start at index 1.
-        tail = self.history[1:]  # list of (assistant, user) pairs flattened
-        if len(tail) > keep_pairs * 2:
-            self.history = [self.history[0]] + tail[-(keep_pairs * 2):]
+        # Pruning is handled by the regular _prune_history or add_turn logic,
+        # but here we can be more aggressive to clear out summarized content.
+        # We'll drop approximately half of the dynamic history if we're over budget.
+        self._prune_history()
 
     # ------------------------------------------------------------------
     # Summarization trigger
     # ------------------------------------------------------------------
 
     def needs_summarization(self, threshold: float = SUMMARIZATION_THRESHOLD) -> bool:
-        """Return True when stored turn pairs reach *threshold* fraction of max_turns.
-
-        The check is based purely on message count, not token count, which
-        keeps it fast and free of tokenizer dependencies.  At 0.8 (default)
-        we still have 20 % headroom before the hard sliding-window truncation
-        would fire.
-        """
-        # Number of complete turn pairs currently in history (excluding the initial prompt).
-        turn_pairs = (len(self.history) - 1) // 2
-        return turn_pairs >= int(self.max_turns * threshold)
+        """Return True when token count reaches *threshold* fraction of token_budget."""
+        return self.count_total_tokens() >= int(self.token_budget * threshold)
 
     def get_turns_for_summary(self) -> list[dict[str, str]]:
-        """Return the oldest turn pairs that should be compressed.
+        """Return the older turn pairs that should be compressed.
 
-        We hand the *older* half to the summariser and keep the *newer* half
-        as raw dialogue.  This guarantees the LLM always has the freshest
-        turns verbatim while very old context is compressed.
+        We keep the 3 most recent turn pairs verbatim and summarize everything else
+        in the dynamic history tail (excluding the opening prompt).
         """
         tail = self.history[1:]  # exclude opening user prompt
-        keep_pairs = max(1, self.max_turns // 2)
-        summarise_tail = tail[: -(keep_pairs * 2)] if keep_pairs * 2 < len(tail) else tail
-        return summarise_tail
+        keep_count = 6  # 3 pairs
+        if len(tail) <= keep_count:
+            return []
+        return tail[:-keep_count]
 
     # ------------------------------------------------------------------
     # Message assembly
@@ -143,6 +166,11 @@ class ModelBroker:
             self.provider = provider
         else:
             self.provider = self._create_provider_from_env(model_path, n_ctx)
+
+        # Token budget for StoryContext is half of the provider's context window
+        # to leave plenty of room for generation and system overhead.
+        default_budget = (n_ctx or 4096) // 2
+        self.token_budget = int(os.getenv("LLM_TOKEN_BUDGET", str(default_budget)))
 
         self._schema = StoryNode.model_json_schema()
         self._temperature = float(os.getenv("LLM_TEMPERATURE", "0.6"))

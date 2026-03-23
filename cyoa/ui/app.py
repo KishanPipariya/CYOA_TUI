@@ -21,7 +21,7 @@ from typing import Any, Optional, ClassVar
 import asyncio
 
 from cyoa.core.models import StoryNode, Choice
-from cyoa.llm.llm_backend import ModelBroker, StoryContext
+from cyoa.llm.llm_backend import ModelBroker, StoryContext, DEFAULT_TOKEN_BUDGET
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
 from cyoa.ui.components import BranchScreen, ThemeSpinner, ConfirmScreen, HelpScreen
@@ -243,7 +243,11 @@ class CYOAApp(App):
         if self.generator is None:
             self.generator = ModelBroker(model_path=model_path)
 
-        self.story_context = StoryContext(starting_prompt=self.starting_prompt)
+        self.story_context = StoryContext(
+            starting_prompt=self.starting_prompt,
+            token_budget=self.generator.token_budget,
+            token_counter=self.generator.provider.count_tokens,
+        )
         self.show_loading()
 
         if self.db is None:
@@ -760,7 +764,9 @@ class CYOAApp(App):
         # Restore story context
         context_history = data.get("context_history", [])
         self.story_context = StoryContext(
-            starting_prompt=data.get("starting_prompt", self.starting_prompt)
+            starting_prompt=data.get("starting_prompt", self.starting_prompt),
+            token_budget=self.generator.token_budget if self.generator else DEFAULT_TOKEN_BUDGET,
+            token_counter=self.generator.provider.count_tokens if self.generator else None,
         )
         self.story_context.history = context_history
 

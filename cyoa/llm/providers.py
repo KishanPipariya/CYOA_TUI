@@ -25,6 +25,38 @@ class LLMProvider(abc.ABC):
             total += self.count_tokens(msg.get("content", ""))
         return total
 
+    @abc.abstractmethod
+    async def generate_text(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> str:
+        """Generate a plain text response."""
+        ...
+
+    @abc.abstractmethod
+    async def generate_json(
+        self,
+        messages: List[Dict[str, str]],
+        schema: Dict[str, Any],
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> str:
+        """Generate a JSON response conforming to the schema."""
+        ...
+
+    @abc.abstractmethod
+    async def stream_json(
+        self,
+        messages: List[Dict[str, str]],
+        schema: Dict[str, Any],
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> AsyncIterator[str]:
+        """Stream a JSON response chunk by chunk."""
+        ...
+
 
 class LlamaCppProvider(LLMProvider):
     def __init__(self, model_path: str, n_ctx: int = 4096):
