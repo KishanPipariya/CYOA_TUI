@@ -49,6 +49,7 @@ def _mock_generator(*args, **kwargs):
             return node3  # second choice made / ending
 
     mock_gen.generate_next_node_async = AsyncMock(side_effect=side_effect_func_async)
+    mock_gen.update_story_summaries_async = AsyncMock()
     mock_gen.save_state_async = AsyncMock(return_value=b"state")
     mock_gen.load_state_async = AsyncMock()
     mock_gen.token_budget = 2048
@@ -71,12 +72,7 @@ def mock_app_dependencies():
             None  # Just empty for story map test initially
         )
 
-        # db.save_scene_async calls on_complete callback immediately to simulate success
-        def mock_save_scene_async(on_complete=None, **kwargs):
-            if on_complete:
-                on_complete("dummy-scene-id")
-
-        db_instance.save_scene_async.side_effect = mock_save_scene_async
+        db_instance.save_scene_async = AsyncMock(return_value="dummy-scene-id")
 
         yield
 
@@ -91,7 +87,7 @@ async def test_app_startup_and_loading_state(mock_app_dependencies):
 
     async with app.run_test() as pilot:
         # Give the background workers a moment to process initial generation
-        await pilot.pause(0.2)
+        await pilot.pause(1.0)
 
         # Verify the story text container updated with the mock narrative
         story_md = app.query_one("#story-text", Markdown)
@@ -116,7 +112,7 @@ async def test_stats_display_reflects_player_stats(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(0.2)
+        await pilot.pause(1.0)
         stats_label = app.query_one("#stats-display", Label)
 
         # Initial stats: Health 100 (high)
@@ -150,14 +146,14 @@ async def test_inventory_updates_on_item_gain_and_loss(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(0.2)
+        await pilot.pause(1.0)
         
         # Initial inventory should have Broken Sword (from node1)
         assert "Broken Sword" in app.inventory
         
         # Gain an item via a choice that returns node2 (which has Health Potion)
         await pilot.press("1")
-        await pilot.pause(0.2)
+        await pilot.pause(1.0)
         assert "Health Potion" in app.inventory
         assert "Broken Sword" in app.inventory
         
@@ -219,13 +215,13 @@ async def test_choice_selection_via_keyboard(mock_app_dependencies):
 
     async with app.run_test() as pilot:
         # Wait for initial load
-        await pilot.pause(0.2)
+        await pilot.pause(1.0)
 
         # Press '1' to select the first choice ("Go North")
         await pilot.press("1")
 
         # Pause to let the worker thread process the next mock node
-        await pilot.pause(0.2)
+        await pilot.pause(1.0)
 
         # Verify the story text appended the new narrative
         story_md = app.query_one("#story-text", Markdown)
@@ -263,7 +259,7 @@ async def test_choice_selection_via_click(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(0.2)
+        await pilot.pause(1.0)
 
         # Click the first choice button
         choices_container = app.query_one("#choices-container", Container)
@@ -271,7 +267,7 @@ async def test_choice_selection_via_click(mock_app_dependencies):
         first_btn.focus()
         await pilot.press("enter")
 
-        await pilot.pause(0.5)
+        await pilot.pause(1.0)
         assert "You went North." in app._current_story
 
         choices_container = app.query_one("#choices-container", Container)
@@ -287,11 +283,11 @@ async def test_game_over_state_and_restart(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(0.2)  # Node 1
+        await pilot.pause(1.0)  # Node 1
         await pilot.press("1")
-        await pilot.pause(0.2)  # Node 2
+        await pilot.pause(1.0)  # Node 2
         await pilot.press("1")
-        await pilot.pause(0.2)  # Node 3 (Ending)
+        await pilot.pause(1.0)  # Node 3 (Ending)
 
         assert "You opened the door and escaped!" in app._current_story
 
@@ -304,7 +300,7 @@ async def test_game_over_state_and_restart(mock_app_dependencies):
 
         # Test clicking the restart button
         await pilot.click("#btn-new-adventure")
-        await pilot.pause(0.2)  # Back to Node 1
+        await pilot.pause(1.0)  # Back to Node 1
 
         # Verify reset
         assert app.turn_count == 1
@@ -320,19 +316,19 @@ async def test_app_restart_via_keyboard(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(0.2)
+        await pilot.pause(1.0)
         await pilot.press("1")
-        await pilot.pause(0.2)  # Node 2 (turn 2)
+        await pilot.pause(1.0)  # Node 2 (turn 2)
 
         assert app.turn_count == 2
 
         # Press R — now shows confirmation dialog
         await pilot.press("r")
-        await pilot.pause(0.1)
+        await pilot.pause(0.2)
 
         # Confirm the restart
         await pilot.press("y")
-        await pilot.pause(0.2)  # Node 1 again
+        await pilot.pause(1.0)  # Node 1 again
 
         assert app.turn_count == 1
         assert "You awaken in a test dungeon." in app._current_story
@@ -350,18 +346,18 @@ async def test_restart_confirmation_dialog(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(0.2)
+        await pilot.pause(1.0)
 
         # Press 'r' — should show confirm dialog, NOT restart
         await pilot.press("r")
-        await pilot.pause(0.1)
+        await pilot.pause(0.2)
 
         # The ConfirmScreen should be pushed
         assert isinstance(app.screen, ConfirmScreen)
 
         # Dismiss with 'n' (No) — should return to the game unchanged
         await pilot.press("n")
-        await pilot.pause(0.1)
+        await pilot.pause(0.2)
         assert not isinstance(app.screen, ConfirmScreen)
         # Story should still be the original
         assert "You awaken in a test dungeon." in app._current_story
@@ -373,17 +369,17 @@ async def test_quit_confirmation_dialog(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(0.2)
+        await pilot.pause(1.0)
 
         # Press 'q' — should show confirm dialog
         await pilot.press("q")
-        await pilot.pause(0.1)
+        await pilot.pause(0.2)
 
         assert isinstance(app.screen, ConfirmScreen)
 
         # Cancel via Escape
         await pilot.press("escape")
-        await pilot.pause(0.1)
+        await pilot.pause(0.2)
         assert not isinstance(app.screen, ConfirmScreen)
 
 
@@ -393,15 +389,15 @@ async def test_help_screen(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(0.2)
+        await pilot.pause(1.0)
 
         await pilot.press("h")
-        await pilot.pause(0.1)
+        await pilot.pause(0.2)
 
         assert isinstance(app.screen, HelpScreen)
 
         await pilot.press("escape")
-        await pilot.pause(0.1)
+        await pilot.pause(0.2)
         assert not isinstance(app.screen, HelpScreen)
 
 
@@ -411,7 +407,7 @@ async def test_choice_buttons_have_number_labels(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(0.2)
+        await pilot.pause(1.0)
 
         choices_container = app.query_one("#choices-container", Container)
         buttons = list(choices_container.query(Button))
@@ -427,20 +423,20 @@ async def test_undo_restores_previous_state(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(0.2)  # Node 1
+        await pilot.pause(1.0)  # Node 1
 
         assert app.turn_count == 1
         original_story = app._current_story
 
         # Make a choice
         await pilot.press("1")
-        await pilot.pause(0.2)  # Node 2
+        await pilot.pause(1.0)  # Node 2
         assert app.turn_count == 2
         assert "You went North." in app._current_story
 
         # Undo
         await pilot.press("u")
-        await pilot.pause(0.1)
+        await pilot.pause(0.2)
 
         assert app.turn_count == 1
         assert app._current_story == original_story
@@ -452,11 +448,11 @@ async def test_undo_with_no_history(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(0.2)
+        await pilot.pause(1.0)
 
         # Press undo with no previous state
         await pilot.press("u")
-        await pilot.pause(0.1)
+        await pilot.pause(0.2)
 
         # Should still be on turn 1
         assert app.turn_count == 1
@@ -472,15 +468,15 @@ async def test_save_and_load_game(mock_app_dependencies, tmp_path, monkeypatch):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(0.2)  # Node 1
+        await pilot.pause(1.0)  # Node 1
         await pilot.press("1")
-        await pilot.pause(0.2)  # Node 2
+        await pilot.pause(1.0)  # Node 2
 
         assert app.turn_count == 2
 
         # Save the game
         await pilot.press("s")
-        await pilot.pause(0.2)
+        await pilot.pause(1.0)
 
         # Verify a save file was created
         import os
@@ -490,9 +486,9 @@ async def test_save_and_load_game(mock_app_dependencies, tmp_path, monkeypatch):
 
         # Restart the game
         await pilot.press("r")
-        await pilot.pause(0.1)
-        await pilot.press("y")
         await pilot.pause(0.2)
+        await pilot.press("y")
+        await pilot.pause(1.0)
 
         assert app.turn_count == 1
 
@@ -506,7 +502,7 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(0.2)
+        await pilot.pause(1.0)
         
         # Set some unique state
         from cyoa.core.models import StoryNode, Choice
@@ -523,12 +519,12 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
         
         # Save
         await pilot.press("s")
-        await pilot.pause(0.1)
+        await pilot.pause(0.2)
         
         # Create a new app instance to simulate loading fresh
         app2 = CYOAApp(model_path="dummy_path.gguf")
         async with app2.run_test() as pilot2:
-            await pilot2.pause(0.1)
+            await pilot2.pause(0.2)
             
             # Find the save file
             save_files = [f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]

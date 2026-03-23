@@ -6,7 +6,7 @@ actual LLM model or requiring a Neo4j instance.
 """
 
 import pytest  # type: ignore
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 from cyoa.core.models import StoryNode, Choice
 from cyoa.llm.broker import StoryContext
@@ -113,9 +113,8 @@ class TestStoryContext:
         # Recent turns should NOT be in the summary tail
         assert "narrative 2" not in [t["content"] for t in turns]
 
-    def test_set_rolling_summary_truncates_history(self):
-        """set_rolling_summary should store the summary string and prune history correctly."""
-        # Use a tight budget so that adding a summary forces pruning
+    def test_set_hierarchical_summary_and_pruning(self):
+        """set_hierarchical_summary should store the summary strings and prune history."""
         ctx = StoryContext(
             starting_prompt="Start",
             token_budget=100,
@@ -124,21 +123,35 @@ class TestStoryContext:
         for i in range(4):
             ctx.add_turn(f"n{i}", f"c{i}")
 
-        ctx.set_rolling_summary("The story so far: stuff happened.")
-        assert ctx.rolling_summary == "The story so far: stuff happened."
+        ctx.set_hierarchical_summary(
+            scene="The scene.",
+            chapter="The chapter.",
+            arc="The arc."
+        )
+        assert ctx.scene_summary == "The scene."
+        assert ctx.chapter_summary == "The chapter."
+        assert ctx.arc_summary == "The arc."
 
         # Should have pruned to fit budget.
         assert len(ctx.history) < 9
         assert ctx.history[0]["content"] == "Start"
 
-    def test_system_prompt_includes_summary(self):
-        """get_messages should render the rolling_summary in the system prompt."""
+    def test_system_prompt_includes_hierarchical_summaries(self):
+        """get_messages should render all three hierarchy levels in the system prompt."""
         ctx = StoryContext(starting_prompt="Start")
-        ctx.set_rolling_summary("MY UNIQUE SUMMARY")
+        ctx.set_hierarchical_summary(
+            scene="SCENE_TXT",
+            chapter="CHAPTER_TXT",
+            arc="ARC_TXT"
+        )
         msgs = ctx.get_messages()
         sys_msg = msgs[0]["content"]
-        assert "<rolling_summary>" in sys_msg
-        assert "MY UNIQUE SUMMARY" in sys_msg
+        assert "<scene_summary>" in sys_msg
+        assert "SCENE_TXT" in sys_msg
+        assert "<chapter_summary>" in sys_msg
+        assert "CHAPTER_TXT" in sys_msg
+        assert "<arc_summary>" in sys_msg
+        assert "ARC_TXT" in sys_msg
 
     def test_pruning_removes_memories_when_over_budget(self):
         """History and memories should be pruned when exceeding budget."""
@@ -226,9 +239,9 @@ class TestModelBrokerFallback:
         assert len(node.choices) == 2
 
     @pytest.mark.asyncio
-    async def test_generate_summary_async_calls_llm(self):
-        """generate_summary_async should invoke generator with the summary prompt."""
-        from cyoa.llm.broker import ModelBroker
+    async def test_hierarchical_summarization_logic(self):
+        """update_story_summaries_async should correctly flow through hierarchy levels."""
+        from cyoa.llm.broker import ModelBroker, StoryContext
         from cyoa.llm.providers import LLMProvider
         from unittest.mock import AsyncMock
 
@@ -236,19 +249,26 @@ class TestModelBrokerFallback:
         mock_provider.generate_text = AsyncMock(return_value="Summary result.")
 
         gen = ModelBroker(provider=mock_provider)
+        ctx = StoryContext(starting_prompt="Start")
+        # Add a bunch of turns to trigger summarization
+        for i in range(12): 
+            ctx.add_turn(f"n{i}", f"c{i}")
 
-        turns = [
-            {"role": "assistant", "content": "Scene 1"},
-            {"role": "user", "content": "Choice 1"},
-        ]
-        summary = await gen.generate_summary_async(turns)
+        await gen.update_story_summaries_async(ctx)
 
-        assert summary == "Summary result."
-        assert mock_provider.generate_text.called
-        # Verify system instruction presence
-        call_args = mock_provider.generate_text.call_args[1]
-        sys_prompt = call_args["messages"][0]["content"]
-        assert "precise narrative archivist" in sys_prompt
+        # Initial summary should be 'scene'
+        assert ctx.scene_summary == "Summary result."
+        assert ctx._scene_turn_count > 0
+
+        # Simulate Promotion by forcing turn count
+        ctx._scene_turn_count = 11
+        await gen.update_story_summaries_async(ctx)
+        
+        # Now chapter should be updated
+        assert ctx.chapter_summary == "Summary result."
+        assert ctx._chapter_scene_count == 1
+        # Scene summary reset/updated with latest turns
+        assert ctx.scene_summary == "Summary result."
 
     @pytest.mark.asyncio
     async def test_repair_loop_success_on_second_attempt(self):
@@ -612,6 +632,7 @@ class TestBranchingLogic:
                 title=None,
             )
         )
+        mock_gen.update_story_summaries_async = AsyncMock()
 
         with (
             patch("cyoa.ui.app.ModelBroker", return_value=mock_gen),
@@ -620,9 +641,7 @@ class TestBranchingLogic:
             mock_db = mock_db_cls.return_value
             mock_db.create_story_node_and_get_title.return_value = "Test Story"
             mock_db.get_story_tree.return_value = None
-            mock_db.save_scene_async.side_effect = (
-                lambda on_complete=None, **kw: on_complete("sid") if on_complete else None
-            )
+            mock_db.save_scene_async = AsyncMock(return_value="sid")
 
             app = CYOAApp(model_path="dummy")
             app.current_scene_id = "scene-3"
@@ -716,6 +735,7 @@ class TestProceduralItemSystem:
 
         mock_gen = MagicMock()
         mock_gen.generate_next_node_async = AsyncMock(return_value=mock_node)
+        mock_gen.update_story_summaries_async = AsyncMock()
 
         # Use a factory callable (matching test_tui.py's _mock_generator pattern)
         # so StoryGenerator(...) instantiation returns the pre-built mock_gen.
@@ -729,9 +749,7 @@ class TestProceduralItemSystem:
             mock_db = mock_db_cls.return_value
             mock_db.create_story_node_and_get_title.return_value = "Test Story"
             mock_db.get_story_tree.return_value = None
-            mock_db.save_scene_async.side_effect = (
-                lambda on_complete=None, **kw: on_complete("sid") if on_complete else None
-            )
+            mock_db.save_scene_async = AsyncMock(return_value="sid")
 
             app = CYOAApp(model_path="dummy")
             async with app.run_test() as pilot:

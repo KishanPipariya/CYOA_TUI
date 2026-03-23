@@ -40,8 +40,13 @@ class StoryContext:
         self.inventory: list[str] = []
         self.player_stats: dict[str, int] = {}
         self.memories: list[str] = []
-        # Rolling summarization: paragraph produced by compressing old turns.
-        self.rolling_summary: Optional[str] = None
+        # Hierarchical Context Compression
+        self.scene_summary: Optional[str] = None
+        self.chapter_summary: Optional[str] = None
+        self.arc_summary: Optional[str] = None
+        # Hierarchy tracking
+        self._scene_turn_count: int = 0
+        self._chapter_scene_count: int = 0
 
         template_dir = pathlib.Path(__file__).parent / "templates"
         self.jinja_env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_dir))
@@ -109,15 +114,25 @@ class StoryContext:
         """Store memories to be injected dynamically into the system prompt."""
         self.memories = memories
 
-    def set_rolling_summary(self, summary: str) -> None:
-        """Store a compressed narrative summary produced by the summarization agent.
+    def set_hierarchical_summary(
+        self,
+        scene: Optional[str] = None,
+        chapter: Optional[str] = None,
+        arc: Optional[str] = None,
+    ) -> None:
+        """Update the hierarchical summaries of the narrative."""
+        if scene is not None:
+            self.scene_summary = scene
+        if chapter is not None:
+            self.chapter_summary = chapter
+        if arc is not None:
+            self.arc_summary = arc
+        # Still run prune to ensure we stay within budget if summaries increased
+        self._prune_history()
 
-        After summarization the oldest summarized turns are pruned to reclaim context space.
-        """
-        self.rolling_summary = summary
-        # Pruning is handled by the regular _prune_history or add_turn logic,
-        # but here we can be more aggressive to clear out summarized content.
-        # We'll drop approximately half of the dynamic history if we're over budget.
+    def set_rolling_summary(self, summary: str) -> None:
+        """Backward compatibility for the old rolling summary. Sets the scene summary."""
+        self.scene_summary = summary
         self._prune_history()
 
     # ------------------------------------------------------------------
@@ -149,7 +164,9 @@ class StoryContext:
             inventory=self.inventory,
             stats=self.player_stats,
             memories=self.memories,
-            rolling_summary=self.rolling_summary,
+            scene_summary=self.scene_summary,
+            chapter_summary=self.chapter_summary,
+            arc_summary=self.arc_summary,
         )
         return [{"role": "system", "content": system_content}] + self.history
 
@@ -165,7 +182,11 @@ class StoryContext:
         new_ctx.inventory = list(self.inventory)
         new_ctx.player_stats = dict(self.player_stats)
         new_ctx.memories = list(self.memories)
-        new_ctx.rolling_summary = self.rolling_summary
+        new_ctx.scene_summary = self.scene_summary
+        new_ctx.chapter_summary = self.chapter_summary
+        new_ctx.arc_summary = self.arc_summary
+        new_ctx._scene_turn_count = self._scene_turn_count
+        new_ctx._chapter_scene_count = self._chapter_scene_count
         return new_ctx
 
 
@@ -240,8 +261,129 @@ class ModelBroker:
             return LlamaCppProvider(model_path=m_path, n_ctx=n_ctx_val)
 
     async def generate_summary_async(self, turns_to_compress: list[dict[str, str]]) -> str:
-        """Compress a sequence of (assistant, user) turn messages into a dense
-        narrative paragraph suitable for a rolling context window.
+        """Deprecated legacy wrapper. Use update_story_summaries_async(context) instead."""
+        # This will only be called if some third-party code uses it.
+        # We can't easily update a context we don't have, so we use the legacy logic.
+        return await self.generate_legacy_summary_async(turns_to_compress)
+
+    async def update_story_summaries_async(self, context: StoryContext) -> None:
+        """The core of Hierarchical Context Compression.
+        
+        Compresses pruned history into a Scene Summary (last 10 turns), 
+        Chapter Summary (last 5 scenes), and Arc Summary (global plot goals).
+        """
+        turns_to_compress = context.get_turns_for_summary()
+        if not turns_to_compress:
+            return
+
+        pair_count = len(turns_to_compress) // 2
+        
+        # New buffers for the update
+        new_scene = context.scene_summary
+        new_chapter = context.chapter_summary
+        new_arc = context.arc_summary
+        
+        # PHASE 1: Update Scene Summary
+        if context._scene_turn_count + pair_count <= 10:
+            # Still within the ~10 turn scene window
+            new_scene = await self._generate_dense_summary(
+                turns_to_compress, context.scene_summary, level="scene"
+            )
+            context._scene_turn_count += pair_count
+        else:
+            # Scene window full — promote existing Scene Summary to Chapter level
+            logger.info("Hierarchical Summarization: Promoting Scene to Chapter.")
+            
+            # Incorporate old scene summary into chapter summary
+            new_chapter = await self._generate_dense_summary(
+                [], context.chapter_summary, previous_summary=context.scene_summary, level="chapter"
+            )
+            context._chapter_scene_count += 1
+            
+            # Start a brand new Scene Summary with the new turns
+            new_scene = await self._generate_dense_summary(
+                turns_to_compress, level="scene"
+            )
+            context._scene_turn_count = pair_count
+            
+            # PHASE 2: Check for Chapter -> Arc promotion
+            if context._chapter_scene_count >= 5:
+                logger.info("Hierarchical Summarization: Promoting Chapter to Arc.")
+                new_arc = await self._generate_dense_summary(
+                    [], context.arc_summary, previous_summary=context.chapter_summary, level="arc"
+                )
+                # Reset chapter buffer
+                new_chapter = ""
+                context._chapter_scene_count = 0
+        
+        # Apply the updates to the context (also triggers pruning)
+        context.set_hierarchical_summary(scene=new_scene, chapter=new_chapter, arc=new_arc)
+
+    async def _generate_dense_summary(
+        self, 
+        turns: list[dict[str, str]], 
+        existing: Optional[str] = None, 
+        previous_summary: Optional[str] = None,
+        level: str = "scene"
+    ) -> str:
+        """Helper to call the LLM for a specific hierarchy level."""
+        
+        level_map = {
+            "scene": ("Scene Summary", "last 10 turns", "2-3 sentences of plot events"),
+            "chapter": ("Chapter Summary", "last 5 scenes", "a dense overview of the local mission or region"),
+            "arc": ("Arc Summary", "global plot goals", "a high-level synopsis of the overarching journey"),
+        }
+        title, context_desc, goal = level_map.get(level, ("Summary", "", ""))
+
+        # Assemble the input text
+        input_bits = []
+        if existing:
+            input_bits.append(f"Current {title}: {existing}")
+        if previous_summary:
+            input_bits.append(f"Newly Finished Lower-Level Context: {previous_summary}")
+        
+        if turns:
+            compact_turns = []
+            for msg in turns:
+                role = "Story" if msg["role"] == "assistant" else "Player"
+                compact_turns.append(f"[{role}]: {msg['content']}")
+            input_bits.append("Recent Turn History:\n" + "\n".join(compact_turns))
+
+        input_text = "\n\n".join(input_bits)
+
+        summarizer_messages = [
+            {
+                "role": "system",
+                "content": (
+                    f"You are a narrative archivist. Your task is to maintain the '{title}'. "
+                    f"This level of summary covers {context_desc}. "
+                    f"Write {goal}. "
+                    "Focus on facts, character decisions, and significant world changes. "
+                    "Past tense, third person. No meta-commentary."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Update the following {title} with the new information provided:\n\n"
+                    f"{input_text}"
+                ),
+            },
+        ]
+
+        try:
+            summary = await self.provider.generate_text(
+                messages=summarizer_messages,
+                temperature=0.3,
+                max_tokens=self._summary_max_tokens,
+            )
+            return summary.strip()
+        except Exception as exc:
+            logger.warning("Hierarchical summary update failed for %s: %s", level, exc)
+            return existing or ""
+
+    async def generate_legacy_summary_async(self, turns_to_compress: list[dict[str, str]]) -> str:
+        """The original summarization logic.
         """
         if not turns_to_compress:
             return ""

@@ -29,10 +29,23 @@ Current Stats: {{ stats | tojson }}
 {% endfor %}
 </memory_retrieval>
 {% endif %}
-{% if rolling_summary %}
+{% if arc_summary %}
+<arc_summary>
+[Global Plot Synopsis]
+{{ arc_summary }}
+</arc_summary>
+{% endif %}
 
-<rolling_summary>
-[Story So Far — compressed summary of earlier events]
-{{ rolling_summary }}
-</rolling_summary>
+{% if chapter_summary %}
+<chapter_summary>
+[Previous Chapter Context]
+{{ chapter_summary }}
+</chapter_summary>
+{% endif %}
+
+{% if scene_summary %}
+<scene_summary>
+[Last Scene Recap]
+{{ scene_summary }}
+</scene_summary>
 {% endif %}

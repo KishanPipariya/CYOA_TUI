@@ -33,16 +33,7 @@ from cyoa.core import constants, utils
 __all__ = ["CYOAApp"]
 
 
-def _adaptive_throttle(story_length: int) -> int:
-    """Return a throttle value that increases with story length to avoid
-    expensive Markdown re-parses on long stories."""
-    if story_length < 2000:
-        return constants.STREAM_RENDER_THROTTLE_BASE
-    elif story_length < 5000:
-        return 16
-    elif story_length < 10000:
-        return 32
-    return constants.STREAM_RENDER_THROTTLE_MAX
+
 
 
 def _detect_scene_art(narrative: str) -> str | None:
@@ -618,6 +609,21 @@ class CYOAApp(App):
         ):
             return
 
+        # Snapshot state for undo BEFORE making changes
+        self._undo_snapshot = {
+            "turn_count": self.turn_count,
+            "current_story": self._current_story,
+            "current_node": self.current_node,
+            "current_scene_id": self.current_scene_id,
+            "last_choice_text": self.last_choice_text,
+            "last_raw_narrative": self._last_raw_narrative,
+            "inventory": list(self.inventory),
+            "player_stats": dict(self.player_stats),
+            "story_context_history": [msg.copy() for msg in self.story_context.history]
+            if self.story_context
+            else [],
+        }
+
         # [UI IMPROVEMENT] Instantly deflate UI: remove other choices and show spinner
         choice_text = self.current_node.choices[choice_idx].text
 
@@ -630,19 +636,6 @@ class CYOAApp(App):
 
         # Yield to the event loop so the TUI renders the button removals IMMEDIATELY
         await asyncio.sleep(0.01)
-
-        # Snapshot state for undo before making changes
-        self._undo_snapshot = {
-            "turn_count": self.turn_count,
-            "current_story": self._current_story,
-            "current_node": self.current_node,
-            "current_scene_id": self.current_scene_id,
-            "last_choice_text": self.last_choice_text,
-            "last_raw_narrative": self._last_raw_narrative,
-            "inventory": list(self.inventory),
-            "player_stats": dict(self.player_stats),
-            "story_context_history": [msg.copy() for msg in self.story_context.history],
-        }
 
         self.last_choice_text = choice_text
         if self.story_context:
@@ -782,7 +775,7 @@ class CYOAApp(App):
                 art_widget.add_class("hidden")
 
             for i, choice in enumerate(self.current_node.choices):
-                btn_id = f"choice-{uuid.uuid4().hex[:8]}"
+                btn_id = f"choice-t{self.turn_count}-{i}"
                 label = f"[{i + 1}] {choice.text}"
                 btn = Button(label, id=btn_id, variant="primary")
                 choices_container.mount(btn)
@@ -962,10 +955,7 @@ class CYOAApp(App):
                     severity="information",
                     timeout=4,
                 )
-                turns_to_compress = self.story_context.get_turns_for_summary()
-                summary = await self.generator.generate_summary_async(turns_to_compress)
-                if summary:
-                    self.story_context.set_rolling_summary(summary)
+                await self.generator.update_story_summaries_async(self.story_context)
             # ────────────────────────────────────────────────────────────────
 
             # Check speculation cache
