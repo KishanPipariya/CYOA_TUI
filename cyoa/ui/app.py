@@ -78,6 +78,7 @@ class CYOAApp(App):
         ("l", "load_game", "Load"),
         ("q", "request_quit", "Quit"),
         ("r", "request_restart", "Restart"),
+        ("space", "skip_typewriter", "Skip Narrator"),
         ("1", "choose('1')", "Choice 1"),
         ("2", "choose('2')", "Choice 2"),
         ("3", "choose('3')", "Choice 3"),
@@ -121,6 +122,12 @@ class CYOAApp(App):
         self.memory = NarrativeMemory()
         self.npc_memory = NPCMemory()
         self.speculation_cache = SpeculationCache()
+
+        # Typewriter Narrator state
+        self._typewriter_queue: asyncio.Queue[str] = asyncio.Queue()
+        self._typewriter_target: str = ""  # The full text we WANT to display
+        self._typewriter_active_chunk: list[str] = []
+        self._is_typing: bool = False
 
         # Undo: snapshot of previous turn state
         self._undo_snapshot: Optional[dict[str, Any]] = None
@@ -189,6 +196,8 @@ class CYOAApp(App):
         self.query_one("#story-container").border_title = "Story"
         # Fix #6: Show spinner immediately before model even begins loading
         self.query_one("#loading").remove_class("hidden")
+        # Start the typewriter narrator worker
+        self._typewriter_worker()
         # Short delay to let the UI paint the ASCII art + spinner before blocking
         self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
 
@@ -286,14 +295,87 @@ class CYOAApp(App):
                 # Failure in speculation is acceptable; main path will handle it
                 continue
 
+    @work(group="typewriter", exclusive=True)
+    async def _typewriter_worker(self) -> None:
+        """Background worker that smoothly reveals narrative text from the queue."""
+        try:
+            story_md = self.query_one("#story-text", Markdown)
+        except Exception:
+            return
+
+        last_refresh = 0.0
+        # Throttle Markdown re-renders to ~30fps max to avoid UI lag on long stories
+        REFRESH_LIMIT = 0.033
+
+        while True:
+            # wait for text chunks
+            chunk = await self._typewriter_queue.get()
+            self._is_typing = True
+            self._typewriter_active_chunk = list(chunk)
+
+            while self._typewriter_active_chunk:
+                # Catch up if the queue is backing up
+                q_size = self._typewriter_queue.qsize()
+                batch_size = 1
+                if q_size > constants.TYPEWRITER_CATCHUP_THRESHOLD:
+                    # Extreme catchup: grab everything and exit loops
+                    self._current_story += "".join(self._typewriter_active_chunk)
+                    self._typewriter_active_chunk.clear()
+                    while not self._typewriter_queue.empty():
+                        self._current_story += self._typewriter_queue.get_nowait()
+                elif q_size > 10:
+                    batch_size = constants.TYPEWRITER_MAX_BATCH
+
+                if self._typewriter_active_chunk:
+                    to_add = "".join(self._typewriter_active_chunk[:batch_size])
+                    self._typewriter_active_chunk = self._typewriter_active_chunk[batch_size:]
+                    self._current_story += to_add
+
+                # Throttled UI update
+                now = asyncio.get_event_loop().time()
+                if now - last_refresh >= REFRESH_LIMIT or not self._typewriter_active_chunk:
+                    story_md.update(self._current_story)
+                    if self._is_at_bottom():
+                        self._scroll_to_bottom(animate=False)
+                    last_refresh = now
+
+                if self._typewriter_active_chunk:
+                    await asyncio.sleep(constants.TYPEWRITER_CHAR_DELAY)
+
+            if self._typewriter_queue.empty():
+                self._is_typing = False
+
+    def action_skip_typewriter(self) -> None:
+        """Instantly reveal all pending text in the typewriter queue."""
+        if not self._is_typing and self._typewriter_queue.empty():
+            return
+
+        # Flush active chunk
+        if self._typewriter_active_chunk:
+            self._current_story += "".join(self._typewriter_active_chunk)
+            self._typewriter_active_chunk.clear()
+
+        # Flush queue
+        while not self._typewriter_queue.empty():
+            try:
+                self._current_story += self._typewriter_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        self._is_typing = False
+        try:
+            self.query_one("#story-text", Markdown).update(self._current_story)
+            self._scroll_to_bottom()
+        except Exception:
+            pass
+
+    def on_click(self) -> None:
+        """Skip the typewriter animation on click."""
+        self.action_skip_typewriter()
+
     def _stream_narrative(self, partial: str) -> None:
         """
-        Streaming callback called via call_from_thread for each batch of chars.
-        Fix #1: throttles Markdown re-renders to every _STREAM_RENDER_THROTTLE
-        characters so the full story string is not re-parsed on every token.
+        Streaming callback: feeds the typewriter queue instead of updating UI directly.
         """
-        story_md = self.query_one("#story-text", Markdown)
-
         if self._loading_suffix_shown:
             # First token batch arrived — strip the loading placeholder
             suffix = "\n\n*(The ancient texts are shifting...)*"
@@ -301,21 +383,15 @@ class CYOAApp(App):
                 self._current_story = self._current_story[: -len(suffix)]
             self._loading_suffix_shown = False
             self.query_one("#loading").add_class("hidden")
+
+            # Start of a new turn: prepend separator via the queue
             if self._current_story == LOADING_ART:
-                self._current_story = partial
+                self._current_story = ""
+                self._typewriter_queue.put_nowait(partial)
             else:
-                self._current_story += f"\n\n---\n\n{partial}"
-            # Always render immediately on first token so text appears
-            self._stream_token_buffer = 0
-            story_md.update(self._current_story)
+                self._typewriter_queue.put_nowait(f"\n\n---\n\n{partial}")
         else:
-            self._current_story += partial
-            self._stream_token_buffer += len(partial)
-            # Adaptive throttle: re-render less frequently as story grows
-            throttle = _adaptive_throttle(len(self._current_story))
-            if self._stream_token_buffer >= throttle:
-                self._stream_token_buffer = 0
-                story_md.update(self._current_story)
+            self._typewriter_queue.put_nowait(partial)
 
     def show_loading(self, selected_label: str | None = None) -> None:
         """Clear choice buttons, show spinner, append 'shifting' text.
@@ -342,8 +418,8 @@ class CYOAApp(App):
             self._current_story += "\n\n*(The ancient texts are shifting...)*"
             self._loading_suffix_shown = True
             self.query_one("#story-text", Markdown).update(self._current_story)
-            story_container = self.query_one("#story-container")
-            self.set_timer(0.05, lambda: story_container.scroll_end(animate=False))
+            # Force scroll on new turn so player sees their choice immediately
+            self._scroll_to_bottom()
 
     def _update_status_bar(self) -> None:
         """Refresh the two-row status bar with color-coded health."""
@@ -377,6 +453,27 @@ class CYOAApp(App):
         )
         self.query_one("#inventory-display", Label).update(inv_str)
 
+    def _is_at_bottom(self) -> bool:
+        """Return True if the story container is near its bottom edge.
+        
+        This allows 'smart' scrolling: following the narrative only if the user 
+        was already at the bottom of the story.
+        """
+        try:
+            container = self.query_one("#story-container")
+            # A small threshold (2.0) accounts for layout offsets or padding.
+            return container.scroll_y >= container.max_scroll_y - 2
+        except Exception:
+            return True
+
+    def _scroll_to_bottom(self, animate: bool = True) -> None:
+        """Scroll the story container to the end after the next refresh."""
+        try:
+            container = self.query_one("#story-container")
+            self.call_after_refresh(lambda: container.scroll_end(animate=animate))
+        except Exception:
+            pass
+
     def display_node(self, node: StoryNode) -> None:
         """Render a newly generated StoryNode to the UI (after streaming completes)."""
         self.query_one("#loading").add_class("hidden")
@@ -389,32 +486,34 @@ class CYOAApp(App):
         art = _detect_scene_art(node.narrative) if not is_error else None
         art_block = f"\n```\n{art}\n```\n" if art else ""
 
-        # If streaming happened, _stream_narrative already updated the story;
-        # only do a full replace if we somehow ended up in non-streaming mode.
-        if self._current_story == LOADING_ART:
-            self._current_story = art_block + node.narrative
-        elif self._loading_suffix_shown:
-            # No streaming happened (fallback) — strip suffix and append
+        # Fallback/Cache hit: nothing happened in _stream_narrative
+        if self._loading_suffix_shown:
+            self._loading_suffix_shown = False
             suffix = "\n\n*(The ancient texts are shifting...)*"
             if self._current_story.endswith(suffix):
                 self._current_story = self._current_story[: -len(suffix)]
-            self._current_story += f"\n\n---\n\n{art_block}{node.narrative}"
+
+            sep = "\n\n---\n\n" if self._current_story != LOADING_ART else ""
+            self._typewriter_queue.put_nowait(f"{sep}{art_block}{node.narrative}")
         else:
-            # Streaming happened (partially or fully). Ensure the narrative is complete
-            # and correctly formatted, replacing any partial failed stream that might
-            # have occurred before a successful Repair Loop.
+            # Streaming happened. To ensure ASCII art is included and any partial
+            # stream is cleaned up, we sync to the finalized narrative.
+            # We skip the narrator to avoid "double-typing" or missing art.
+            self.action_skip_typewriter()
+
             last_sep = self._current_story.rfind("\n\n---\n\n")
             if last_sep != -1:
-                # Everything before the separator (the user choice etc) stays.
-                # Everything after is replaced by art_block + node.narrative.
                 prefix = self._current_story[: last_sep + len("\n\n---\n\n")]
                 self._current_story = prefix + art_block + node.narrative
             else:
-                # This must be the first node of the game
+                # First node or missing separator
                 self._current_story = art_block + node.narrative
-        self._loading_suffix_shown = False
+        
+        try:
+            self.query_one("#story-text", Markdown).update(self._current_story)
+        except Exception:
+            pass
 
-        # For errors, wrap the narrative with a warning block
         if is_error:
             error_display = self._current_story
             # Append a visual error marker if not already present
@@ -423,10 +522,15 @@ class CYOAApp(App):
                 error_display = self._current_story + error_suffix
                 self._current_story = error_display
 
-        story_md.update(self._current_story)
+        at_bottom = self._is_at_bottom()
+        try:
+            self.query_one("#story-text", Markdown).update(self._current_story)
+        except Exception:
+            pass
 
-        story_container = self.query_one("#story-container")
-        self.set_timer(0.05, lambda: story_container.scroll_end(animate=False))
+        # Smart following: only scroll to the new node if the user was already at the bottom
+        if at_bottom:
+            self._scroll_to_bottom()
 
         # memory.add() moved to worker thread (generate_next_step)
         # so chromadb embedding does not block the UI event loop here.
@@ -503,6 +607,9 @@ class CYOAApp(App):
             or choice_idx >= len(self.current_node.choices)
         ):
             return
+
+        # NEW: Ensure previous turn's typing is finished before starting a new turn
+        self.action_skip_typewriter()
 
         # Snapshot state for undo before making changes
         self._undo_snapshot = {
@@ -638,6 +745,7 @@ class CYOAApp(App):
         # because it re-processes story text and would add duplicate art)
         self.query_one("#story-text", Markdown).update(self._current_story)
         self.query_one("#loading").add_class("hidden")
+        self._scroll_to_bottom()
         choices_container = self.query_one("#choices-container")
         choices_container.remove_children()
         if self.current_node:
@@ -761,6 +869,7 @@ class CYOAApp(App):
 
         # Re-render the UI
         self.query_one("#story-text", Markdown).update(self._current_story)
+        self._scroll_to_bottom()
         self.query_one("#choices-container").remove_children()
         self.query_one("#journal-list", ListView).clear()
         if self.current_node:
@@ -937,8 +1046,7 @@ class CYOAApp(App):
         bus.emit("choice_made", choice_text=f"Time fracture back to Turn {idx + 1}")
 
         self.query_one("#story-text", Markdown).update(self._current_story)
-        story_container = self.query_one("#story-container")
-        self.set_timer(0.05, lambda: story_container.scroll_end(animate=False))
+        self._scroll_to_bottom()
 
         target_scene = history["scenes"][idx]
 
@@ -1032,8 +1140,8 @@ class CYOAApp(App):
             for edge in edges.get(scene_id, []):
                 choice_text = edge["choice"]
                 choice_preview = (
-                    choice_text[:MAX_CHOICE_PREVIEW_LEN] + "..."
-                    if len(choice_text) > MAX_CHOICE_PREVIEW_LEN
+                    choice_text[:constants.MAX_CHOICE_PREVIEW_LEN] + "..."
+                    if len(choice_text) > constants.MAX_CHOICE_PREVIEW_LEN
                     else choice_text
                 )
                 choice_label = f"[dim][i]- {choice_preview}[/i][/dim]"

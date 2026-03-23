@@ -30,6 +30,11 @@ STREAM_RENDER_THROTTLE_BASE = 8
 STREAM_RENDER_THROTTLE_MAX = 48
 MAX_CHOICE_PREVIEW_LEN = 15
 
+# --- Typewriter Narrator ---
+TYPEWRITER_CHAR_DELAY = 0.02  # seconds per character
+TYPEWRITER_CATCHUP_THRESHOLD = 50  # if queue > 50, speed up reveal
+TYPEWRITER_MAX_BATCH = 5  # max characters to reveal per tick during catchup
+
 CONFIG_FILE = ".config.json"
 SAVES_DIR = "saves"
 STORY_LOG_FILE = "story.md"
