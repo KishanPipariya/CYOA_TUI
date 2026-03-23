@@ -55,7 +55,7 @@ def _mock_generator(*args, **kwargs):
 def mock_app_dependencies():
     """Mock the LLM Generator and DB to be fast and deterministic in UI tests."""
     with (
-        patch("cyoa.ui.app.StoryGenerator", new=_mock_generator),
+        patch("cyoa.ui.app.ModelBroker", new=_mock_generator),
         patch("cyoa.ui.app.CYOAGraphDB") as mock_db,
     ):
         # Configure the mock DB to not fail async DB operations

@@ -131,27 +131,20 @@ class TestStoryContext:
 # ── 2. LLM JSON parse failure graceful fallback ───────────────────────────────
 
 
-class TestStoryGeneratorFallback:
+class TestModelBrokerFallback:
     @pytest.mark.asyncio
     async def test_bad_json_returns_fallback_node(self):
         """If LLM returns invalid JSON, generate_next_node_async should return a valid fallback StoryNode."""
-        from cyoa.llm.llm_backend import StoryGenerator
+        from cyoa.llm.llm_backend import ModelBroker
+        from cyoa.llm.providers import LLMProvider
+        from unittest.mock import AsyncMock
 
-        with patch("cyoa.llm.llm_backend.Llama") as MockLlama:
-            mock_llm = MagicMock()
-            mock_llm.create_chat_completion.return_value = {
-                "choices": [{"message": {"content": "NOT VALID JSON {"}}]
-            }
-            MockLlama.return_value = mock_llm
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate_json = AsyncMock(return_value="NOT VALID JSON {")
 
-            gen = StoryGenerator.__new__(StoryGenerator)
-            gen.llm = mock_llm
-            gen._schema = StoryNode.model_json_schema()
-            gen._temperature = 0.6
-            gen._max_tokens = 512
-
-            ctx = StoryContext("start")
-            node = await gen.generate_next_node_async(ctx)
+        gen = ModelBroker(provider=mock_provider)
+        ctx = StoryContext("start")
+        node = await gen.generate_next_node_async(ctx)
 
         assert isinstance(node, StoryNode)
         assert len(node.choices) >= 1  # fallback always has a choice
@@ -160,60 +153,49 @@ class TestStoryGeneratorFallback:
     async def test_valid_json_returns_parsed_node(self):
         """If LLM returns valid JSON, generate_next_node_async should return a proper StoryNode."""
         import json
-        from cyoa.llm.llm_backend import StoryGenerator
+        from cyoa.llm.llm_backend import ModelBroker
+        from cyoa.llm.providers import LLMProvider
+        from unittest.mock import AsyncMock
 
         payload = StoryNode(
             narrative="A torch flickers.",
             choices=[Choice(text="Pick it up"), Choice(text="Leave it")],
         ).model_dump()
 
-        with patch("cyoa.llm.llm_backend.Llama") as MockLlama:
-            mock_llm = MagicMock()
-            mock_llm.create_chat_completion.return_value = {
-                "choices": [{"message": {"content": json.dumps(payload)}}]
-            }
-            MockLlama.return_value = mock_llm
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate_json = AsyncMock(return_value=json.dumps(payload))
 
-            gen = StoryGenerator.__new__(StoryGenerator)
-            gen.llm = mock_llm
-            gen._schema = StoryNode.model_json_schema()
-            gen._temperature = 0.6
-            gen._max_tokens = 512
-
-            ctx = StoryContext("start")
-            node = await gen.generate_next_node_async(ctx)
+        gen = ModelBroker(provider=mock_provider)
+        ctx = StoryContext("start")
+        node = await gen.generate_next_node_async(ctx)
 
         assert node.narrative == "A torch flickers."
         assert len(node.choices) == 2
 
     @pytest.mark.asyncio
     async def test_generate_summary_async_calls_llm(self):
-        """generate_summary_async should invoke chat completion with the summary prompt."""
-        from cyoa.llm.llm_backend import StoryGenerator
+        """generate_summary_async should invoke generator with the summary prompt."""
+        from cyoa.llm.llm_backend import ModelBroker
+        from cyoa.llm.providers import LLMProvider
+        from unittest.mock import AsyncMock
 
-        with patch("cyoa.llm.llm_backend.Llama") as MockLlama:
-            mock_llm = MagicMock()
-            mock_llm.create_chat_completion.return_value = {
-                "choices": [{"message": {"content": "Summary result."}}]
-            }
-            MockLlama.return_value = mock_llm
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate_text = AsyncMock(return_value="Summary result.")
 
-            gen = StoryGenerator.__new__(StoryGenerator)
-            gen.llm = mock_llm
-            gen._summary_max_tokens = 200
+        gen = ModelBroker(provider=mock_provider)
 
-            turns = [
-                {"role": "assistant", "content": "Scene 1"},
-                {"role": "user", "content": "Choice 1"},
-            ]
-            summary = await gen.generate_summary_async(turns)
+        turns = [
+            {"role": "assistant", "content": "Scene 1"},
+            {"role": "user", "content": "Choice 1"},
+        ]
+        summary = await gen.generate_summary_async(turns)
 
-            assert summary == "Summary result."
-            assert mock_llm.create_chat_completion.called
-            # Verify system instruction presence
-            call_args = mock_llm.create_chat_completion.call_args[1]
-            sys_prompt = call_args["messages"][0]["content"]
-            assert "precise narrative archivist" in sys_prompt
+        assert summary == "Summary result."
+        assert mock_provider.generate_text.called
+        # Verify system instruction presence
+        call_args = mock_provider.generate_text.call_args[1]
+        sys_prompt = call_args["messages"][0]["content"]
+        assert "precise narrative archivist" in sys_prompt
 
 
 # ── 3. Graph DB offline graceful degradation ──────────────────────────────────
@@ -408,7 +390,8 @@ class TestStreamingCallback:
     async def test_stream_narrative_extractor(self):
         """_stream_with_callback_async should extract narrative characters correctly."""
         import json
-        from cyoa.llm.llm_backend import StoryGenerator
+        from cyoa.llm.llm_backend import ModelBroker
+        from cyoa.llm.providers import LLMProvider
 
         payload = {
             "title": None,
@@ -418,18 +401,19 @@ class TestStreamingCallback:
         }
         json_str = json.dumps(payload)
 
-        # Simulate streaming chunks split mid-string
-        chunks = []
-        for ch in json_str:
-            chunks.append(
-                {"choices": [{"delta": {"content": ch}, "finish_reason": None}]}
-            )
-        chunks.append({"choices": [{"delta": {}, "finish_reason": "stop"}]})
+        # Simulate streaming characters one-by-one
+        def mock_stream(*args, **kwargs):
+            async def gen():
+                for ch in json_str:
+                    yield ch
+            return gen()
 
+        mock_provider = MagicMock()
+        mock_provider.stream_json.side_effect = mock_stream
+
+        gen = ModelBroker(provider=mock_provider)
         received = []
-
-        gen = StoryGenerator.__new__(StoryGenerator)
-        result = await gen._stream_with_callback_async(iter(chunks), on_token_chunk=received.append)
+        result = await gen._stream_with_callback_async([], on_token_chunk=received.append)
 
         extracted = "".join(received)
         assert "torch" in extracted
@@ -440,19 +424,25 @@ class TestStreamingCallback:
     @pytest.mark.asyncio
     async def test_stream_resilience(self):
         """Verify extractor handles weird spacing and newlines using jiter."""
-        from cyoa.llm.llm_backend import StoryGenerator
+        from cyoa.llm.llm_backend import ModelBroker
+        from cyoa.llm.providers import LLMProvider
 
         # Weird spacing, newlines, and escaping that would break a simple regex
         json_str = '{"title": null,  "narrative" \n : \n  "The dragon said, \\"Return my gold!\\"." , "choices": []}'
-        
-        chunks = []
-        for ch in json_str:
-            chunks.append({"choices": [{"delta": {"content": ch}}]})
-        
+
+        def mock_stream(*args, **kwargs):
+            async def gen():
+                for ch in json_str:
+                    yield ch
+            return gen()
+
+        mock_provider = MagicMock()
+        mock_provider.stream_json.side_effect = mock_stream
+
+        gen = ModelBroker(provider=mock_provider)
         received = []
-        gen = StoryGenerator.__new__(StoryGenerator)
-        result = await gen._stream_with_callback_async(iter(chunks), on_token_chunk=received.append)
-        
+        result = await gen._stream_with_callback_async([], on_token_chunk=received.append)
+
         extracted = "".join(received)
         assert extracted == 'The dragon said, "Return my gold!".'
         assert "gold" in extracted
@@ -525,7 +515,7 @@ class TestBranchingLogic:
         )
 
         with (
-            patch("cyoa.ui.app.StoryGenerator", return_value=mock_gen),
+            patch("cyoa.ui.app.ModelBroker", return_value=mock_gen),
             patch("cyoa.ui.app.CYOAGraphDB") as mock_db_cls,
         ):
             mock_db = mock_db_cls.return_value
@@ -634,7 +624,7 @@ class TestProceduralItemSystem:
             return mock_gen
 
         with (
-            patch("cyoa.ui.app.StoryGenerator", new=mock_generator_factory),
+            patch("cyoa.ui.app.ModelBroker", new=mock_generator_factory),
             patch("cyoa.ui.app.CYOAGraphDB") as mock_db_cls,
         ):
             mock_db = mock_db_cls.return_value

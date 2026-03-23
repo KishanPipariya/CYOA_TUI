@@ -7,12 +7,12 @@ class Choice(BaseModel):
 
 
 class StoryNode(BaseModel):
+    narrative: str = Field(
+        description="The unfolding story text describing what just happened and the current situation."
+    )
     title: Optional[str] = Field(
         default=None,
         description="The generated title for this story adventure. (Only necessary for the very first node of the game).",
-    )
-    narrative: str = Field(
-        description="The unfolding story text describing what just happened and the current situation."
     )
     items_gained: List[str] = Field(
         default_factory=list,

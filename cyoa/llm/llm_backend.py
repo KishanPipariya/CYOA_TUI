@@ -4,11 +4,12 @@ import os
 import logging
 import pathlib
 import jinja2
-from typing import Callable, Optional
-from llama_cpp import Llama  # type: ignore
-from cyoa.core.models import StoryNode
+from typing import Callable, Optional, List, Dict, Any, Union
 
-__all__ = ["StoryContext", "StoryGenerator"]
+from cyoa.core.models import StoryNode
+from cyoa.llm.providers import LLMProvider, LlamaCppProvider, OllamaProvider
+
+__all__ = ["StoryContext", "ModelBroker", "StoryGenerator"]
 
 # Configurable via .env / environment — defaults used if not set
 MAX_CONTEXT_TURNS = int(os.getenv("LLM_MAX_TURNS", "10"))
@@ -131,47 +132,45 @@ class StoryContext:
         return [{"role": "system", "content": system_content}] + self.history
 
 
-class StoryGenerator:
-    def __init__(self, model_path: str, n_ctx: Optional[int] = None) -> None:
-        n_ctx_val = n_ctx or int(os.getenv("LLM_N_CTX", "4096"))
-        cpu_threads = max(1, (os.cpu_count() or 8) // 2)
-        self.llm = Llama(
-            model_path=model_path,
-            n_ctx=n_ctx_val,
-            n_threads=cpu_threads,
-            n_gpu_layers=-1,
-            flash_attn=True,
-            verbose=False,
-        )
+class ModelBroker:
+    def __init__(
+        self,
+        model_path: Optional[str] = None,
+        n_ctx: Optional[int] = None,
+        provider: Optional[LLMProvider] = None,
+    ) -> None:
+        if provider:
+            self.provider = provider
+        else:
+            self.provider = self._create_provider_from_env(model_path, n_ctx)
+
         self._schema = StoryNode.model_json_schema()
         self._temperature = float(os.getenv("LLM_TEMPERATURE", "0.6"))
         self._max_tokens = int(os.getenv("LLM_MAX_TOKENS", "512"))
         # Maximum tokens for the "Story So Far" summary paragraph.
         self._summary_max_tokens = int(os.getenv("LLM_SUMMARY_MAX_TOKENS", "200"))
 
+    def _create_provider_from_env(
+        self, model_path: Optional[str] = None, n_ctx: Optional[int] = None
+    ) -> LLMProvider:
+        provider_type = os.getenv("LLM_PROVIDER", "llama_cpp").lower()
+        if provider_type == "ollama":
+            model = os.getenv("LLM_MODEL", model_path or "llama3")
+            base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+            return OllamaProvider(model=model, base_url=base_url)
+        else:
+            m_path = model_path or os.getenv("LLM_MODEL_PATH")
+            if not m_path:
+                m_path = "models/mistral-7b-instruct-v0.2.Q4_K_M.gguf"
+                logger.warning("No model path provided, using default: %s", m_path)
+
+            n_ctx_val = n_ctx or int(os.getenv("LLM_N_CTX", "4096"))
+            return LlamaCppProvider(model_path=m_path, n_ctx=n_ctx_val)
+
     async def generate_summary_async(self, turns_to_compress: list[dict[str, str]]) -> str:
         """Compress a sequence of (assistant, user) turn messages into a dense
         narrative paragraph suitable for a rolling context window.
-
-        The resulting text is injected as the ``<rolling_summary>`` block in
-        the system prompt, replacing the raw turns that it covers.  This keeps
-        narrative momentum without consuming precious context tokens.
-
-        Parameters
-        ----------
-        turns_to_compress:
-            A flat list of ``{role, content}`` dicts representing the old turns
-            (obtained from :meth:`StoryContext.get_turns_for_summary`).
-
-        Returns
-        -------
-        str
-            A concise paragraph of ≤ ``_summary_max_tokens`` tokens describing
-            the summarised story arc.  Falls back to a joined plaintext
-            representation of the turns if the LLM call fails.
         """
-        import asyncio
-
         if not turns_to_compress:
             return ""
 
@@ -208,16 +207,13 @@ class StoryGenerator:
         ]
 
         try:
-            response = await asyncio.to_thread(
-                self.llm.create_chat_completion,
+            summary = await self.provider.generate_text(
                 messages=summarizer_messages,
-                temperature=0.3,  # Lower temp for factual fidelity
+                temperature=0.3,
                 max_tokens=self._summary_max_tokens,
-                stream=False,
             )
-            summary = response["choices"][0]["message"]["content"].strip()
             logger.info("Rolling summary generated (%d chars).", len(summary))
-            return summary
+            return summary.strip()
         except Exception as exc:  # noqa: BLE001
             logger.warning("Rolling summarization failed: %s — using plaintext fallback.", exc)
             # Graceful fallback: join turns into a very short plain-text blob
@@ -232,30 +228,20 @@ class StoryGenerator:
     ) -> StoryNode:
         """
         Generate the next story node asynchronously.
-
-        If `on_token_chunk` is provided, stream tokens and call it with chunked text
-        of the narrative as it streams in (typewriter effect).
-        The complete JSON is still assembled and validated after streaming.
         """
         stream = on_token_chunk is not None
-        import asyncio
-
-        response = await asyncio.to_thread(
-            self.llm.create_chat_completion,
-            messages=context.get_messages(),
-            response_format={
-                "type": "json_object",
-                "schema": self._schema,
-            },
-            temperature=self._temperature,
-            max_tokens=self._max_tokens,
-            stream=stream,
-        )
 
         if stream and on_token_chunk is not None:
-            content = await self._stream_with_callback_async(response, on_token_chunk)
+            content = await self._stream_with_callback_async(
+                context.get_messages(), on_token_chunk
+            )
         else:
-            content = response["choices"][0]["message"]["content"]
+            content = await self.provider.generate_json(
+                messages=context.get_messages(),
+                schema=self._schema,
+                temperature=self._temperature,
+                max_tokens=self._max_tokens,
+            )
 
         try:
             data = json.loads(content)
@@ -272,48 +258,26 @@ class StoryGenerator:
 
     async def _stream_with_callback_async(
         self,
-        stream_iter,
+        messages: list[dict[str, str]],
         on_token_chunk: Callable[[str], None],
     ) -> str:
         """
-        Consume the streaming response in a background thread to prevent blocking
-        the asyncio event loop, and queue chunks back for processing.
+        Consume the streaming response and call back for narrative updates.
         """
-        import asyncio
-        loop = asyncio.get_running_loop()
-        q = asyncio.Queue()
-
-        def producer():
-            try:
-                for chunk in stream_iter:
-                    delta = chunk["choices"][0].get("delta", {})
-                    token = delta.get("content", "")
-                    if token:
-                        loop.call_soon_threadsafe(q.put_nowait, ("token", token))
-                loop.call_soon_threadsafe(q.put_nowait, ("done", None))
-            except Exception as e:
-                loop.call_soon_threadsafe(q.put_nowait, ("error", e))
-
-        _ = asyncio.create_task(asyncio.to_thread(producer))
-
         buffer = ""
         last_sent_narrative_len = 0
 
-        while True:
-            msg_type, val = await q.get()
-            if msg_type == "error":
-                logger.error("Error in LLM generator: %s", val)
-                break
-            if msg_type == "done":
-                break
-
-            token = val
+        async for token in self.provider.stream_json(
+            messages=messages,
+            schema=self._schema,
+            temperature=self._temperature,
+            max_tokens=self._max_tokens,
+        ):
             buffer += token
 
             try:
                 # We use partial_mode="trailing-strings" so jiter doesn't truncate
-                # the string we're currently receiving. It returns what's been
-                # parsed so far as a Python dict/object.
+                # the string we're currently receiving.
                 parsed = jiter.from_json(buffer.encode(), partial_mode="trailing-strings")
 
                 if isinstance(parsed, dict) and "narrative" in parsed:
@@ -326,7 +290,10 @@ class StoryGenerator:
                             last_sent_narrative_len = len(current_narrative)
             except (ValueError, jiter.JiterError):
                 # JSON not yet parseable at all, or "narrative" key not yet fully present.
-                # This is normal during the first several tokens of the stream.
                 continue
 
         return buffer
+
+
+# Alias for backward compatibility during transition
+StoryGenerator = ModelBroker

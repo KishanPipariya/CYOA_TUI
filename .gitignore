@@ -216,3 +216,5 @@ tasks.md
 
 # Secrets — never commit the actual .env, only .env.example
 .envsaves/
+
+LLM_ARCHITECTURE_PROPOSAL.md

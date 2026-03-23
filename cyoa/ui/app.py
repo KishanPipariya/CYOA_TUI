@@ -21,7 +21,7 @@ from typing import Any, Optional, ClassVar
 import asyncio
 
 from cyoa.core.models import StoryNode, Choice
-from cyoa.llm.llm_backend import StoryGenerator, StoryContext
+from cyoa.llm.llm_backend import ModelBroker, StoryContext
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
 from cyoa.ui.components import BranchScreen, ThemeSpinner, ConfirmScreen, HelpScreen
@@ -146,7 +146,7 @@ class CYOAApp(App):
         self.spinner_frames = spinner_frames or ["[-]", "[\\]", "[|]", "[/]"]
         self._accent_color = accent_color
 
-        self.generator: Optional[StoryGenerator] = None
+        self.generator: Optional[ModelBroker] = None
         self.story_context: Optional[StoryContext] = None
         self.db: Optional[CYOAGraphDB] = None
         self.current_scene_id: Optional[str] = None
@@ -241,7 +241,7 @@ class CYOAApp(App):
     async def initialize_and_start(self, model_path: str) -> None:
         """Load model and generate the first scene. Reuses existing model if already loaded."""
         if self.generator is None:
-            self.generator = StoryGenerator(model_path=model_path)
+            self.generator = ModelBroker(model_path=model_path)
 
         self.story_context = StoryContext(starting_prompt=self.starting_prompt)
         self.show_loading()
@@ -249,7 +249,12 @@ class CYOAApp(App):
         if self.db is None:
             self.db = CYOAGraphDB()
 
-        node = await self.generator.generate_next_node_async(self.story_context)
+        def on_token(partial: str) -> None:
+            self._stream_narrative(partial)
+
+        node = await self.generator.generate_next_node_async(
+            self.story_context, on_token_chunk=on_token
+        )
         self._last_raw_narrative = node.narrative
         self.current_node = node
         for item in getattr(node, "items_gained", []):
