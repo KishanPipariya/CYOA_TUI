@@ -21,7 +21,7 @@ from typing import Any, Optional, ClassVar
 import asyncio
 
 from cyoa.core.models import StoryNode, Choice
-from cyoa.llm.llm_backend import ModelBroker, StoryContext, DEFAULT_TOKEN_BUDGET
+from cyoa.llm.llm_backend import ModelBroker, StoryContext, DEFAULT_TOKEN_BUDGET, SpeculationCache
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
 from cyoa.ui.components import BranchScreen, ThemeSpinner, ConfirmScreen, HelpScreen
@@ -112,7 +112,7 @@ class CYOAApp(App):
     # Fix #8: CSS loaded from external file
     CSS_PATH = "styles.tcss"
 
-    BINDINGS: ClassVar[list[tuple[str, str, str]]] = [
+    BINDINGS: ClassVar[list[Any]] = [
         ("d", "toggle_dark", "Toggle dark mode"),
         ("b", "branch_past", "Branch from Past"),
         ("j", "toggle_journal", "Toggle Journal"),
@@ -166,6 +166,7 @@ class CYOAApp(App):
         # RAG: in-memory semantic scene store
         self.memory = NarrativeMemory()
         self.npc_memory = NPCMemory()
+        self.speculation_cache = SpeculationCache()
 
         # Undo: snapshot of previous turn state
         self._undo_snapshot: Optional[dict[str, Any]] = None
@@ -237,6 +238,14 @@ class CYOAApp(App):
         # Short delay to let the UI paint the ASCII art + spinner before blocking
         self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
 
+    def on_unmount(self) -> None:
+        """Cancel all background work and release the LLM model."""
+        self.workers.cancel_all()
+        if self.generator:
+            self.generator.close()
+        if self._story_file:
+            self._story_file.close()
+
     @work(exclusive=True)
     async def initialize_and_start(self, model_path: str) -> None:
         """Load model and generate the first scene. Reuses existing model if already loaded."""
@@ -299,6 +308,35 @@ class CYOAApp(App):
         )
 
         self.display_node(node)
+
+    @work(group="speculation", exclusive=True)
+    async def speculate_all_choices(self, node: StoryNode) -> None:
+        """Sequential background generation of the most likely next scenes."""
+        if not self.story_context or not self.generator:
+            return
+
+        # Give the UI some breathing room after the main generation finishes
+        await asyncio.sleep(2.0)
+
+        for i, choice in enumerate(node.choices):
+            # If the user already picked a choice and main generation started,
+            # this worker group will be canceled, so we don't need explicit checks here.
+            key = f"{self.current_scene_id}:{choice.text}"
+            if self.speculation_cache.get_node(self.current_scene_id or "", choice.text):
+                continue
+
+            # Clone context to speculate without polluting the main one
+            spec_context = self.story_context.clone()
+            spec_context.add_turn(node.narrative, choice.text, self.inventory, self.player_stats)
+
+            try:
+                # Low-priority generation (no streaming)
+                spec_node = await self.generator.generate_next_node_async(spec_context)
+                self.speculation_cache.set_node(self.current_scene_id or "", choice.text, spec_node)
+                # logger.info("Speculated next scene for: %s", choice.text)
+            except Exception: # noqa: BLE001
+                # Failure in speculation is acceptable; main path will handle it
+                continue
 
     def _stream_narrative(self, partial: str) -> None:
         """
@@ -463,7 +501,6 @@ class CYOAApp(App):
                 btn_id = f"choice-{uuid.uuid4().hex[:8]}"
                 label = f"[{i + 1}] {choice.text}"
                 btn = Button(label, id=btn_id, variant="default")
-                btn.action_text = str(i)
                 choices_container.mount(btn)
             return
 
@@ -478,8 +515,10 @@ class CYOAApp(App):
             btn_id = f"choice-{uuid.uuid4().hex[:8]}"
             label = f"[{i + 1}] {choice.text}"
             btn = Button(label, id=btn_id, variant="primary")
-            btn.action_text = str(i)
             choices_container.mount(btn)
+
+        # Trigger background speculation for the current node's choices
+        self.speculate_all_choices(node)
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         # Handle the end-game "New Adventure" button
@@ -563,7 +602,9 @@ class CYOAApp(App):
         journal_list.scroll_end(animate=False)
 
         self.show_loading(selected_label=selected_label)
-        self.generate_next_step()
+        # Cancel any ongoing speculation for other choices
+        self.workers.cancel_group(self, "speculation")
+        self.generate_next_step(choice_text=choice_text)
 
     # Fix #2: In-app restart without reloading the model
     async def action_restart(self) -> None:
@@ -643,6 +684,12 @@ class CYOAApp(App):
         if self.story_context:
             self.story_context.history = snap["story_context_history"]
 
+        # Restore KV cache state if available for faster re-generation
+        if self.generator and self.current_scene_id:
+            state = self.speculation_cache.get_state(self.current_scene_id)
+            if state:
+                self.run_worker(self.generator.load_state_async(state))
+
         self._undo_snapshot = None  # Only one level of undo
         self._loading_suffix_shown = False
 
@@ -657,7 +704,6 @@ class CYOAApp(App):
                 btn_id = f"choice-{uuid.uuid4().hex[:8]}"
                 label = f"[{i + 1}] {choice.text}"
                 btn = Button(label, id=btn_id, variant="primary")
-                btn.action_text = str(i)
                 choices_container.mount(btn)
         self._update_status_bar()
 
@@ -799,7 +845,7 @@ class CYOAApp(App):
         panel.toggle_class("hidden")
 
     @work(exclusive=True)
-    async def generate_next_step(self) -> None:  # noqa: C901
+    async def generate_next_step(self, choice_text: Optional[str] = None) -> None:  # noqa: C901
         # RAG: retrieve relevant past scenes and inject as memory
         if (
             self._last_raw_narrative
@@ -838,13 +884,31 @@ class CYOAApp(App):
                     self.story_context.set_rolling_summary(summary)
             # ────────────────────────────────────────────────────────────────
 
-            # Streaming: pass on_token callback so typewriter fires live
-            def on_token(partial: str) -> None:
-                self._stream_narrative(partial)
+            # Check speculation cache
+            cached_node = None
+            if choice_text:
+                cached_node = self.speculation_cache.get_node(self.current_scene_id or "", choice_text)
 
-            node = await self.generator.generate_next_node_async(
-                self.story_context, on_token_chunk=on_token
-            )
+            if cached_node:
+                # Performance optimization: use the pre-calculated node
+                node = cached_node
+                # Simulated minimal stream to maintain UI feel
+                self._stream_narrative("*(Recalling future memories...)* ")
+                await asyncio.sleep(0.1)
+            else:
+                # Streaming: pass on_token callback so typewriter fires live
+                def on_token(partial: str) -> None:
+                    self._stream_narrative(partial)
+
+                node = await self.generator.generate_next_node_async(
+                    self.story_context, on_token_chunk=on_token
+                )
+
+            # Update KV cache state for the *current* scene (the one we just entered)
+            # This allows instant rewinding back to this scene later.
+            state = await self.generator.save_state_async()
+            if state and self.current_scene_id:
+                self.speculation_cache.set_state(self.current_scene_id, state)
             self._last_raw_narrative = node.narrative
             self.current_node = node  # Added
 
@@ -949,7 +1013,6 @@ class CYOAApp(App):
         # For now, we blank it gracefully on branch, requiring the player to re-find items or the LLM to hallucinate them back.
         self.inventory = []
         self.player_stats = {"health": 100, "gold": 0, "reputation": 0}
-
         self.memory = NarrativeMemory()
         self.npc_memory = NPCMemory()
         for i in range(idx + 1):
@@ -963,6 +1026,14 @@ class CYOAApp(App):
             ):
                 for npc in history["scenes"][i]["npcs_present"]:
                     await self.npc_memory.add_async(npc, past_scene_id, past_narrative)
+
+        # ── KV-Cache optimization ───────────────────────────────────────────
+        # Restore model state for this scene if we have a checkpoint cached
+        if self.generator:
+            state = self.speculation_cache.get_state(self.current_scene_id)
+            if state:
+                await self.generator.load_state_async(state)
+        # ────────────────────────────────────────────────────────────────────
 
         journal_list = self.query_one("#journal-list", ListView)
         journal_list.clear()

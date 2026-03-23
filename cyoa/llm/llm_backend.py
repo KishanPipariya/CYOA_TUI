@@ -6,10 +6,10 @@ import pathlib
 import jinja2
 from typing import Callable, Optional, List, Dict, Any, Union
 
-from cyoa.core.models import StoryNode
+from cyoa.core.models import StoryNode, Choice
 from cyoa.llm.providers import LLMProvider, LlamaCppProvider, OllamaProvider
 
-__all__ = ["StoryContext", "ModelBroker", "StoryGenerator"]
+__all__ = ["StoryContext", "ModelBroker", "StoryGenerator", "SpeculationCache"]
 
 # Configurable via .env / environment — defaults used if not set
 DEFAULT_TOKEN_BUDGET = int(os.getenv("LLM_TOKEN_BUDGET", "2048"))
@@ -153,6 +153,49 @@ class StoryContext:
             rolling_summary=self.rolling_summary,
         )
         return [{"role": "system", "content": system_content}] + self.history
+
+    def clone(self) -> "StoryContext":
+        """Return a deep copy of the context data, but reuse the model/template refs."""
+        new_ctx = StoryContext(
+            starting_prompt=self.starting_prompt,
+            token_budget=self.token_budget,
+            token_counter=self.token_counter,
+        )
+        # Deep copy the mutable history and stats
+        new_ctx.history = [msg.copy() for msg in self.history]
+        new_ctx.inventory = list(self.inventory)
+        new_ctx.player_stats = dict(self.player_stats)
+        new_ctx.memories = list(self.memories)
+        new_ctx.rolling_summary = self.rolling_summary
+        return new_ctx
+
+
+class SpeculationCache:
+    """Stores pre-calculated story nodes to reduce perceived latency."""
+
+    def __init__(self) -> None:
+        self._nodes: Dict[str, StoryNode] = {}
+        # We also store the KV states if available
+        self._states: Dict[str, bytes] = {}
+
+    def get_node(self, scene_id: str, choice_text: str) -> Optional[StoryNode]:
+        return self._nodes.get(f"{scene_id}:{choice_text}")
+
+    def set_node(self, scene_id: str, choice_text: str, node: StoryNode) -> None:
+        self._nodes[f"{scene_id}:{choice_text}"] = node
+
+    def get_state(self, scene_id: str) -> Optional[bytes]:
+        return self._states.get(scene_id)
+
+    def set_state(self, scene_id: str, state: bytes) -> None:
+        self._states[scene_id] = state
+
+    def clear_nodes(self) -> None:
+        self._nodes.clear()
+
+    def clear_all(self) -> None:
+        self._nodes.clear()
+        self._states.clear()
 
 
 class ModelBroker:
@@ -327,7 +370,7 @@ class ModelBroker:
                 "The universe encounters an anomaly (LLM failed to format its response). "
                 "You find yourself back where you started."
             ),
-            choices=[{"text": "Try doing something different."}],
+            choices=[Choice(text="Try doing something different.")],
         )
 
     async def _stream_with_callback_async(
@@ -362,11 +405,23 @@ class ModelBroker:
                         if new_content:
                             on_token_chunk(new_content)
                             last_sent_narrative_len = len(current_narrative)
-            except (ValueError, jiter.JiterError):
+            except (ValueError, AttributeError):
                 # JSON not yet parseable at all, or "narrative" key not yet fully present.
                 continue
 
         return buffer
+
+    async def save_state_async(self) -> Optional[bytes]:
+        """Save the provider's internal state (KV cache)."""
+        return await self.provider.save_state()
+
+    async def load_state_async(self, state: bytes) -> None:
+        """Load a previously saved state (KV cache)."""
+        await self.provider.load_state(state)
+
+    def close(self) -> None:
+        """Shut down the underlying model provider."""
+        self.provider.close()
 
 
 # Alias for backward compatibility during transition
