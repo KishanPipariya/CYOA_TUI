@@ -584,20 +584,20 @@ class CYOAApp(App):
             try:
                 # Part 0: 'choice', Part 1: 'tX', Part 2: '0'
                 choice_idx = int(button_id.split("-")[-1])
-                self._trigger_choice(choice_idx)
+                await self._trigger_choice(choice_idx)
             except (ValueError, IndexError):
                 pass
 
     # Fix #1: Keyboard number shortcut to select a choice
-    def action_choose(self, number: str) -> None:
+    async def action_choose(self, number: str) -> None:
         """Select a choice by its 1-based index using number keys."""
         idx = int(number) - 1
         # Check if the specifically indexed choice button exists for this turn
         query = self.query(f"#choice-t{self.turn_count}-{idx}")
         if query:
-            self._trigger_choice(idx)
+            await self._trigger_choice(idx)
 
-    def _trigger_choice(self, choice_idx: int) -> None:
+    async def _trigger_choice(self, choice_idx: int) -> None:
         """Handle choice selection, update the narrative, and query LLM."""
         if (
             not self.story_context
@@ -605,6 +605,14 @@ class CYOAApp(App):
             or choice_idx >= len(self.current_node.choices)
         ):
             return
+
+        # [UI IMPROVEMENT] Instantly deflate UI: remove other choices and show spinner
+        choice_text = self.current_node.choices[choice_idx].text
+        selected_label = f"[{choice_idx + 1}] {choice_text}"
+        self.show_loading(selected_label=selected_label)
+        
+        # Yield to the event loop so the TUI renders the button removals IMMEDIATELY
+        await asyncio.sleep(0.01)
 
         # NEW: Ensure previous turn's typing is finished before starting a new turn
         self.action_skip_typewriter()
@@ -619,11 +627,9 @@ class CYOAApp(App):
             "last_raw_narrative": self._last_raw_narrative,
             "inventory": list(self.inventory),
             "player_stats": dict(self.player_stats),
-            "story_context_history": copy.deepcopy(self.story_context.history),
+            "story_context_history": [msg.copy() for msg in self.story_context.history],
         }
 
-        choice_text = self.current_node.choices[choice_idx].text
-        selected_label = f"[{choice_idx + 1}] {choice_text}"
         self.last_choice_text = choice_text
         if self.story_context:
             self.story_context.add_turn(
@@ -647,7 +653,6 @@ class CYOAApp(App):
         journal_list.append(ListItem(Label(journal_entry)))
         journal_list.scroll_end(animate=False)
 
-        self.show_loading(selected_label=selected_label)
         # Cancel any ongoing speculation for other choices
         self.workers.cancel_group(self, "speculation")
         self.generate_next_step(choice_text=choice_text)
