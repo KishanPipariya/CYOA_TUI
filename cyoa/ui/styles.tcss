@@ -13,12 +13,25 @@ Screen {
 }
 
 #journal-panel, #story-map-panel {
-    width: 1fr;
-    max-width: 40;
+    width: 40;
     border-left: vkey $secondary;
     padding: 1;
     background: $surface;
+    /* Smooth slide-in/out transition with fade. Note: padding/margin cannot be animated. */
+    transition: width 300ms in_out_cubic, opacity 300ms;
+    overflow-x: hidden;
+    opacity: 1;
 }
+
+#journal-panel.hidden, #story-map-panel.hidden {
+    display: block; /* Override default hidden behavior to allow width animation */
+    width: 0;
+    padding: 0;
+    margin: 0;
+    border: none;
+    opacity: 0;
+}
+
 
 #journal-title, #story-map-title {
     text-align: center;
