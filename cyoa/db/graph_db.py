@@ -46,29 +46,6 @@ class CYOAGraphDB:
             logger.error(f"Unexpected Graph DB connection error: {e}")
             self.driver = None
 
-        bus.subscribe("scene_generated", self.on_scene_generated)
-
-    def on_scene_generated(self, **kwargs: Any) -> None:
-        """Event bus handler that unwraps kwargs into the async task signature."""
-        narrative = kwargs.get("narrative")
-        available_choices = kwargs.get("available_choices")
-        if available_choices is None:
-            available_choices = []
-        story_title = kwargs.get("story_title")
-        source_scene_id = kwargs.get("source_scene_id")
-        choice_text = kwargs.get("choice_text")
-        on_complete = kwargs.get("on_complete")
-
-        if narrative and story_title:
-            self.save_scene_async(
-                narrative,
-                list(available_choices),
-                story_title,
-                source_scene_id,
-                choice_text,
-                on_complete,
-            )
-
     def close(self) -> None:
         """Close the database connection."""
         if self.driver:
@@ -174,22 +151,19 @@ class CYOAGraphDB:
                 choice_text=choice_text,
             )
 
-    # ── Fix #5: Fire-and-forget wrapper for non-blocking DB writes ──
-
-    def save_scene_async(
+    async def save_scene_async(
         self,
         narrative: str,
         available_choices: list[str],
         story_title: str,
         source_scene_id: Optional[str],
         choice_text: Optional[str],
-        on_complete: Optional[Callable[[str], None]] = None,
-    ) -> None:  # noqa: PLR0913
+    ) -> str:
         """
-        Writes a new scene node (and optional edge from previous scene) to Neo4j
-        in a background daemon thread so it doesn't block the UI.
-        Calls on_complete(new_scene_id) when done.
+        Writes a new scene node (and optional edge from previous scene) to Neo4j.
+        Runs the blocking DB operations in a worker thread and returns the new scene ID.
         """
+        import asyncio
 
         def _write():
             new_scene_id = self.create_scene_node(
@@ -197,11 +171,9 @@ class CYOAGraphDB:
             )
             if source_scene_id and choice_text:
                 self.create_choice_edge(source_scene_id, new_scene_id, choice_text)
-            if on_complete:
-                on_complete(new_scene_id)
+            return new_scene_id
 
-        t = threading.Thread(target=_write, daemon=True)
-        t.start()
+        return await asyncio.to_thread(_write)
 
     def get_scene_history_path(self, current_scene_id: str) -> Optional[dict[str, Any]]:
         """

@@ -1,6 +1,6 @@
-# Shadows of the Forgotten Prison (13)
+# Shadows of the Forgotten Prison (14)
 
-> **You chose:** Search the cell for any items that might help you escape or survive a little longer.
+> **You chose:** Listen for any signs of life outside your cell to understand your surroundings better and possibly find a weakness in your captivity.
 
 ---
 

@@ -147,12 +147,18 @@ class LlamaCppProvider(LLMProvider):
         temperature: float = 0.7,
     ) -> AsyncIterator[str]:
         import asyncio
-        
+
         loop = asyncio.get_running_loop()
         q: asyncio.Queue[Optional[str]] = asyncio.Queue()
+        # Fix: use threading.Event to signal cancellation back to the producer thread
+        cancel_event = threading.Event()
 
         def producer():
             try:
+                # We check the event BEFORE locking to avoid long waits if already cancelled
+                if cancel_event.is_set():
+                    return
+
                 with self._lock:
                     stream = self.llm.create_chat_completion(
                         messages=messages,
@@ -162,22 +168,28 @@ class LlamaCppProvider(LLMProvider):
                         stream=True,
                     )
                     for chunk in stream:
+                        if cancel_event.is_set():
+                            break
                         delta = chunk["choices"][0].get("delta", {})
                         token = delta.get("content", "")
                         if token:
                             loop.call_soon_threadsafe(q.put_nowait, token)
             except Exception as e:
-                logger.error(f"Error in LlamaCppProvider stream producer: {e}")
+                logger.error("Error in LlamaCppProvider stream producer: %s", e)
             finally:
                 loop.call_soon_threadsafe(q.put_nowait, None)
 
         loop.run_in_executor(None, producer)
 
-        while True:
-            token = await q.get()
-            if token is None:
-                break
-            yield token
+        try:
+            while True:
+                token = await q.get()
+                if token is None:
+                    break
+                yield token
+        finally:
+            # Signal the producer thread to stop if we stop consuming tokens (e.g. cancellation)
+            cancel_event.set()
     async def save_state(self) -> Optional[bytes]:
         """Save the current KV-cache state of the LLM."""
         import asyncio

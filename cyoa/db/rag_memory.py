@@ -44,22 +44,6 @@ class NarrativeMemory:
         self._client: Optional[Any] = None
         self._collection: Optional[Any] = None
 
-        if self._available:
-            bus.subscribe("scene_generated", self.on_scene_generated)
-
-    def on_scene_generated(self, **kwargs: Any) -> None:
-        """Event bus listener extracting the UUID and string for the RAG store."""
-        import asyncio
-        narrative = kwargs.get("narrative")
-        # Ensure we always supply an ID if GraphDB is disabled/racing
-        scene_id = kwargs.get("scene_id") or str(uuid.uuid4())
-        if narrative:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self.add_async(scene_id, narrative))
-            except RuntimeError:
-                pass
-
     def _ensure_ready(self) -> bool:
         """Create the chroma client and collection on first use. Returns False if unavailable."""
         if not self._available:

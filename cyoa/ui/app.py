@@ -202,10 +202,12 @@ class CYOAApp(App):
         self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
 
     def on_unmount(self) -> None:
-        """Cancel all background work and release the LLM model."""
+        """Cancel all background work and release the LLM model and graph DB."""
         self.workers.cancel_all()
         if self.generator:
             self.generator.close()
+        if self.db:
+            self.db.close()
 
     @work(exclusive=True)
     async def initialize_and_start(self, model_path: str) -> None:
@@ -248,21 +250,17 @@ class CYOAApp(App):
 
         bus.emit("story_started", title=self.current_story_title)
 
-        choices_text = [choice.text for choice in node.choices]
-
-        def on_complete(sid: str) -> None:
-            self.current_scene_id = sid
+        if self.db:
+            choices_text = [choice.text for choice in node.choices]
+            new_id = await self.db.save_scene_async(
+                narrative=node.narrative,
+                available_choices=choices_text,
+                story_title=self.current_story_title,
+                source_scene_id=None,
+                choice_text=None,
+            )
+            self.current_scene_id = new_id
             self.update_story_map()
-
-        bus.emit(
-            "scene_generated",
-            narrative=node.narrative,
-            available_choices=choices_text,
-            story_title=self.current_story_title,
-            source_scene_id=None,
-            choice_text=None,
-            on_complete=on_complete,
-        )
 
         self.display_node(node)
 
@@ -988,19 +986,15 @@ class CYOAApp(App):
             prev_scene_id = self.current_scene_id
             prev_choice = self.last_choice_text
 
-            def on_complete(sid: str) -> None:
-                self.current_scene_id = sid
-                self.update_story_map()
-
-            bus.emit(
-                "scene_generated",
+            new_id = await self.db.save_scene_async(
                 narrative=node.narrative,
                 available_choices=choices_text,
                 story_title=self.current_story_title,
                 source_scene_id=prev_scene_id,
                 choice_text=prev_choice,
-                on_complete=on_complete,
             )
+            self.current_scene_id = new_id
+            self.update_story_map()
 
             # Flush any remaining throttled stream chars before final render
             if self._stream_token_buffer > 0:
