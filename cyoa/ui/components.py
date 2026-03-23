@@ -86,7 +86,7 @@ class ThemeSpinner(Static):
 
     def on_mount(self) -> None:
         self.update(escape(self.frames[0]))
-        self.set_interval(0.5, self.tick)
+        self.set_interval(0.1, self.tick)
 
     def tick(self) -> None:
         self._frame_idx = (self._frame_idx + 1) % len(self.frames)

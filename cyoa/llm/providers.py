@@ -90,59 +90,25 @@ class LlamaCppProvider(LLMProvider):
         if not text:
             return 0
         try:
-            with self._lock:
-                # self.llm.tokenize returns a list of token IDs
-                return len(self.llm.tokenize(text.encode("utf-8"), add_bos=False))
+            # Fix: Use non-blocking acquire to avoid hanging the UI thread if the 
+            # LLM is currently busy generating a response in another thread.
+            if self._lock.acquire(blocking=False):
+                try:
+                    # self.llm.tokenize returns a list of token IDs
+                    return len(self.llm.tokenize(text.encode("utf-8"), add_bos=False))
+                finally:
+                    self._lock.release()
+            else:
+                # Fallback to estimate if the model is busy
+                return len(text) // 4
         except Exception as e:
             logger.warning("LlamaCpp tokenization failed: %s — using fallback.", e)
             return len(text) // 4
 
-    async def generate_text(
+    async def _run_cancellable_stream(
         self,
         messages: List[Dict[str, str]],
-        max_tokens: int = 512,
-        temperature: float = 0.7,
-    ) -> str:
-        import asyncio
-
-        def _run():
-            with self._lock:
-                return self.llm.create_chat_completion(
-                    messages=messages,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    stream=False,
-                )
-
-        response = await asyncio.to_thread(_run)
-        return response["choices"][0]["message"]["content"]
-
-    async def generate_json(
-        self,
-        messages: List[Dict[str, str]],
-        schema: Dict[str, Any],
-        max_tokens: int = 512,
-        temperature: float = 0.7,
-    ) -> str:
-        import asyncio
-
-        def _run():
-            with self._lock:
-                return self.llm.create_chat_completion(
-                    messages=messages,
-                    response_format={"type": "json_object", "schema": schema},
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    stream=False,
-                )
-
-        response = await asyncio.to_thread(_run)
-        return response["choices"][0]["message"]["content"]
-
-    async def stream_json(
-        self,
-        messages: List[Dict[str, str]],
-        schema: Dict[str, Any],
+        schema: Optional[Dict[str, Any]] = None,
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> AsyncIterator[str]:
@@ -150,23 +116,27 @@ class LlamaCppProvider(LLMProvider):
 
         loop = asyncio.get_running_loop()
         q: asyncio.Queue[Optional[str]] = asyncio.Queue()
-        # Fix: use threading.Event to signal cancellation back to the producer thread
         cancel_event = threading.Event()
 
         def producer():
             try:
-                # We check the event BEFORE locking to avoid long waits if already cancelled
                 if cancel_event.is_set():
                     return
 
                 with self._lock:
-                    stream = self.llm.create_chat_completion(
-                        messages=messages,
-                        response_format={"type": "json_object", "schema": schema},
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        stream=True,
-                    )
+                    if cancel_event.is_set():
+                        return
+
+                    params = {
+                        "messages": messages,
+                        "max_tokens": max_tokens,
+                        "temperature": temperature,
+                        "stream": True,
+                    }
+                    if schema:
+                        params["response_format"] = {"type": "json_object", "schema": schema}
+
+                    stream = self.llm.create_chat_completion(**params)
                     for chunk in stream:
                         if cancel_event.is_set():
                             break
@@ -188,8 +158,53 @@ class LlamaCppProvider(LLMProvider):
                     break
                 yield token
         finally:
-            # Signal the producer thread to stop if we stop consuming tokens (e.g. cancellation)
             cancel_event.set()
+
+    async def generate_text(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> str:
+        content = []
+        async for token in self._run_cancellable_stream(
+            messages=messages, max_tokens=max_tokens, temperature=temperature
+        ):
+            content.append(token)
+        return "".join(content)
+
+    async def generate_json(
+        self,
+        messages: List[Dict[str, str]],
+        schema: Dict[str, Any],
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> str:
+        content = []
+        async for token in self._run_cancellable_stream(
+            messages=messages,
+            schema=schema,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        ):
+            content.append(token)
+        return "".join(content)
+
+    async def stream_json(
+        self,
+        messages: List[Dict[str, str]],
+        schema: Dict[str, Any],
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> AsyncIterator[str]:
+        async for token in self._run_cancellable_stream(
+            messages=messages,
+            schema=schema,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        ):
+            yield token
+
     async def save_state(self) -> Optional[bytes]:
         """Save the current KV-cache state of the LLM."""
         import asyncio
@@ -219,9 +234,22 @@ class LlamaCppProvider(LLMProvider):
 
     def close(self) -> None:
         """Clear the LLM instance to release memory/threads."""
-        with self._lock:
+        # Use a short timeout to avoid hanging the UI shutdown if a thread is stuck
+        acquired = self._lock.acquire(timeout=0.5)
+        try:
             if hasattr(self, "llm"):
-                del self.llm
+                # If we couldn't get the lock, it means a thread is still running.
+                # Since we are likely shutting down the app, we prefer to skip
+                # the explicit 'del' rather than hanging the process.
+                if acquired:
+                    del self.llm
+                else:
+                    logger.warning(
+                        "LlamaCpp lock held during close(); skipping explicit cleanup to avoid hang."
+                    )
+        finally:
+            if acquired:
+                self._lock.release()
 
 
 class OllamaProvider(LLMProvider):

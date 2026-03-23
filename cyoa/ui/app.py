@@ -194,11 +194,11 @@ class CYOAApp(App):
     async def on_mount(self) -> None:
         self.query_one("#choices-container").border_title = "Choices"
         self.query_one("#story-container").border_title = "Story"
-        # Fix #6: Show spinner immediately before model even begins loading
-        self.query_one("#loading").remove_class("hidden")
+        # Start loading indicator (text + spinner) immediately
+        self.show_loading()
         # Start the typewriter narrator worker
         self._typewriter_worker()
-        # Short delay to let the UI paint the ASCII art + spinner before blocking
+        # Short delay to let the UI paint the initial scene before starting the engine
         self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
 
     def on_unmount(self) -> None:
@@ -212,25 +212,40 @@ class CYOAApp(App):
     @work(exclusive=True)
     async def initialize_and_start(self, model_path: str) -> None:
         """Load model and generate the first scene. Reuses existing model if already loaded."""
-        if self.generator is None:
-            self.generator = ModelBroker(model_path=model_path)
-
-        self.story_context = StoryContext(
-            starting_prompt=self.starting_prompt,
-            token_budget=self.generator.token_budget,
-            token_counter=self.generator.provider.count_tokens,
-        )
+        # Show loading state (text + spinner) BEFORE model/DB loading begins
         self.show_loading()
+        # Ensure the UI paints the initial shifting state
+        await asyncio.sleep(0.2)
 
-        if self.db is None:
-            self.db = CYOAGraphDB()
+        try:
+            if self.generator is None:
+                # Fix: Model loading is blocking (can take several seconds), run it in a thread
+                self.generator = await asyncio.to_thread(ModelBroker, model_path=model_path)
 
-        def on_token(partial: str) -> None:
-            self._stream_narrative(partial)
+            self.story_context = StoryContext(
+                starting_prompt=self.starting_prompt,
+                token_budget=self.generator.token_budget,
+                token_counter=self.generator.provider.count_tokens,
+            )
 
-        node = await self.generator.generate_next_node_async(
-            self.story_context, on_token_chunk=on_token
-        )
+            if self.db is None:
+                # Fix: Neo4j connection/verify_connectivity() is also blocking; run in a thread
+                self.db = await asyncio.to_thread(CYOAGraphDB)
+
+            # Re-ensure loading state is active before first turn generation
+            self.show_loading()
+
+            def on_token(partial: str) -> None:
+                self._stream_narrative(partial)
+
+            node = await self.generator.generate_next_node_async(
+                self.story_context, on_token_chunk=on_token
+            )
+        except Exception as e:
+            self.notify(f"Initial setup failed: {e}", severity="error", timeout=5)
+            # Hide loading so the user can see the error/retry
+            self.query_one("#loading").add_class("hidden")
+            raise
         self._last_raw_narrative = node.narrative
         self.current_node = node
         for item in getattr(node, "items_gained", []):
@@ -666,6 +681,7 @@ class CYOAApp(App):
         self.last_choice_text = None
         self._last_raw_narrative = None
         self._stream_token_buffer = 0
+        self._loading_suffix_shown = False
         self.inventory = []
         self.player_stats = {"health": 100, "gold": 0, "reputation": 0}
         self.current_node = None  # Added
