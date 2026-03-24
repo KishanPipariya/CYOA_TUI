@@ -16,8 +16,6 @@ __all__ = ["NarrativeMemory", "NPCMemory"]
 try:
     import chromadb
 
-
-
     _CHROMA_AVAILABLE = True
     logger = logging.getLogger(__name__)
 except ImportError:

@@ -1,7 +1,6 @@
 import logging
 import os
 import time
-from typing import Any
 
 from opentelemetry import metrics, trace
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
@@ -17,17 +16,18 @@ logger = logging.getLogger(__name__)
 # Default service name
 SERVICE_NAME = "cyoa-tui"
 
+
 def setup_observability() -> None:
     """Initialize OpenTelemetry tracers and meters."""
     resource = Resource.create({"service.name": SERVICE_NAME})
 
     # Trace setup
     tracer_provider = TracerProvider(resource=resource)
-    
+
     # Check for OTLP endpoint, fallback to console or no-op if you prefer
     # For now we'll use OTLP if an endpoint is set, otherwise maybe just logs?
     otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-    
+
     if otlp_endpoint:
         span_exporter = OTLPSpanExporter()
         tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
@@ -43,9 +43,12 @@ def setup_observability() -> None:
         metric_exporter = OTLPMetricExporter()
         metric_reader = PeriodicExportingMetricReader(metric_exporter)
         logger.info("OTLP Metric Exporter initialized.")
-    
-    meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader] if metric_reader else [])
+
+    meter_provider = MeterProvider(
+        resource=resource, metric_readers=[metric_reader] if metric_reader else []
+    )
     metrics.set_meter_provider(meter_provider)
+
 
 # Initialize global tracer and meter
 tracer = trace.get_tracer(__name__)
@@ -79,8 +82,10 @@ failure_counter = meter.create_counter(
     description="Failed LLM generations",
 )
 
+
 class LLMObservedSession:
     """Helper to track timing and token counts for a single LLM call."""
+
     def __init__(self, model_name: str, task: str):
         self.model_name = model_name
         self.task = task
@@ -93,7 +98,7 @@ class LLMObservedSession:
         self.start_time = time.perf_counter()
         self.span = tracer.start_span(
             f"llm.generate.{self.task}",
-            attributes={"llm.model": self.model_name, "llm.task": self.task}
+            attributes={"llm.model": self.model_name, "llm.task": self.task},
         )
         return self
 
@@ -111,7 +116,7 @@ class LLMObservedSession:
     def end(self, success: bool = True):
         end_time = time.perf_counter()
         duration = end_time - self.start_time
-        
+
         if success:
             success_counter.add(1, {"llm.model": self.model_name, "llm.task": self.task})
             if self.token_count > 0:
@@ -124,6 +129,7 @@ class LLMObservedSession:
             self.span.set_attribute("llm.tokens", self.token_count)
             self.span.set_attribute("llm.duration_s", duration)
             self.span.end()
+
 
 def record_repair_attempt(model_name: str, error_type: str):
     repair_counter.add(1, {"llm.model": model_name, "error_type": error_type})

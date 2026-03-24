@@ -554,12 +554,15 @@ class CYOAApp(App):
         # Ensure the view is at the bottom after narrative and choices are fully rendered
         self._scroll_to_bottom()
 
-    def _mount_choice_buttons(self, node: StoryNode,
-                              choices_container: Container, is_error: bool) -> None:
+    def _mount_choice_buttons(
+        self, node: StoryNode, choices_container: Container, is_error: bool
+    ) -> None:
         """Mount choice buttons based on the node state."""
         # Error UX: show a Retry button alongside the fallback choice
         if is_error:
-            choices_container.mount(Button("🔄 Retry Generation", id="btn-retry", variant="warning"))
+            choices_container.mount(
+                Button("🔄 Retry Generation", id="btn-retry", variant="warning")
+            )
             for i, choice in enumerate(node.choices):
                 btn_id = f"choice-{uuid.uuid4().hex[:8]}"
                 btn = Button(f"[{i + 1}] {choice.text}", id=btn_id, variant="default")

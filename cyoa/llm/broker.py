@@ -486,9 +486,11 @@ class ModelBroker:
                     e,
                     content[:100],
                 )
-                
+
                 # Record the repair attempt in OpenTelemetry
-                model_name = getattr(self.provider, "model_path", getattr(self.provider, "model", "unknown"))
+                model_name = getattr(
+                    self.provider, "model_path", getattr(self.provider, "model", "unknown")
+                )
                 record_repair_attempt(model_name=model_name, error_type=type(e).__name__)
 
                 # Append the faulty response and a correction prompt for the next attempt

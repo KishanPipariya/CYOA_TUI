@@ -9,10 +9,9 @@ from typing import Any, cast
 import httpx
 from llama_cpp import Llama
 
-from cyoa.core.observability import LLMObservedSession, record_repair_attempt
+from cyoa.core.observability import LLMObservedSession
 
 logger = logging.getLogger(__name__)
-
 
 
 class LLMProvider(abc.ABC):
@@ -316,7 +315,7 @@ class OllamaProvider(LLMProvider):
                 response.raise_for_status()
                 data = response.json()
                 content = str(data["message"]["content"])
-                
+
                 # For non-streaming, TTFT is the same as total time in this simplistic view
                 session.report_first_token()
                 session.report_token(self.count_tokens(content))
@@ -350,7 +349,7 @@ class OllamaProvider(LLMProvider):
                 response.raise_for_status()
                 data = response.json()
                 content = str(data["message"]["content"])
-                
+
                 session.report_first_token()
                 session.report_token(self.count_tokens(content))
                 session.end(success=True)

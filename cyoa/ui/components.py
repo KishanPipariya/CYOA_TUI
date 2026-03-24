@@ -294,7 +294,9 @@ class LoadGameScreen(ModalScreen[str]):
         list_view = self.query_one("#load-list", ListView)
         for save_file in self._save_files:
             display_name = save_file.replace(".json", "").replace("_", " ")
-            item = SaveListItem(Label(f"💾 {display_name}", classes="save-entry"), save_filename=save_file)
+            item = SaveListItem(
+                Label(f"💾 {display_name}", classes="save-entry"), save_filename=save_file
+            )
             list_view.append(item)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:

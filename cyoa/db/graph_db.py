@@ -25,7 +25,9 @@ class CYOAGraphDB:
         try:
             # Cast uri to str because the Neo4j driver expects a non-None URI
             uri_str = str(uri)
-            self.driver = GraphDatabase.driver(uri_str, auth=(str(user), str(password)), connection_timeout=2.0)
+            self.driver = GraphDatabase.driver(
+                uri_str, auth=(str(user), str(password)), connection_timeout=2.0
+            )
             # Verify connectivity immediately to fail fast.
             self.driver.verify_connectivity()
             logger.info("Successfully connected to Neo4j.")
