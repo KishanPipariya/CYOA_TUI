@@ -1,12 +1,15 @@
+from unittest.mock import patch
+
 import pytest
+
 from cyoa.ui.app import CYOAApp
-from unittest.mock import patch, MagicMock
+
 
 @pytest.mark.asyncio
 async def test_debug_stats():
     with patch("cyoa.ui.app.ModelBroker"), patch("cyoa.ui.app.CYOAGraphDB"):
         app = CYOAApp(model_path="dummy")
-        async with app.run_test() as pilot:
+        async with app.run_test():
             app.player_stats["health"] = 0
             app._update_status_bar()
             label = app.query_one("#stats-display")

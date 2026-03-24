@@ -1,14 +1,16 @@
-import jiter
 import json
-import os
 import logging
+import os
 import pathlib
-import jinja2
-from typing import Callable, Optional, List, Dict, Any, Union
+from collections.abc import Callable
+from typing import Any
 
-from cyoa.core.models import StoryNode, Choice
-from cyoa.llm.providers import LLMProvider, LlamaCppProvider, OllamaProvider
+import jinja2
+import jiter
+
 from cyoa.core.constants import CHARS_PER_TOKEN
+from cyoa.core.models import Choice, StoryNode
+from cyoa.llm.providers import LlamaCppProvider, LLMProvider, OllamaProvider
 
 __all__ = ["StoryContext", "ModelBroker", "SpeculationCache"]
 
@@ -29,21 +31,19 @@ class StoryContext:
         self,
         starting_prompt: str,
         token_budget: int = DEFAULT_TOKEN_BUDGET,
-        token_counter: Optional[Callable[[str], int]] = None,
+        token_counter: Callable[[str], int] | None = None,
     ) -> None:
         self.token_budget = token_budget
         self.token_counter = token_counter or (lambda x: len(x) // CHARS_PER_TOKEN)
         self.starting_prompt = starting_prompt
-        self.history: list[dict[str, str]] = [
-            {"role": "user", "content": starting_prompt}
-        ]
+        self.history: list[dict[str, str]] = [{"role": "user", "content": starting_prompt}]
         self.inventory: list[str] = []
         self.player_stats: dict[str, int] = {}
         self.memories: list[str] = []
         # Hierarchical Context Compression
-        self.scene_summary: Optional[str] = None
-        self.chapter_summary: Optional[str] = None
-        self.arc_summary: Optional[str] = None
+        self.scene_summary: str | None = None
+        self.chapter_summary: str | None = None
+        self.arc_summary: str | None = None
         # Hierarchy tracking
         self._scene_turn_count: int = 0
         self._chapter_scene_count: int = 0
@@ -60,8 +60,8 @@ class StoryContext:
         self,
         raw_narrative: str,
         user_choice: str,
-        inventory: Optional[list[str]] = None,
-        player_stats: Optional[dict[str, int]] = None,
+        inventory: list[str] | None = None,
+        player_stats: dict[str, int] | None = None,
     ) -> None:
         """Add an assistant turn (raw narrative) and user choice, trimming old turns."""
         self.history.append({"role": "assistant", "content": raw_narrative})
@@ -77,7 +77,7 @@ class StoryContext:
 
     def _prune_history(self) -> None:
         """Prune story history and memories to fit within the token budget.
-        
+
         Prioritizes:
         1. System Prompt & Persona
         2. Rolling Summary
@@ -116,9 +116,9 @@ class StoryContext:
 
     def set_hierarchical_summary(
         self,
-        scene: Optional[str] = None,
-        chapter: Optional[str] = None,
-        arc: Optional[str] = None,
+        scene: str | None = None,
+        chapter: str | None = None,
+        arc: str | None = None,
     ) -> None:
         """Update the hierarchical summaries of the narrative."""
         if scene is not None:
@@ -194,20 +194,20 @@ class SpeculationCache:
     """Stores pre-calculated story nodes to reduce perceived latency."""
 
     def __init__(self) -> None:
-        self._nodes: Dict[str, StoryNode] = {}
+        self._nodes: dict[str, StoryNode] = {}
         # We also store the KV states if available
-        self._states: Dict[str, bytes] = {}
+        self._states: dict[str, Any] = {}
 
-    def get_node(self, scene_id: str, choice_text: str) -> Optional[StoryNode]:
+    def get_node(self, scene_id: str, choice_text: str) -> StoryNode | None:
         return self._nodes.get(f"{scene_id}:{choice_text}")
 
     def set_node(self, scene_id: str, choice_text: str, node: StoryNode) -> None:
         self._nodes[f"{scene_id}:{choice_text}"] = node
 
-    def get_state(self, scene_id: str) -> Optional[bytes]:
+    def get_state(self, scene_id: str) -> Any:
         return self._states.get(scene_id)
 
-    def set_state(self, scene_id: str, state: bytes) -> None:
+    def set_state(self, scene_id: str, state: Any) -> None:
         self._states[scene_id] = state
 
     def clear_nodes(self) -> None:
@@ -221,9 +221,9 @@ class SpeculationCache:
 class ModelBroker:
     def __init__(
         self,
-        model_path: Optional[str] = None,
-        n_ctx: Optional[int] = None,
-        provider: Optional[LLMProvider] = None,
+        model_path: str | None = None,
+        n_ctx: int | None = None,
+        provider: LLMProvider | None = None,
     ) -> None:
         if provider:
             self.provider = provider
@@ -244,7 +244,7 @@ class ModelBroker:
         self._repair_attempts = int(os.getenv("LLM_REPAIR_ATTEMPTS", "2"))
 
     def _create_provider_from_env(
-        self, model_path: Optional[str] = None, n_ctx: Optional[int] = None
+        self, model_path: str | None = None, n_ctx: int | None = None
     ) -> LLMProvider:
         provider_type = os.getenv("LLM_PROVIDER", "llama_cpp").lower()
         if provider_type == "ollama":
@@ -268,8 +268,8 @@ class ModelBroker:
 
     async def update_story_summaries_async(self, context: StoryContext) -> None:
         """The core of Hierarchical Context Compression.
-        
-        Compresses pruned history into a Scene Summary (last 10 turns), 
+
+        Compresses pruned history into a Scene Summary (last 10 turns),
         Chapter Summary (last 5 scenes), and Arc Summary (global plot goals).
         """
         turns_to_compress = context.get_turns_for_summary()
@@ -277,12 +277,12 @@ class ModelBroker:
             return
 
         pair_count = len(turns_to_compress) // 2
-        
+
         # New buffers for the update
         new_scene = context.scene_summary
         new_chapter = context.chapter_summary
         new_arc = context.arc_summary
-        
+
         # PHASE 1: Update Scene Summary
         if context._scene_turn_count + pair_count <= 10:
             # Still within the ~10 turn scene window
@@ -293,19 +293,17 @@ class ModelBroker:
         else:
             # Scene window full — promote existing Scene Summary to Chapter level
             logger.info("Hierarchical Summarization: Promoting Scene to Chapter.")
-            
+
             # Incorporate old scene summary into chapter summary
             new_chapter = await self._generate_dense_summary(
                 [], context.chapter_summary, previous_summary=context.scene_summary, level="chapter"
             )
             context._chapter_scene_count += 1
-            
+
             # Start a brand new Scene Summary with the new turns
-            new_scene = await self._generate_dense_summary(
-                turns_to_compress, level="scene"
-            )
+            new_scene = await self._generate_dense_summary(turns_to_compress, level="scene")
             context._scene_turn_count = pair_count
-            
+
             # PHASE 2: Check for Chapter -> Arc promotion
             if context._chapter_scene_count >= 5:
                 logger.info("Hierarchical Summarization: Promoting Chapter to Arc.")
@@ -315,23 +313,31 @@ class ModelBroker:
                 # Reset chapter buffer
                 new_chapter = ""
                 context._chapter_scene_count = 0
-        
+
         # Apply the updates to the context (also triggers pruning)
         context.set_hierarchical_summary(scene=new_scene, chapter=new_chapter, arc=new_arc)
 
     async def _generate_dense_summary(
-        self, 
-        turns: list[dict[str, str]], 
-        existing: Optional[str] = None, 
-        previous_summary: Optional[str] = None,
-        level: str = "scene"
+        self,
+        turns: list[dict[str, str]],
+        existing: str | None = None,
+        previous_summary: str | None = None,
+        level: str = "scene",
     ) -> str:
         """Helper to call the LLM for a specific hierarchy level."""
-        
+
         level_map = {
             "scene": ("Scene Summary", "last 10 turns", "2-3 sentences of plot events"),
-            "chapter": ("Chapter Summary", "last 5 scenes", "a dense overview of the local mission or region"),
-            "arc": ("Arc Summary", "global plot goals", "a high-level synopsis of the overarching journey"),
+            "chapter": (
+                "Chapter Summary",
+                "last 5 scenes",
+                "a dense overview of the local mission or region",
+            ),
+            "arc": (
+                "Arc Summary",
+                "global plot goals",
+                "a high-level synopsis of the overarching journey",
+            ),
         }
         title, context_desc, goal = level_map.get(level, ("Summary", "", ""))
 
@@ -341,7 +347,7 @@ class ModelBroker:
             input_bits.append(f"Current {title}: {existing}")
         if previous_summary:
             input_bits.append(f"Newly Finished Lower-Level Context: {previous_summary}")
-        
+
         if turns:
             compact_turns = []
             for msg in turns:
@@ -383,8 +389,7 @@ class ModelBroker:
             return existing or ""
 
     async def generate_legacy_summary_async(self, turns_to_compress: list[dict[str, str]]) -> str:
-        """The original summarization logic.
-        """
+        """The original summarization logic."""
         if not turns_to_compress:
             return ""
 
@@ -414,8 +419,7 @@ class ModelBroker:
             {
                 "role": "user",
                 "content": (
-                    "Summarise the following story events into a single paragraph:\n\n"
-                    f"{turns_blob}"
+                    f"Summarise the following story events into a single paragraph:\n\n{turns_blob}"
                 ),
             },
         ]
@@ -431,14 +435,12 @@ class ModelBroker:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Rolling summarization failed: %s — using plaintext fallback.", exc)
             # Graceful fallback: join turns into a very short plain-text blob
-            return " ".join(
-                msg["content"][:80] for msg in turns_to_compress if msg.get("content")
-            )
+            return " ".join(msg["content"][:80] for msg in turns_to_compress if msg.get("content"))
 
     async def generate_next_node_async(
         self,
         context: StoryContext,
-        on_token_chunk: Optional[Callable[[str], None]] = None,
+        on_token_chunk: Callable[[str], None] | None = None,
     ) -> StoryNode:
         """
         Generate the next story node asynchronously.
@@ -456,9 +458,7 @@ class ModelBroker:
             try:
                 if attempts == 0 and stream and on_token_chunk is not None:
                     # Initial attempt with streaming
-                    content = await self._stream_with_callback_async(
-                        messages, on_token_chunk
-                    )
+                    content = await self._stream_with_callback_async(messages, on_token_chunk)
                 else:
                     # Non-streaming for initial (if requested) or repair attempts
                     content = await self.provider.generate_json(
@@ -555,11 +555,11 @@ class ModelBroker:
 
         return buffer
 
-    async def save_state_async(self) -> Optional[bytes]:
+    async def save_state_async(self) -> Any:
         """Save the provider's internal state (KV cache)."""
         return await self.provider.save_state()
 
-    async def load_state_async(self, state: bytes) -> None:
+    async def load_state_async(self, state: Any) -> None:
         """Load a previously saved state (KV cache)."""
         await self.provider.load_state(state)
 

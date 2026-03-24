@@ -1,14 +1,13 @@
-import pytest
 import os
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from textual.widgets import Markdown, Button, Label, ListView
+import pytest
 from textual.containers import Container
+from textual.widgets import Button, Label, ListView, Markdown
 
+from cyoa.core.models import Choice, StoryNode
 from cyoa.ui.app import CYOAApp
-from cyoa.core.models import StoryNode, Choice
 from cyoa.ui.components import ConfirmScreen, HelpScreen
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -68,9 +67,7 @@ def mock_app_dependencies():
         # Configure the mock DB to not fail async DB operations
         db_instance = mock_db.return_value
         db_instance.create_story_node_and_get_title.return_value = "Test Adventure"
-        db_instance.get_story_tree.return_value = (
-            None  # Just empty for story map test initially
-        )
+        db_instance.get_story_tree.return_value = None  # Just empty for story map test initially
 
         db_instance.save_scene_async = AsyncMock(return_value="dummy-scene-id")
 
@@ -90,7 +87,7 @@ async def test_app_startup_and_loading_state(mock_app_dependencies):
         await pilot.pause(1.0)
 
         # Verify the story text container updated with the mock narrative
-        story_md = app.query_one("#story-text", Markdown)
+        app.query_one("#story-text", Markdown)
         assert "You awaken in a test dungeon." in app._current_story
 
         # Verify choices were generated
@@ -147,38 +144,38 @@ async def test_inventory_updates_on_item_gain_and_loss(mock_app_dependencies):
 
     async with app.run_test() as pilot:
         await pilot.pause(1.0)
-        
+
         # Initial inventory should have Broken Sword (from node1)
         assert "Broken Sword" in app.inventory
-        
+
         # Gain an item via a choice that returns node2 (which has Health Potion)
         await pilot.press("1")
         await pilot.pause(1.0)
         assert "Health Potion" in app.inventory
         assert "Broken Sword" in app.inventory
-        
+
         # Mock item loss: Manually trigger a display update for a hypothetical node that loses an item
-        from cyoa.core.models import StoryNode, Choice
+        from cyoa.core.models import Choice, StoryNode
+
         loss_node = StoryNode(
             narrative="You used the potion.",
             choices=[Choice(text="Continue"), Choice(text="Wait")],
             items_gained=[],
             items_lost=["Health Potion"],
-            title="Test Adventure"
+            title="Test Adventure",
         )
-        
+
         # We can't easily force the generator to return this without more complex patching,
         # but we can test the display_node logic which handles the updates.
         # Use a unique turn_count to avoid ID collisions in tests
         app.turn_count = 99
         app.display_node(loss_node)
-        
+
         app.inventory.remove("Health Potion")
         app._update_status_bar()
         inv_label = app.query_one("#inventory-display", Label)
         assert "Health Potion" not in inv_label.render().plain
         assert "Broken Sword" in inv_label.render().plain
-
 
 
 @pytest.mark.asyncio
@@ -224,7 +221,7 @@ async def test_choice_selection_via_keyboard(mock_app_dependencies):
         await pilot.pause(1.0)
 
         # Verify the story text appended the new narrative
-        story_md = app.query_one("#story-text", Markdown)
+        app.query_one("#story-text", Markdown)
         assert "You went North." in app._current_story
 
         # Check that the UI choice buttons updated to the new choices
@@ -249,7 +246,7 @@ async def test_choice_selection_via_keyboard(mock_app_dependencies):
         # Verify journal updated
         journal_list = app.query_one("#journal-list", ListView)
         journal_labels = journal_list.query(Label)
-        journal_text = "".join(str(l.render()) for l in journal_labels)
+        journal_text = "".join(str(label.render()) for label in journal_labels)
         assert "Go North" in journal_text
 
 
@@ -497,43 +494,45 @@ async def test_save_and_load_game(mock_app_dependencies, tmp_path, monkeypatch):
 async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeypatch):
     """Test that saving and then loading a game correctly restores all relevant state."""
     from cyoa.core import constants
+
     monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
 
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
         await pilot.pause(1.0)
-        
+
         # Set some unique state
-        from cyoa.core.models import StoryNode, Choice
+        from cyoa.core.models import Choice, StoryNode
+
         app.inventory = ["Unique Item 1", "Unique Item 2"]
         app.player_stats = {"health": 88, "gold": 123, "reputation": 5}
         app.turn_count = 5
         node = StoryNode(
             narrative="A unique story begins.",
             choices=[Choice(text="Continue"), Choice(text="Quit")],
-            title="Test Adventure"
+            title="Test Adventure",
         )
         app.current_node = node
         app._current_story = "Previous history.\n\n---\n\n" + node.narrative
-        
+
         # Save
         await pilot.press("s")
         await pilot.pause(0.2)
-        
+
         # Create a new app instance to simulate loading fresh
         app2 = CYOAApp(model_path="dummy_path.gguf")
         async with app2.run_test() as pilot2:
             await pilot2.pause(0.2)
-            
+
             # Find the save file
             save_files = [f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]
             assert len(save_files) == 1
             save_path = os.path.join(str(tmp_path), save_files[0])
-            
+
             # Load it into the second app
             app2._restore_from_save(save_path)
-            
+
             # Verify restoration
             assert app2.turn_count == 5
             assert app2.inventory == ["Unique Item 1", "Unique Item 2"]

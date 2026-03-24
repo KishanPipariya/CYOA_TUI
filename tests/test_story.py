@@ -5,15 +5,15 @@ Headless test harness that verifies core CYOA behaviour without loading the
 actual LLM model or requiring a Neo4j instance.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest  # type: ignore
-from unittest.mock import patch, MagicMock, AsyncMock
 
-from cyoa.core.models import StoryNode, Choice
-from cyoa.llm.broker import StoryContext
+from cyoa.core.models import Choice, StoryNode
+from cyoa.core.theme_loader import list_themes, load_theme
 from cyoa.db.graph_db import CYOAGraphDB
-from cyoa.core.theme_loader import load_theme, list_themes
 from cyoa.db.rag_memory import NarrativeMemory
-
+from cyoa.llm.broker import StoryContext
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -58,7 +58,7 @@ class TestStoryContext:
         ctx = StoryContext(
             starting_prompt="Start",
             token_budget=150,
-            token_counter=lambda x: 20 if len(x) > 5 else 5
+            token_counter=lambda x: 20 if len(x) > 5 else 5,
         )
         for i in range(5):
             ctx.add_turn(f"Narrative {i}", f"Choice {i}")
@@ -71,7 +71,7 @@ class TestStoryContext:
     def test_system_and_initial_prompt_preserved(self):
         """Initial user prompt must always remain."""
         ctx = StoryContext(starting_prompt="My prompt")
-        for i in range(8):
+        for _i in range(8):
             ctx.add_turn("narrative", "choice")
 
         assert ctx.history[0]["role"] == "user"
@@ -88,11 +88,7 @@ class TestStoryContext:
     def test_needs_summarization_trigger(self):
         """needs_summarization should return True at 80% of token_budget."""
         # 0.8 * 100 = 80 tokens
-        ctx = StoryContext(
-            starting_prompt="Start",
-            token_budget=100,
-            token_counter=lambda x: 10
-        )
+        ctx = StoryContext(starting_prompt="Start", token_budget=100, token_counter=lambda x: 10)
         # initial prompt = 10 (role) + 10 (content) = 20
         # messages after 1st turn = system (20) + prompt (20) + turn1 (40) = 80
         ctx.add_turn("n0", "c0")
@@ -115,19 +111,11 @@ class TestStoryContext:
 
     def test_set_hierarchical_summary_and_pruning(self):
         """set_hierarchical_summary should store the summary strings and prune history."""
-        ctx = StoryContext(
-            starting_prompt="Start",
-            token_budget=100,
-            token_counter=lambda x: 10
-        )
+        ctx = StoryContext(starting_prompt="Start", token_budget=100, token_counter=lambda x: 10)
         for i in range(4):
             ctx.add_turn(f"n{i}", f"c{i}")
 
-        ctx.set_hierarchical_summary(
-            scene="The scene.",
-            chapter="The chapter.",
-            arc="The arc."
-        )
+        ctx.set_hierarchical_summary(scene="The scene.", chapter="The chapter.", arc="The arc.")
         assert ctx.scene_summary == "The scene."
         assert ctx.chapter_summary == "The chapter."
         assert ctx.arc_summary == "The arc."
@@ -139,11 +127,7 @@ class TestStoryContext:
     def test_system_prompt_includes_hierarchical_summaries(self):
         """get_messages should render all three hierarchy levels in the system prompt."""
         ctx = StoryContext(starting_prompt="Start")
-        ctx.set_hierarchical_summary(
-            scene="SCENE_TXT",
-            chapter="CHAPTER_TXT",
-            arc="ARC_TXT"
-        )
+        ctx.set_hierarchical_summary(scene="SCENE_TXT", chapter="CHAPTER_TXT", arc="ARC_TXT")
         msgs = ctx.get_messages()
         sys_msg = msgs[0]["content"]
         assert "<scene_summary>" in sys_msg
@@ -160,7 +144,7 @@ class TestStoryContext:
         ctx = StoryContext(
             starting_prompt="Start",
             token_budget=100,
-            token_counter=lambda x: 20 if len(x) > 5 else 5
+            token_counter=lambda x: 20 if len(x) > 5 else 5,
         )
         ctx.add_turn("Narrative 1", "Choice 1")
         # History is now: Prompt (25), Assistant (25), User (25) = 75 tokens
@@ -193,7 +177,6 @@ class TestStoryContext:
         assert "100" in sys_content
 
 
-
 # ── 2. LLM JSON parse failure graceful fallback ───────────────────────────────
 
 
@@ -203,7 +186,6 @@ class TestModelBrokerFallback:
         """If LLM returns invalid JSON, generate_next_node_async should return a valid fallback StoryNode."""
         from cyoa.llm.broker import ModelBroker
         from cyoa.llm.providers import LLMProvider
-        from unittest.mock import AsyncMock
 
         mock_provider = MagicMock(spec=LLMProvider)
         mock_provider.generate_json = AsyncMock(return_value="NOT VALID JSON {")
@@ -219,9 +201,9 @@ class TestModelBrokerFallback:
     async def test_valid_json_returns_parsed_node(self):
         """If LLM returns valid JSON, generate_next_node_async should return a proper StoryNode."""
         import json
+
         from cyoa.llm.broker import ModelBroker
         from cyoa.llm.providers import LLMProvider
-        from unittest.mock import AsyncMock
 
         payload = StoryNode(
             narrative="A torch flickers.",
@@ -243,7 +225,6 @@ class TestModelBrokerFallback:
         """update_story_summaries_async should correctly flow through hierarchy levels."""
         from cyoa.llm.broker import ModelBroker, StoryContext
         from cyoa.llm.providers import LLMProvider
-        from unittest.mock import AsyncMock
 
         mock_provider = MagicMock(spec=LLMProvider)
         mock_provider.generate_text = AsyncMock(return_value="Summary result.")
@@ -251,7 +232,7 @@ class TestModelBrokerFallback:
         gen = ModelBroker(provider=mock_provider)
         ctx = StoryContext(starting_prompt="Start")
         # Add a bunch of turns to trigger summarization
-        for i in range(12): 
+        for i in range(12):
             ctx.add_turn(f"n{i}", f"c{i}")
 
         await gen.update_story_summaries_async(ctx)
@@ -263,7 +244,7 @@ class TestModelBrokerFallback:
         # Simulate Promotion by forcing turn count
         ctx._scene_turn_count = 11
         await gen.update_story_summaries_async(ctx)
-        
+
         # Now chapter should be updated
         assert ctx.chapter_summary == "Summary result."
         assert ctx._chapter_scene_count == 1
@@ -273,17 +254,21 @@ class TestModelBrokerFallback:
     @pytest.mark.asyncio
     async def test_repair_loop_success_on_second_attempt(self):
         """ModelBroker should retry if JSON is invalid and succeed if the second attempt is valid."""
+        import json
+
         from cyoa.llm.broker import ModelBroker
         from cyoa.llm.providers import LLMProvider
-        from unittest.mock import AsyncMock
-        import json
 
         mock_provider = MagicMock(spec=LLMProvider)
         # First call returns garbage, second returns valid JSON
-        mock_provider.generate_json = AsyncMock(side_effect=[
-            "GARBAGE {",
-            json.dumps({"narrative": "Repaired!", "choices": [{"text": "OK"}, {"text": "Cancel"}]})
-        ])
+        mock_provider.generate_json = AsyncMock(
+            side_effect=[
+                "GARBAGE {",
+                json.dumps(
+                    {"narrative": "Repaired!", "choices": [{"text": "OK"}, {"text": "Cancel"}]}
+                ),
+            ]
+        )
 
         broker = ModelBroker(provider=mock_provider)
         ctx = StoryContext("start")
@@ -301,7 +286,6 @@ class TestModelBrokerFallback:
         """ModelBroker should return a fallback node if all repair attempts fail."""
         from cyoa.llm.broker import ModelBroker
         from cyoa.llm.providers import LLMProvider
-        from unittest.mock import AsyncMock
 
         mock_provider = MagicMock(spec=LLMProvider)
         mock_provider.generate_json = AsyncMock(return_value="STILL GARBAGE")
@@ -314,7 +298,6 @@ class TestModelBrokerFallback:
 
             assert "anomaly" in node.narrative
             assert mock_provider.generate_json.call_count == 2
-
 
 
 # ── 3. Graph DB offline graceful degradation ──────────────────────────────────
@@ -509,8 +492,8 @@ class TestStreamingCallback:
     async def test_stream_narrative_extractor(self):
         """_stream_with_callback_async should extract narrative characters correctly."""
         import json
+
         from cyoa.llm.broker import ModelBroker
-        from cyoa.llm.providers import LLMProvider
 
         payload = {
             "title": None,
@@ -525,6 +508,7 @@ class TestStreamingCallback:
             async def gen():
                 for ch in json_str:
                     yield ch
+
             return gen()
 
         mock_provider = MagicMock()
@@ -544,7 +528,6 @@ class TestStreamingCallback:
     async def test_stream_resilience(self):
         """Verify extractor handles weird spacing and newlines using jiter."""
         from cyoa.llm.broker import ModelBroker
-        from cyoa.llm.providers import LLMProvider
 
         # Weird spacing, newlines, and escaping that would break a simple regex
         json_str = '{"title": null,  "narrative" \n : \n  "The dragon said, \\"Return my gold!\\"." , "choices": []}'
@@ -553,6 +536,7 @@ class TestStreamingCallback:
             async def gen():
                 for ch in json_str:
                     yield ch
+
             return gen()
 
         mock_provider = MagicMock()
@@ -560,7 +544,7 @@ class TestStreamingCallback:
 
         gen = ModelBroker(provider=mock_provider)
         received = []
-        result = await gen._stream_with_callback_async([], on_token_chunk=received.append)
+        await gen._stream_with_callback_async([], on_token_chunk=received.append)
 
         extracted = "".join(received)
         assert extracted == 'The dragon said, "Return my gold!".'
@@ -594,7 +578,6 @@ class TestBranchingLogic:
     @pytest.mark.no_worker_mock
     async def test_restore_to_scene_rebuilds_context(self):
         """Restoring to a past scene should rebuild the StoryContext and memory correctly."""
-        from unittest.mock import AsyncMock
         from cyoa.ui.app import CYOAApp
 
         history = {
@@ -645,9 +628,7 @@ class TestBranchingLogic:
 
             app = CYOAApp(model_path="dummy")
             app.current_scene_id = "scene-3"
-            app._current_story = (
-                "You wake up.\n\nYou stand up.\n\nYou walk left into a wall."
-            )
+            app._current_story = "You wake up.\n\nYou stand up.\n\nYou walk left into a wall."
 
             async with app.run_test() as pilot:
                 # Allow the initial startup worker to settle
@@ -685,9 +666,7 @@ class TestBranchingLogic:
         def mock_call_from_thread(callback, *args, **kwargs):
             callback(*args, **kwargs)
 
-        with patch.object(
-            app, "call_from_thread", side_effect=mock_call_from_thread
-        ) as mock_call:
+        with patch.object(app, "call_from_thread", side_effect=mock_call_from_thread) as mock_call:
             app.action_branch_past()
             mock_call.assert_not_called()
 
@@ -699,9 +678,7 @@ class TestProceduralItemSystem:
     def test_story_context_formats_inventory(self):
         """StoryContext should properly inject the inventory state into the user prompt."""
         ctx = StoryContext(starting_prompt="Start")
-        ctx.add_turn(
-            "You found a sword.", "Take sword", inventory=["Iron Sword", "Torch"]
-        )
+        ctx.add_turn("You found a sword.", "Take sword", inventory=["Iron Sword", "Torch"])
 
         messages = ctx.get_messages()
         sys_msg = messages[0]
@@ -722,9 +699,8 @@ class TestProceduralItemSystem:
     @pytest.mark.no_worker_mock
     async def test_app_updates_inventory_state(self):
         """CYOAApp should extract the items list from the generated StoryNode and update state."""
-        from unittest.mock import AsyncMock
-        from cyoa.ui.app import CYOAApp
         from cyoa.core.models import Choice, StoryNode
+        from cyoa.ui.app import CYOAApp
 
         mock_node = StoryNode(
             narrative="You found a shiny key.",

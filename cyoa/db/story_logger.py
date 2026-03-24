@@ -1,5 +1,6 @@
 import logging
-from typing import Optional, Any
+from typing import Any
+
 from cyoa.core.events import bus
 
 logger = logging.getLogger(__name__)
@@ -13,7 +14,7 @@ class StoryLogger:
 
     def __init__(self, filepath: str = "story.md") -> None:
         self.filepath = filepath
-        self._file_handle: Optional[Any] = None
+        self._file_handle: Any | None = None
 
         # Subscribe to events
         bus.subscribe("story_started", self.on_story_started)

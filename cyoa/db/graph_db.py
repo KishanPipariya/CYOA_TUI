@@ -1,13 +1,10 @@
-import uuid
-import os
-import threading
-from typing import Any, Callable, Optional
-from neo4j import GraphDatabase  # type: ignore
-from neo4j.exceptions import ServiceUnavailable, AuthError  # type: ignore
-
 import logging
-from cyoa.core.events import bus
+import os
+import uuid
+from typing import Any
 
+from neo4j import GraphDatabase
+from neo4j.exceptions import AuthError, ServiceUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +12,9 @@ logger = logging.getLogger(__name__)
 class CYOAGraphDB:
     def __init__(
         self,
-        uri: Optional[str] = None,
-        user: Optional[str] = None,
-        password: Optional[str] = None,
+        uri: str | None = None,
+        user: str | None = None,
+        password: str | None = None,
     ) -> None:
         """Initialize the connection to Neo4j. Reads credentials from env vars if not provided."""
         uri = uri or os.getenv("NEO4J_URI", "bolt://localhost:7687")
@@ -26,16 +23,14 @@ class CYOAGraphDB:
         self.driver = None  # Initialize to None
 
         try:
-            self.driver = GraphDatabase.driver(
-                uri, auth=(user, password), connection_timeout=2.0
-            )
+            # Cast uri to str because the Neo4j driver expects a non-None URI
+            uri_str = str(uri)
+            self.driver = GraphDatabase.driver(uri_str, auth=(str(user), str(password)), connection_timeout=2.0)
             # Verify connectivity immediately to fail fast.
             self.driver.verify_connectivity()
             logger.info("Successfully connected to Neo4j.")
         except ServiceUnavailable as e:
-            logger.warning(
-                f"Graph DB is offline. Proceeding without graph persistence. Error: {e}"
-            )
+            logger.warning(f"Graph DB is offline. Proceeding without graph persistence. Error: {e}")
             self.driver = None
         except AuthError:
             logger.error(
@@ -63,7 +58,9 @@ class CYOAGraphDB:
             return generated_title
 
         # Check if the title exists, and if so, append a modifier
-        query_check = "MATCH (s:Story) WHERE s.title STARTS WITH $base_title RETURN s.title AS title"
+        query_check = (
+            "MATCH (s:Story) WHERE s.title STARTS WITH $base_title RETURN s.title AS title"
+        )
 
         final_title = generated_title
         with self.driver.session() as session:
@@ -92,9 +89,7 @@ class CYOAGraphDB:
             })
             RETURN s.title AS title
             """
-            session.run(
-                query_create, story_id=str(uuid.uuid4()), final_title=final_title
-            )
+            session.run(query_create, story_id=str(uuid.uuid4()), final_title=final_title)
 
         return final_title
 
@@ -127,7 +122,10 @@ class CYOAGraphDB:
                 available_choices=available_choices,
                 story_title=story_title,
             )
-            return result.single()["scene_id"]
+            record = result.single()
+            if record is None:
+                return scene_id
+            return str(record["scene_id"])
 
     def create_choice_edge(
         self, source_scene_id: str, target_scene_id: str, choice_text: str
@@ -156,8 +154,8 @@ class CYOAGraphDB:
         narrative: str,
         available_choices: list[str],
         story_title: str,
-        source_scene_id: Optional[str],
-        choice_text: Optional[str],
+        source_scene_id: str | None,
+        choice_text: str | None,
     ) -> str:
         """
         Writes a new scene node (and optional edge from previous scene) to Neo4j.
@@ -165,17 +163,15 @@ class CYOAGraphDB:
         """
         import asyncio
 
-        def _write():
-            new_scene_id = self.create_scene_node(
-                narrative, available_choices, story_title
-            )
+        def _write() -> str:
+            new_scene_id = self.create_scene_node(narrative, available_choices, story_title)
             if source_scene_id and choice_text:
                 self.create_choice_edge(source_scene_id, new_scene_id, choice_text)
             return new_scene_id
 
         return await asyncio.to_thread(_write)
 
-    def get_scene_history_path(self, current_scene_id: str) -> Optional[dict[str, Any]]:
+    def get_scene_history_path(self, current_scene_id: str) -> dict[str, Any] | None:
         """
         Retrieves the path of scenes that led to the current scene.
         """
@@ -290,11 +286,11 @@ class CYOAGraphDB:
         query = """
         MATCH (story:Story {title: $story_title})<-[:BELONGS_TO]-(scene:Scene)
         OPTIONAL MATCH (scene)-[r:LEADS_TO]->(next:Scene)
-        RETURN scene.id AS id, scene.narrative AS narrative, 
+        RETURN scene.id AS id, scene.narrative AS narrative,
                next.id AS next_id, r.action_text AS choice
         """
         nodes = {}
-        edges = {}
+        edges: dict[str, list[dict[str, Any]]] = {}
         has_incoming = set()
 
         with self.driver.session() as session:

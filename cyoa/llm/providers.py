@@ -3,12 +3,14 @@ import json
 import logging
 import os
 import threading
-from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Protocol
+from collections.abc import AsyncIterator, Iterator
+from typing import Any, cast
 
 import httpx
-from llama_cpp import Llama # type: ignore
+from llama_cpp import Llama
 
 logger = logging.getLogger(__name__)
+
 
 class LLMProvider(abc.ABC):
     @abc.abstractmethod
@@ -16,7 +18,7 @@ class LLMProvider(abc.ABC):
         """Count the number of tokens in the given text."""
         ...
 
-    def count_tokens_in_messages(self, messages: List[Dict[str, str]]) -> int:
+    def count_tokens_in_messages(self, messages: list[dict[str, str]]) -> int:
         """Count the number of tokens in a list of chat messages."""
         # Baseline implementation: sum up tokens in all parts of the message.
         # This is a good approximation for most models.
@@ -29,7 +31,7 @@ class LLMProvider(abc.ABC):
     @abc.abstractmethod
     async def generate_text(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> str:
@@ -39,8 +41,8 @@ class LLMProvider(abc.ABC):
     @abc.abstractmethod
     async def generate_json(
         self,
-        messages: List[Dict[str, str]],
-        schema: Dict[str, Any],
+        messages: list[dict[str, str]],
+        schema: dict[str, Any],
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> str:
@@ -50,30 +52,29 @@ class LLMProvider(abc.ABC):
     @abc.abstractmethod
     def stream_json(
         self,
-        messages: List[Dict[str, str]],
-        schema: Dict[str, Any],
+        messages: list[dict[str, str]],
+        schema: dict[str, Any],
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> AsyncIterator[str]:
         """Stream a JSON response chunk by chunk."""
         ...
 
-    async def save_state(self) -> Optional[bytes]:
+    async def save_state(self) -> Any:
         """Save the provider's internal state (e.g. KV cache) if supported."""
         return None
 
-    async def load_state(self, state: bytes) -> None:
+    async def load_state(self, state: Any) -> None:  # noqa: B027
         """Load the provider's internal state (e.g. KV cache) if supported."""
-        pass
+        ...
 
-    def close(self) -> None:
+    def close(self) -> None:  # noqa: B027
         """Release resources (optional)."""
-        pass
+        ...
 
 
 class LlamaCppProvider(LLMProvider):
     def __init__(self, model_path: str, n_ctx: int = 4096):
-        import os
         cpu_threads = max(1, (os.cpu_count() or 8) // 2)
         self.llm = Llama(
             model_path=model_path,
@@ -90,7 +91,7 @@ class LlamaCppProvider(LLMProvider):
         if not text:
             return 0
         try:
-            # Fix: Use non-blocking acquire to avoid hanging the UI thread if the 
+            # Fix: Use non-blocking acquire to avoid hanging the UI thread if the
             # LLM is currently busy generating a response in another thread.
             if self._lock.acquire(blocking=False):
                 try:
@@ -105,20 +106,38 @@ class LlamaCppProvider(LLMProvider):
             logger.warning("LlamaCpp tokenization failed: %s — using fallback.", e)
             return len(text) // 4
 
+    def _prepare_stream_params(
+        self,
+        messages: list[dict[str, str]],
+        schema: dict[str, Any] | None,
+        max_tokens: int,
+        temperature: float,
+    ) -> dict[str, Any]:
+        """Prepare parameters for Llama.create_chat_completion."""
+        params: dict[str, Any] = {
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": True,
+        }
+        if schema:
+            params["response_format"] = {"type": "json_object", "schema": schema}
+        return params
+
     async def _run_cancellable_stream(
         self,
-        messages: List[Dict[str, str]],
-        schema: Optional[Dict[str, Any]] = None,
+        messages: list[dict[str, str]],
+        schema: dict[str, Any] | None = None,
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> AsyncIterator[str]:
         import asyncio
 
         loop = asyncio.get_running_loop()
-        q: asyncio.Queue[Optional[str]] = asyncio.Queue()
+        q: asyncio.Queue[str | None] = asyncio.Queue()
         cancel_event = threading.Event()
 
-        def producer():
+        def producer() -> None:
             try:
                 if cancel_event.is_set():
                     return
@@ -127,17 +146,9 @@ class LlamaCppProvider(LLMProvider):
                     if cancel_event.is_set():
                         return
 
-                    params = {
-                        "messages": messages,
-                        "max_tokens": max_tokens,
-                        "temperature": temperature,
-                        "stream": True,
-                    }
-                    if schema:
-                        params["response_format"] = {"type": "json_object", "schema": schema}
-
-                    stream = self.llm.create_chat_completion(**params)
-                    for chunk in stream:
+                    params = self._prepare_stream_params(messages, schema, max_tokens, temperature)
+                    stream = self.llm.create_chat_completion(**cast(Any, params))
+                    for chunk in cast(Iterator[Any], stream):
                         if cancel_event.is_set():
                             break
                         delta = chunk["choices"][0].get("delta", {})
@@ -162,7 +173,7 @@ class LlamaCppProvider(LLMProvider):
 
     async def generate_text(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> str:
@@ -175,8 +186,8 @@ class LlamaCppProvider(LLMProvider):
 
     async def generate_json(
         self,
-        messages: List[Dict[str, str]],
-        schema: Dict[str, Any],
+        messages: list[dict[str, str]],
+        schema: dict[str, Any],
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> str:
@@ -192,8 +203,8 @@ class LlamaCppProvider(LLMProvider):
 
     async def stream_json(
         self,
-        messages: List[Dict[str, str]],
-        schema: Dict[str, Any],
+        messages: list[dict[str, str]],
+        schema: dict[str, Any],
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> AsyncIterator[str]:
@@ -205,11 +216,11 @@ class LlamaCppProvider(LLMProvider):
         ):
             yield token
 
-    async def save_state(self) -> Optional[bytes]:
+    async def save_state(self) -> Any:
         """Save the current KV-cache state of the LLM."""
         import asyncio
 
-        def _run():
+        def _run() -> Any:
             with self._lock:
                 return self.llm.save_state()
 
@@ -219,11 +230,11 @@ class LlamaCppProvider(LLMProvider):
             logger.warning("Failed to save LlamaCpp state: %s", e)
             return None
 
-    async def load_state(self, state: bytes) -> None:
+    async def load_state(self, state: Any) -> None:
         """Load a previously saved KV-cache state."""
         import asyncio
 
-        def _run():
+        def _run() -> None:
             with self._lock:
                 self.llm.load_state(state)
 
@@ -254,11 +265,13 @@ class LlamaCppProvider(LLMProvider):
 
 class OllamaProvider(LLMProvider):
     def __init__(self, model: str, base_url: str = "http://localhost:11434"):
+        self.tokenizer: Any | None = None
         self.model = model
         self.base_url = f"{base_url.rstrip('/')}/api/chat"
         # Tiktoken fallback for high-precision estimation without model weights
         try:
             import tiktoken
+
             self.tokenizer = tiktoken.get_encoding("cl100k_base")
         except ImportError:
             self.tokenizer = None
@@ -273,7 +286,7 @@ class OllamaProvider(LLMProvider):
 
     async def generate_text(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> str:
@@ -289,12 +302,13 @@ class OllamaProvider(LLMProvider):
             }
             response = await client.post(self.base_url, json=payload)
             response.raise_for_status()
-            return response.json()["message"]["content"]
+            data = response.json()
+            return str(data["message"]["content"])
 
     async def generate_json(
         self,
-        messages: List[Dict[str, str]],
-        schema: Dict[str, Any],
+        messages: list[dict[str, str]],
+        schema: dict[str, Any],
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> str:
@@ -311,12 +325,13 @@ class OllamaProvider(LLMProvider):
             }
             response = await client.post(self.base_url, json=payload)
             response.raise_for_status()
-            return response.json()["message"]["content"]
+            data = response.json()
+            return str(data["message"]["content"])
 
     async def stream_json(
         self,
-        messages: List[Dict[str, str]],
-        schema: Dict[str, Any],
+        messages: list[dict[str, str]],
+        schema: dict[str, Any],
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> AsyncIterator[str]:

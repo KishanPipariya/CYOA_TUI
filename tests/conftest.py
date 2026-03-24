@@ -1,5 +1,6 @@
-import sys
 import os
+import sys
+
 import pytest
 
 # Add the project root to sys.path so tests can import app, models, etc.
@@ -7,6 +8,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cyoa.core.events import bus
+
 
 @pytest.fixture(autouse=True)
 def reset_event_bus():

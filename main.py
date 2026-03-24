@@ -1,23 +1,22 @@
 import argparse
-import sys
 import os
-from dotenv import load_dotenv  # type: ignore
+import sys
+
+from dotenv import load_dotenv
 
 # Load .env before anything that reads os.getenv (graph_db)
 load_dotenv()
 
-from cyoa.ui.app import CYOAApp  # noqa: E402
-from cyoa.core.theme_loader import load_theme, list_themes  # noqa: E402
-from cyoa.db.story_logger import StoryLogger  # noqa: E402
 # Import core constants to keep things consistent
 from cyoa.core.constants import DEFAULT_STARTING_PROMPT, STORY_LOG_FILE  # noqa: E402
+from cyoa.core.theme_loader import list_themes, load_theme  # noqa: E402
+from cyoa.db.story_logger import StoryLogger  # noqa: E402
+from cyoa.ui.app import CYOAApp  # noqa: E402
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="CYOA Terminal Game with Local LLM")
-    parser.add_argument(
-        "--model", type=str, required=True, help="Path to the .gguf model file"
-    )
+    parser.add_argument("--model", type=str, required=True, help="Path to the .gguf model file")
     parser.add_argument(
         "--theme",
         type=str,
@@ -56,7 +55,7 @@ def main() -> None:
         spinner_frames=spinner_frames,
         accent_color=accent_color,
     )
-    
+
     try:
         app.run()
     except KeyboardInterrupt:

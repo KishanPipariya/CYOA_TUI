@@ -1,9 +1,10 @@
 from typing import Any
+
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
-from textual.widgets import Button, ListView, ListItem, Label, Static, Markdown
-from textual.screen import ModalScreen
 from textual.markup import escape
+from textual.screen import ModalScreen
+from textual.widgets import Button, Label, ListItem, ListView, Markdown, Static
 
 __all__ = [
     "BranchScreen",
@@ -11,7 +12,25 @@ __all__ = [
     "ConfirmScreen",
     "HelpScreen",
     "LoadGameScreen",
+    "SceneListItem",
+    "SaveListItem",
 ]
+
+
+class SceneListItem(ListItem):
+    """ListItem that carries a scene index for branch selection."""
+
+    def __init__(self, *args: Any, scene_index: int = 0, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.scene_index = scene_index
+
+
+class SaveListItem(ListItem):
+    """ListItem that carries a save filename for loading."""
+
+    def __init__(self, *args: Any, save_filename: str = "", **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.save_filename = save_filename
 
 
 class BranchScreen(ModalScreen[int]):
@@ -39,9 +58,7 @@ class BranchScreen(ModalScreen[int]):
     }
     """
 
-    def __init__(
-        self, scenes: list[dict[str, Any]], choices: list[str], **kwargs: Any
-    ) -> None:
+    def __init__(self, scenes: list[dict[str, Any]], choices: list[str], **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.scenes = scenes
         self.choices = choices
@@ -62,14 +79,12 @@ class BranchScreen(ModalScreen[int]):
             preview = scene["narrative"][:100].replace("\n", " ") + "..."
             choice_text = self.choices[i] if i < len(self.choices) else "Current Scene"
             label_text = f"Turn {i + 1}: {preview}\n[i]Choice made: {choice_text}[/i]"
-            item = ListItem(Label(label_text, classes="scene-preview"))
-            item.scene_index = i
+            item = SceneListItem(Label(label_text, classes="scene-preview"), scene_index=i)
             list_view.append(item)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
-        idx = getattr(event.item, "scene_index", None)
-        if idx is not None:
-            self.dismiss(idx)
+        if isinstance(event.item, SceneListItem):
+            self.dismiss(event.item.scene_index)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel-branch":
@@ -271,9 +286,7 @@ class LoadGameScreen(ModalScreen[str]):
 
     def compose(self) -> ComposeResult:
         with Container(id="load-dialog"):
-            yield Label(
-                "[b]📂 Load Game[/b] \u2014 Select a save file", id="load-title"
-            )
+            yield Label("[b]📂 Load Game[/b] \u2014 Select a save file", id="load-title")
             yield ListView(id="load-list")
             yield Button("Cancel (Esc)", id="btn-load-cancel", variant="error")
 
@@ -281,14 +294,12 @@ class LoadGameScreen(ModalScreen[str]):
         list_view = self.query_one("#load-list", ListView)
         for save_file in self._save_files:
             display_name = save_file.replace(".json", "").replace("_", " ")
-            item = ListItem(Label(f"💾 {display_name}", classes="save-entry"))
-            item.save_filename = save_file
+            item = SaveListItem(Label(f"💾 {display_name}", classes="save-entry"), save_filename=save_file)
             list_view.append(item)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
-        filename = getattr(event.item, "save_filename", None)
-        if filename:
-            self.dismiss(filename)
+        if isinstance(event.item, SaveListItem):
+            self.dismiss(event.item.save_filename)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-load-cancel":

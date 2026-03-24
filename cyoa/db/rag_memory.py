@@ -7,23 +7,22 @@ LLM prompt as a "memory" block, giving it long-term story coherence
 beyond the sliding context window.
 """
 
-import uuid
 import logging
-from typing import Any, Optional
+import uuid
+from typing import Any
 
 __all__ = ["NarrativeMemory", "NPCMemory"]
 
 try:
-    import chromadb  # type: ignore
-    from cyoa.core.events import bus
+    import chromadb
+
+
 
     _CHROMA_AVAILABLE = True
     logger = logging.getLogger(__name__)
 except ImportError:
     _CHROMA_AVAILABLE = False
-    logger = logging.getLogger(
-        __name__
-    )  # Still need logger even if chromadb is not available
+    logger = logging.getLogger(__name__)  # Still need logger even if chromadb is not available
 
 
 class NarrativeMemory:
@@ -41,8 +40,8 @@ class NarrativeMemory:
     def __init__(self, collection_name: str = "cyoa_narrative_memory") -> None:
         self._available: bool = _CHROMA_AVAILABLE
         self._collection_name: str = collection_name
-        self._client: Optional[Any] = None
-        self._collection: Optional[Any] = None
+        self._client: Any | None = None
+        self._collection: Any | None = None
 
     def _ensure_ready(self) -> bool:
         """Create the chroma client and collection on first use. Returns False if unavailable."""
@@ -66,7 +65,8 @@ class NarrativeMemory:
     async def add_async(self, scene_id: str, narrative: str) -> None:
         """Embed and store a scene narrative asynchronously."""
         import asyncio
-        def _sync_add():
+
+        def _sync_add() -> None:
             if not self._ensure_ready() or self._collection is None:
                 return
             try:
@@ -76,6 +76,7 @@ class NarrativeMemory:
                 )
             except Exception as e:  # noqa: BLE001
                 logger.error("RAG memory: failed to add scene %s: %s", scene_id, e)
+
         await asyncio.to_thread(_sync_add)
 
     async def query_async(self, text: str, n: int = 3) -> list[str]:
@@ -84,7 +85,8 @@ class NarrativeMemory:
         Returns an empty list if memory is unavailable or empty.
         """
         import asyncio
-        def _sync_query():
+
+        def _sync_query() -> list[str]:
             if not self._ensure_ready() or self._collection is None:
                 return []
             try:
@@ -99,6 +101,7 @@ class NarrativeMemory:
             except Exception as e:  # noqa: BLE001
                 logger.error("RAG memory: query failed: %s", e)
                 return []
+
         return await asyncio.to_thread(_sync_query)
 
 
@@ -110,7 +113,7 @@ class NPCMemory:
     def __init__(self, base_collection_name: str = "cyoa_npc_memory") -> None:
         self._available: bool = _CHROMA_AVAILABLE
         self._base_name: str = base_collection_name
-        self._client: Optional[Any] = None
+        self._client: Any | None = None
         self._collections: dict[str, Any] = {}
 
     def _ensure_ready(self, npc_name: str) -> bool:
@@ -131,15 +134,14 @@ class NPCMemory:
             )
             return True
         except Exception as e:  # noqa: BLE001
-            logger.error(
-                "RAG NPC memory: failed to initialise chromadb for %s: %s", npc_name, e
-            )
+            logger.error("RAG NPC memory: failed to initialise chromadb for %s: %s", npc_name, e)
             self._available = False
             return False
 
     async def add_async(self, npc_name: str, scene_id: str, narrative: str) -> None:
         import asyncio
-        def _sync_add():
+
+        def _sync_add() -> None:
             if not self._ensure_ready(npc_name):
                 return
             safe_name = "".join(c if c.isalnum() else "_" for c in npc_name).lower()
@@ -158,11 +160,13 @@ class NPCMemory:
                     npc_name,
                     e,
                 )
+
         await asyncio.to_thread(_sync_add)
 
     async def query_async(self, npc_name: str, text: str, n: int = 2) -> list[str]:
         import asyncio
-        def _sync_query():
+
+        def _sync_query() -> list[str]:
             if not self._ensure_ready(npc_name):
                 return []
             safe_name = "".join(c if c.isalnum() else "_" for c in npc_name).lower()
@@ -182,4 +186,5 @@ class NPCMemory:
             except Exception as e:  # noqa: BLE001
                 logger.error("RAG NPC memory: query failed for %s: %s", npc_name, e)
                 return []
+
         return await asyncio.to_thread(_sync_query)
