@@ -11,6 +11,16 @@ import jiter
 from cyoa.core.constants import CHARS_PER_TOKEN
 from cyoa.core.models import Choice, StoryNode
 from cyoa.core.observability import record_repair_attempt
+from cyoa.llm.pipeline import (
+    DirectiveComponent,
+    GoalComponent,
+    HistoryComponent,
+    MemoryComponent,
+    PersonaComponent,
+    PlayerSheetComponent,
+    PromptPipeline,
+    SummarizationComponent,
+)
 from cyoa.llm.providers import LlamaCppProvider, LLMProvider, OllamaProvider
 
 __all__ = ["StoryContext", "ModelBroker", "SpeculationCache"]
@@ -45,6 +55,9 @@ class StoryContext:
         self.scene_summary: str | None = None
         self.chapter_summary: str | None = None
         self.arc_summary: str | None = None
+        # User/System goals and directives (injected into prompt via pipeline)
+        self.goals: list[str] = []
+        self.directives: list[str] = []
         # Hierarchy tracking
         self._scene_turn_count: int = 0
         self._chapter_scene_count: int = 0
@@ -52,6 +65,28 @@ class StoryContext:
         template_dir = pathlib.Path(__file__).parent / "templates"
         self.jinja_env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_dir))
         self.system_template = self.jinja_env.get_template("system_prompt.j2")
+
+        # Initialize the modular prompt pipeline
+        # We can still extract the base text from the template if we want,
+        # but for now we'll define a default persona and use modular components.
+        self.pipeline = PromptPipeline(
+            [
+                PersonaComponent(),
+                GoalComponent(),
+                DirectiveComponent(),
+                PlayerSheetComponent(),
+                MemoryComponent(),
+                SummarizationComponent(),
+                HistoryComponent(),
+            ]
+        )
+
+    def set_persona(self, persona_text: str) -> None:
+        """Override the default persona in the pipeline."""
+        for i, comp in enumerate(self.pipeline.components):
+            if isinstance(comp, PersonaComponent):
+                self.pipeline.components[i] = PersonaComponent(persona_text)
+                break
 
     # ------------------------------------------------------------------
     # Turn management
@@ -161,15 +196,8 @@ class StoryContext:
     # ------------------------------------------------------------------
 
     def get_messages(self) -> list[dict[str, str]]:
-        system_content = self.system_template.render(
-            inventory=self.inventory,
-            stats=self.player_stats,
-            memories=self.memories,
-            scene_summary=self.scene_summary,
-            chapter_summary=self.chapter_summary,
-            arc_summary=self.arc_summary,
-        )
-        return [{"role": "system", "content": system_content}] + self.history
+        """Assemble the full message stack using the component pipeline."""
+        return self.pipeline.process(self)
 
     def clone(self) -> "StoryContext":
         """Return a deep copy of the context data, but reuse the model/template refs."""
@@ -186,8 +214,12 @@ class StoryContext:
         new_ctx.scene_summary = self.scene_summary
         new_ctx.chapter_summary = self.chapter_summary
         new_ctx.arc_summary = self.arc_summary
+        new_ctx.goals = list(self.goals)
+        new_ctx.directives = list(self.directives)
         new_ctx._scene_turn_count = self._scene_turn_count
         new_ctx._chapter_scene_count = self._chapter_scene_count
+        # Reuse the same pipeline (shallow copy of list is fine if components are stateless or handled)
+        new_ctx.pipeline = PromptPipeline(list(self.pipeline.components))
         return new_ctx
 
 
