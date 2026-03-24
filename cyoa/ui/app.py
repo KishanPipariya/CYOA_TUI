@@ -280,8 +280,6 @@ class CYOAApp(App):
         self.current_scene_id = new_id
         self.update_story_map()
 
-        self.display_node(node)
-
     @work(group="speculation", exclusive=True)
     async def speculate_all_choices(self, node: StoryNode) -> None:
         """Sequential background generation of the most likely next scenes."""
