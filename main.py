@@ -9,12 +9,15 @@ load_dotenv()
 
 # Import core constants to keep things consistent
 from cyoa.core.constants import DEFAULT_STARTING_PROMPT, STORY_LOG_FILE  # noqa: E402
+from cyoa.core.observability import setup_observability
 from cyoa.core.theme_loader import list_themes, load_theme  # noqa: E402
 from cyoa.db.story_logger import StoryLogger  # noqa: E402
 from cyoa.ui.app import CYOAApp  # noqa: E402
 
 
 def main() -> None:
+    # Initialize OpenTelemetry
+    setup_observability()
     parser = argparse.ArgumentParser(description="CYOA Terminal Game with Local LLM")
     parser.add_argument("--model", type=str, required=True, help="Path to the .gguf model file")
     parser.add_argument(

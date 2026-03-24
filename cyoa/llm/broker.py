@@ -10,6 +10,7 @@ import jiter
 
 from cyoa.core.constants import CHARS_PER_TOKEN
 from cyoa.core.models import Choice, StoryNode
+from cyoa.core.observability import record_repair_attempt
 from cyoa.llm.providers import LlamaCppProvider, LLMProvider, OllamaProvider
 
 __all__ = ["StoryContext", "ModelBroker", "SpeculationCache"]
@@ -485,6 +486,10 @@ class ModelBroker:
                     e,
                     content[:100],
                 )
+                
+                # Record the repair attempt in OpenTelemetry
+                model_name = getattr(self.provider, "model_path", getattr(self.provider, "model", "unknown"))
+                record_repair_attempt(model_name=model_name, error_type=type(e).__name__)
 
                 # Append the faulty response and a correction prompt for the next attempt
                 messages = list(messages)

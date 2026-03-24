@@ -9,7 +9,10 @@ from typing import Any, cast
 import httpx
 from llama_cpp import Llama
 
+from cyoa.core.observability import LLMObservedSession, record_repair_attempt
+
 logger = logging.getLogger(__name__)
+
 
 
 class LLMProvider(abc.ABC):
@@ -138,12 +141,15 @@ class LlamaCppProvider(LLMProvider):
         cancel_event = threading.Event()
 
         def producer() -> None:
+            session = LLMObservedSession(model_name=self.model_path, task="generation").start()
             try:
                 if cancel_event.is_set():
+                    session.end(success=False)
                     return
 
                 with self._lock:
                     if cancel_event.is_set():
+                        session.end(success=False)
                         return
 
                     params = self._prepare_stream_params(messages, schema, max_tokens, temperature)
@@ -154,9 +160,13 @@ class LlamaCppProvider(LLMProvider):
                         delta = chunk["choices"][0].get("delta", {})
                         token = delta.get("content", "")
                         if token:
+                            session.report_first_token()
+                            session.report_token(self.count_tokens(token))
                             loop.call_soon_threadsafe(q.put_nowait, token)
+                session.end(success=True)
             except Exception as e:
                 logger.error("Error in LlamaCppProvider stream producer: %s", e)
+                session.end(success=False)
             finally:
                 loop.call_soon_threadsafe(q.put_nowait, None)
 
@@ -290,20 +300,31 @@ class OllamaProvider(LLMProvider):
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> str:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            payload = {
-                "model": self.model,
-                "messages": messages,
-                "stream": False,
-                "options": {
-                    "num_predict": max_tokens,
-                    "temperature": temperature,
-                },
-            }
-            response = await client.post(self.base_url, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            return str(data["message"]["content"])
+        session = LLMObservedSession(model_name=self.model, task="generate_text").start()
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                payload = {
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": False,
+                    "options": {
+                        "num_predict": max_tokens,
+                        "temperature": temperature,
+                    },
+                }
+                response = await client.post(self.base_url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                content = str(data["message"]["content"])
+                
+                # For non-streaming, TTFT is the same as total time in this simplistic view
+                session.report_first_token()
+                session.report_token(self.count_tokens(content))
+                session.end(success=True)
+                return content
+        except Exception:
+            session.end(success=False)
+            raise
 
     async def generate_json(
         self,
@@ -312,21 +333,31 @@ class OllamaProvider(LLMProvider):
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> str:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            payload = {
-                "model": self.model,
-                "messages": messages,
-                "stream": False,
-                "format": schema,
-                "options": {
-                    "num_predict": max_tokens,
-                    "temperature": temperature,
-                },
-            }
-            response = await client.post(self.base_url, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            return str(data["message"]["content"])
+        session = LLMObservedSession(model_name=self.model, task="generate_json").start()
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                payload = {
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": False,
+                    "format": schema,
+                    "options": {
+                        "num_predict": max_tokens,
+                        "temperature": temperature,
+                    },
+                }
+                response = await client.post(self.base_url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                content = str(data["message"]["content"])
+                
+                session.report_first_token()
+                session.report_token(self.count_tokens(content))
+                session.end(success=True)
+                return content
+        except Exception:
+            session.end(success=False)
+            raise
 
     async def stream_json(
         self,
@@ -335,28 +366,37 @@ class OllamaProvider(LLMProvider):
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> AsyncIterator[str]:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            payload = {
-                "model": self.model,
-                "messages": messages,
-                "stream": True,
-                "format": schema,
-                "options": {
-                    "num_predict": max_tokens,
-                    "temperature": temperature,
-                },
-            }
-            async with client.stream("POST", self.base_url, json=payload) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line:
-                        continue
-                    try:
-                        chunk = json.loads(line)
-                        if "message" in chunk and "content" in chunk["message"]:
-                            yield chunk["message"]["content"]
-                        if chunk.get("done", False):
-                            break
-                    except json.JSONDecodeError:
-                        logger.warning("Failed to decode Ollama stream chunk: %s", line)
-                        continue
+        session = LLMObservedSession(model_name=self.model, task="stream_json").start()
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                payload = {
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": True,
+                    "format": schema,
+                    "options": {
+                        "num_predict": max_tokens,
+                        "temperature": temperature,
+                    },
+                }
+                async with client.stream("POST", self.base_url, json=payload) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line:
+                            continue
+                        try:
+                            chunk = json.loads(line)
+                            if "message" in chunk and "content" in chunk["message"]:
+                                session.report_first_token()
+                                content = chunk["message"]["content"]
+                                session.report_token(self.count_tokens(content))
+                                yield content
+                            if chunk.get("done", False):
+                                break
+                        except json.JSONDecodeError:
+                            logger.warning("Failed to decode Ollama stream chunk: %s", line)
+                            continue
+            session.end(success=True)
+        except Exception:
+            session.end(success=False)
+            raise
