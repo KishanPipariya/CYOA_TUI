@@ -78,6 +78,7 @@ class LLMProvider(abc.ABC):
 class LlamaCppProvider(LLMProvider):
     def __init__(self, model_path: str, n_ctx: int = 4096):
         cpu_threads = max(1, (os.cpu_count() or 8) // 2)
+        self.model_path = model_path
         self.llm = Llama(
             model_path=model_path,
             n_ctx=n_ctx,
@@ -140,8 +141,9 @@ class LlamaCppProvider(LLMProvider):
         cancel_event = threading.Event()
 
         def producer() -> None:
-            session = LLMObservedSession(model_name=self.model_path, task="generation").start()
+            session = None
             try:
+                session = LLMObservedSession(model_name=self.model_path, task="generation").start()
                 if cancel_event.is_set():
                     session.end(success=False)
                     return
@@ -165,7 +167,8 @@ class LlamaCppProvider(LLMProvider):
                 session.end(success=True)
             except Exception as e:
                 logger.error("Error in LlamaCppProvider stream producer: %s", e)
-                session.end(success=False)
+                if session:
+                    session.end(success=False)
             finally:
                 loop.call_soon_threadsafe(q.put_nowait, None)
 

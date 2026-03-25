@@ -22,11 +22,12 @@ from textual.widgets import (
 )
 
 from cyoa.core import constants, utils
-from cyoa.core.events import bus
+from cyoa.core.engine import StoryEngine
+from cyoa.core.events import Events, bus
 from cyoa.core.models import Choice, StoryNode
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
-from cyoa.llm.broker import DEFAULT_TOKEN_BUDGET, ModelBroker, SpeculationCache, StoryContext
+from cyoa.llm.broker import ModelBroker, SpeculationCache, StoryContext
 from cyoa.ui.ascii_art import SCENE_ART
 from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, ThemeSpinner
 
@@ -92,25 +93,11 @@ class CYOAApp(App):
         self._accent_color = accent_color
 
         self.generator: ModelBroker | None = None
-        self.story_context: StoryContext | None = None
-        self.db: CYOAGraphDB | None = None
-        self.current_scene_id: str | None = None
-        self.last_choice_text: str | None = None
-        self.current_story_title: str | None = None
-        self._last_raw_narrative: str | None = None
-
-        self._loading_suffix_shown: bool = False
+        self.engine: StoryEngine | None = None
         self._current_story: str = LOADING_ART
+        self._loading_suffix_shown: bool = False
 
-        # Procedural inventory tracking
-        self.inventory: list[str] = []
-        self.player_stats: dict[str, int] = {"health": 100, "gold": 0, "reputation": 0}
-        self.current_node: StoryNode | None = None
-        self._stream_token_buffer: int = 0
-        # RAG: in-memory semantic scene store
-        self.memory = NarrativeMemory()
-        self.npc_memory = NPCMemory()
-        self.speculation_cache = SpeculationCache()
+        # Typewriter Narrator state
 
         # Typewriter Narrator state
         self._typewriter_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -178,13 +165,27 @@ class CYOAApp(App):
         yield Footer()
 
     def watch_turn_count(self, count: int) -> None:
-        # Fix #4: Update footer subtitle with turn counter
         self.sub_title = f"Turn {count}" if count > 0 else ""
 
     async def on_mount(self) -> None:
         self.query_one("#choices-container").border_title = "Choices"
         self.query_one("#story-container").border_title = "Story"
-        # Start loading indicator (text + spinner) immediately
+
+        # Subscribe to Engine Events
+        bus.subscribe(Events.ENGINE_STARTED, self._handle_engine_started)
+        bus.subscribe(Events.ENGINE_RESTARTED, self._handle_engine_restarted)
+        bus.subscribe(Events.CHOICE_MADE, self._handle_choice_made)
+        bus.subscribe(Events.NODE_GENERATING, self._handle_node_generating)
+        bus.subscribe(Events.TOKEN_STREAMED, self._handle_token_streamed)
+        bus.subscribe(Events.NODE_COMPLETED, self._handle_node_completed)
+        bus.subscribe(Events.STATS_UPDATED, self._handle_stats_updated)
+        bus.subscribe(Events.INVENTORY_UPDATED, self._handle_inventory_updated)
+        bus.subscribe(Events.STORY_TITLE_GENERATED, self._handle_title_generated)
+        bus.subscribe(Events.ENDING_REACHED, self._handle_ending_reached)
+        bus.subscribe(Events.ERROR_OCCURRED, self._handle_error)
+        bus.subscribe(Events.STATUS_MESSAGE, self._handle_status_message)
+
+        # Start loading indicator immediately
         self.show_loading()
         # Start the typewriter narrator worker
         self._typewriter_worker()
@@ -192,120 +193,118 @@ class CYOAApp(App):
         self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
 
     def on_unmount(self) -> None:
-        """Cancel all background work and release the LLM model and graph DB."""
+        """Cancel all background work and release resources."""
         self.workers.cancel_all()
         if self.generator:
             self.generator.close()
-        if self.db:
-            self.db.close()
+        if self.engine and self.engine.db:
+            self.engine.db.close()
 
     @work(exclusive=True)
     async def initialize_and_start(self, model_path: str) -> None:
-        """Load model and generate the first scene. Reuses existing model if already loaded."""
-        # Show loading state (text + spinner) BEFORE model/DB loading begins
+        """Load model and start the story engine."""
         self.show_loading()
-        # Ensure the UI paints the initial shifting state
         await asyncio.sleep(0.2)
 
         try:
             if self.generator is None:
-                # Fix: Model loading is blocking (can take several seconds), run it in a thread
                 self.generator = await asyncio.to_thread(ModelBroker, model_path=model_path)
 
-            self.story_context = StoryContext(
-                starting_prompt=self.starting_prompt,
-                token_budget=self.generator.token_budget,
-                token_counter=self.generator.provider.count_tokens,
-            )
+            if self.engine is None:
+                # Initialize engine with shared services
+                self.engine = StoryEngine(
+                    broker=self.generator,
+                    starting_prompt=self.starting_prompt,
+                    db=CYOAGraphDB(),
+                )
 
-            if self.db is None:
-                # Fix: Neo4j connection/verify_connectivity() is also blocking; run in a thread
-                self.db = await asyncio.to_thread(CYOAGraphDB)
+            await self.engine.initialize()
 
-            # Re-ensure loading state is active before first turn generation
-            self.show_loading()
-
-            def on_token(partial: str) -> None:
-                self._stream_narrative(partial)
-
-            node = await self.generator.generate_next_node_async(
-                self.story_context, on_token_chunk=on_token
-            )
         except Exception as e:
             self.notify(f"Initial setup failed: {e}", severity="error", timeout=5)
-            # Hide loading so the user can see the error/retry
             self.query_one("#loading").add_class("hidden")
             raise
 
-        self._apply_node_updates(node)
+    # ------------------------------------------------------------------
+    # Event Handlers
+    # ------------------------------------------------------------------
 
-        generated_title = node.title if node.title else "Untitled Adventure"
-        self.current_story_title = await asyncio.to_thread(
-            self.db.create_story_node_and_get_title, generated_title
-        )
+    def _handle_engine_started(self) -> None:
+        self.turn_count = 1
+        self.query_one("#journal-list", ListView).clear()
 
-        bus.emit("story_started", title=self.current_story_title)
+    def _handle_engine_restarted(self) -> None:
+        self.notify("Adventure Reset.", severity="information", timeout=2)
 
-        if self.db:
-            await self._save_initial_scene(node)
+    def _handle_choice_made(self, choice_text: str) -> None:
+        self.action_skip_typewriter()
+        # We don't append to _current_story here because it's handled in `_trigger_choice` for instant feedback
+        # or maybe we should let the engine handle it?
+        # For now, let's keep the UI responsive logic in `_trigger_choice`.
+        pass
 
+    def _handle_node_generating(self) -> None:
+        self.show_loading()
+
+    def _handle_token_streamed(self, token: str) -> None:
+        self._stream_narrative(token)
+
+    def _handle_node_completed(self, node: StoryNode) -> None:
+        if self.engine:
+            self.turn_count = self.engine.turn_count
         self.display_node(node)
-
-    def _apply_node_updates(self, node: StoryNode) -> None:
-        """Update inventory and player stats from a new StoryNode."""
-        self._last_raw_narrative = node.narrative
-        self.current_node = node
-        for item in getattr(node, "items_gained", []):
-            if item not in self.inventory:
-                self.inventory.append(item)
-        for item in getattr(node, "items_lost", []):
-            if item in self.inventory:
-                self.inventory.remove(item)
-
-        for stat, change in getattr(node, "stat_updates", {}).items():
-            self.player_stats[stat] = self.player_stats.get(stat, 0) + change
-
-    async def _save_initial_scene(self, node: StoryNode) -> None:
-        """Save the first scene of a new story to the database."""
-        if not self.db:
-            return
-        choices_text = [choice.text for choice in node.choices]
-        new_id = await self.db.save_scene_async(
-            narrative=node.narrative,
-            available_choices=choices_text,
-            story_title=str(self.current_story_title),
-            source_scene_id=None,
-            choice_text=None,
-        )
-        self.current_scene_id = new_id
         self.update_story_map()
+
+    def _handle_stats_updated(self, stats: dict[str, int]) -> None:
+        self._update_status_bar(stats)
+
+    def _handle_inventory_updated(self, inventory: list[str]) -> None:
+        self._update_status_bar(inventory=inventory)
+
+    def _handle_title_generated(self, title: str) -> None:
+        self.notify(f"New Chapter: {title}", severity="information", timeout=5)
+
+    def _handle_ending_reached(self, node: StoryNode) -> None:
+        self.notify("The Story Ends.", severity="success", timeout=10)
+
+    def _handle_error(self, error: str) -> None:
+        self.notify(f"Error: {error}", severity="error", timeout=5)
+        self.query_one("#loading").add_class("hidden")
+
+    def _handle_status_message(self, message: str) -> None:
+        self.notify(message, severity="information", timeout=4)
 
     @work(group="speculation", exclusive=True)
     async def speculate_all_choices(self, node: StoryNode) -> None:
         """Sequential background generation of the most likely next scenes."""
-        if not self.story_context or not self.generator:
+        if not self.engine or not self.engine.story_context or not self.generator:
             return
 
-        # Give the UI some breathing room after the main generation finishes
+        # Give the UI some breathing room
         await asyncio.sleep(2.0)
 
-        for _i, choice in enumerate(node.choices):
-            # If the user already picked a choice and main generation started,
-            # this worker group will be canceled, so we don't need explicit checks here.
-            if self.speculation_cache.get_node(self.current_scene_id or "", choice.text):
+        for choice in node.choices:
+            if self.engine.speculation_cache.get_node(self.engine.current_scene_id or "", choice.text):
                 continue
 
             # Clone context to speculate without polluting the main one
-            spec_context = self.story_context.clone()
-            spec_context.add_turn(node.narrative, choice.text, self.inventory, self.player_stats)
+            spec_context = self.engine.story_context.clone()
+            spec_context.add_turn(
+                node.narrative,
+                choice.text,
+                self.engine.inventory,
+                self.engine.player_stats
+            )
 
             try:
                 # Low-priority generation (no streaming)
                 spec_node = await self.generator.generate_next_node_async(spec_context)
-                self.speculation_cache.set_node(self.current_scene_id or "", choice.text, spec_node)
-                # logger.info("Speculated next scene for: %s", choice.text)
-            except Exception:  # noqa: BLE001
-                # Failure in speculation is acceptable; main path will handle it
+                self.engine.speculation_cache.set_node(
+                    self.engine.current_scene_id or "",
+                    choice.text,
+                    spec_node
+                )
+            except Exception:
                 continue
 
     @work(group="typewriter", exclusive=True)
@@ -437,11 +436,21 @@ class CYOAApp(App):
             # Force scroll on new turn so player sees their choice immediately
             self._scroll_to_bottom()
 
-    def _update_status_bar(self) -> None:
+    def _update_status_bar(
+        self,
+        stats: dict[str, int] | None = None,
+        inventory: list[str] | None = None
+    ) -> None:
         """Refresh the two-row status bar with color-coded health."""
-        health = self.player_stats.get("health", 0)
-        gold = self.player_stats.get("gold", 0)
-        rep = self.player_stats.get("reputation", 0)
+        if not self.engine:
+            return
+
+        stats = stats if stats is not None else self.engine.player_stats
+        inventory = inventory if inventory is not None else self.engine.inventory
+
+        health = stats.get("health", 0)
+        gold = stats.get("gold", 0)
+        rep = stats.get("reputation", 0)
 
         # Color-coded health indicator
         if health <= 0:
@@ -463,8 +472,8 @@ class CYOAApp(App):
         stats_label.add_class(css_class)
 
         inv_str = (
-            f"🎒 Inventory: {', '.join(self.inventory)}"
-            if self.inventory
+            f"🎒 Inventory: {', '.join(inventory)}"
+            if inventory
             else "🎒 Inventory: Empty"
         )
         self.query_one("#inventory-display", Label).update(inv_str)
@@ -576,130 +585,52 @@ class CYOAApp(App):
                 btn = Button(f"[{i + 1}] {choice.text}", id=btn_id, variant="primary")
                 choices_container.mount(btn)
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
-        # Handle the end-game "New Adventure" button
-        if event.button.id == "btn-new-adventure":
-            await self.action_restart()
-            return
-
-        # Handle the error retry button
-        if event.button.id == "btn-retry":
-            self.show_loading()
-            self.generate_next_step()
-            return
-
-        # Find which choice button was actually clicked by its ID (choice-t1-0, etc)
-        button_id = event.button.id
-        if button_id and button_id.startswith("choice-"):
-            try:
-                # Part 0: 'choice', Part 1: 'tX', Part 2: '0'
-                choice_idx = int(button_id.split("-")[-1])
-                await self._trigger_choice(choice_idx)
-            except (ValueError, IndexError):
-                pass
-
-    # Fix #1: Keyboard number shortcut to select a choice
-    async def action_choose(self, number: str) -> None:
-        """Select a choice by its 1-based index using number keys."""
-        idx = int(number) - 1
-        # Check if the specifically indexed choice button exists for this turn
-        query = self.query(f"#choice-t{self.turn_count}-{idx}")
-        if query:
-            await self._trigger_choice(idx)
-
     async def _trigger_choice(self, choice_idx: int) -> None:
-        """Handle choice selection, update the narrative, and query LLM."""
+        """Handle choice selection and delegate to the engine."""
         if (
-            not self.story_context
-            or not self.current_node
-            or choice_idx >= len(self.current_node.choices)
+            not self.engine
+            or not self.engine.current_node
+            or choice_idx >= len(self.engine.current_node.choices)
         ):
             return
 
-        # Snapshot state for undo BEFORE making changes
-        self._undo_snapshot = {
-            "turn_count": self.turn_count,
-            "current_story": self._current_story,
-            "current_node": self.current_node,
-            "current_scene_id": self.current_scene_id,
-            "last_choice_text": self.last_choice_text,
-            "last_raw_narrative": self._last_raw_narrative,
-            "inventory": list(self.inventory),
-            "player_stats": dict(self.player_stats),
-            "story_context_history": [msg.copy() for msg in self.story_context.history]
-            if self.story_context
-            else [],
-        }
+        choice = self.engine.current_node.choices[choice_idx]
+        choice_text = choice.text
 
-        # [UI IMPROVEMENT] Instantly deflate UI: remove other choices and show spinner
-        choice_text = self.current_node.choices[choice_idx].text
-
-        # Ensure previous turn's typing is finished before starting a new turn
+        # 1. Instant UI feedback
         self.action_skip_typewriter()
         self._current_story += f"\n\n> **You chose:** {choice_text}"
 
         selected_label = f"[{choice_idx + 1}] {choice_text}"
         self.show_loading(selected_label=selected_label)
 
-        # Yield to the event loop so the TUI renders the button removals IMMEDIATELY
-        await asyncio.sleep(0.01)
-
-        self.last_choice_text = choice_text
-        if self.story_context:
-            self.story_context.add_turn(
-                self.current_node.narrative,
-                choice_text,
-                self.inventory,
-                self.player_stats,
-            )
-        self.turn_count += 1
-
-        bus.emit("choice_made", choice_text=choice_text)
-
-        # Choices are already appended to _current_story in the "Instantly deflate" section above
-        # self._current_story += f"\n\n> **You chose:** {choice_text}"
-
-        # Append enriched choice to the journal (includes narrative summary)
+        # 2. Journal update
         journal_list = self.query_one("#journal-list", ListView)
-        narrative_preview = self.current_node.narrative[:60].replace("\n", " ").strip()
-        if len(self.current_node.narrative) > 60:
+        narrative_preview = self.engine.current_node.narrative[:60].replace("\n", " ").strip()
+        if len(self.engine.current_node.narrative) > 60:
             narrative_preview += "…"
-        journal_entry = f"Turn {self.turn_count}: {choice_text} → {narrative_preview}"
+        journal_entry = f"Turn {self.engine.turn_count}: {choice_text} → {narrative_preview}"
         journal_list.append(ListItem(Label(journal_entry)))
         journal_list.scroll_end(animate=False)
 
-        # Cancel any ongoing speculation for other choices
+        # 3. Cancel speculations and let the engine handle the rest
         self.workers.cancel_group(self, "speculation")
-        self.generate_next_step(choice_text=choice_text)
+        await self.engine.make_choice(choice_text)
 
-    # Fix #2: In-app restart without reloading the model
     async def action_restart(self) -> None:
-        """Reset story state and start a new adventure without reloading the model."""
-        self._current_story = LOADING_ART
-        self.turn_count = 1
-        self.current_scene_id = None
-        self.last_choice_text = None
-        self._last_raw_narrative = None
-        self._stream_token_buffer = 0
-        self._loading_suffix_shown = False
-        self.inventory = []
-        self.player_stats = {"health": 100, "gold": 0, "reputation": 0}
-        self.current_node = None  # Added
-        # Fix #8: reset memory so the new adventure doesn't inherit old scene embeddings
-        self.memory = NarrativeMemory()
-        self.npc_memory = NPCMemory()
+        """Reset story state via the engine."""
+        if not self.engine:
+            return
 
+        self._current_story = LOADING_ART
         self.query_one("#story-text", Markdown).update(LOADING_ART)
         self.query_one("#scene-art", Static).update("")
         self.query_one("#scene-art", Static).add_class("hidden")
-        # Fix #3: use remove_children() instead of query+remove loop
         self.query_one("#choices-container").remove_children()
         self.query_one("#journal-list", ListView).clear()
 
-        # Reset status bar
         self._update_status_bar()
-
-        self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
+        await self.engine.restart()
 
     # UX: Confirmation before restart
     def action_request_restart(self) -> None:
@@ -732,59 +663,27 @@ class CYOAApp(App):
         """Show the help screen with keybindings and game mechanics."""
         self.push_screen(HelpScreen())
 
-    # UX: Single-turn undo
     def action_undo(self) -> None:
         """Restore the game state to before the last choice was made."""
-        snap = self._undo_snapshot
-        if not snap:
+        if not self.engine:
+            return
+
+        # Engine handles core state restoration
+        if not self.engine.undo():
             self.notify("Nothing to undo.", severity="warning", timeout=2)
             return
 
-        self.turn_count = snap["turn_count"]
-        self._current_story = snap["current_story"]
-        self.current_node = snap["current_node"]
-        self.current_scene_id = snap["current_scene_id"]
-        self.last_choice_text = snap["last_choice_text"]
-        self._last_raw_narrative = snap["last_raw_narrative"]
-        self.inventory = list(snap["inventory"])
-        self.player_stats = dict(snap["player_stats"])
-        if self.story_context:
-            self.story_context.history = snap["story_context_history"]
+        # UI-specific restoration
+        # Note: self._current_story needs careful handling since it's the cumulative Markdown
+        # Find the last separator and truncate back to it.
+        sep = "\n\n> **You chose:**"
+        last_choice_pos = self._current_story.rfind(sep)
+        if last_choice_pos != -1:
+            self._current_story = self._current_story[:last_choice_pos]
 
-        # Restore KV cache state if available for faster re-generation
-        if self.generator and self.current_scene_id:
-            state = self.speculation_cache.get_state(self.current_scene_id)
-            if state:
-                self.run_worker(self.generator.load_state_async(state))
-
-        self._undo_snapshot = None  # Only one level of undo
-        self._loading_suffix_shown = False
-
-        # Re-render UI — directly re-mount buttons (don't call display_node
-        # because it re-processes story text and would add duplicate art)
         self.query_one("#story-text", Markdown).update(self._current_story)
         self.query_one("#loading").add_class("hidden")
         self._scroll_to_bottom()
-        choices_container = self.query_one("#choices-container")
-        choices_container.remove_children()
-
-        # Restore art for the undone node
-        art_widget = self.query_one("#scene-art", Static)
-        if self.current_node:
-            art = _detect_scene_art(self.current_node.narrative)
-            if art:
-                art_widget.update(art)
-                art_widget.remove_class("hidden")
-            else:
-                art_widget.update("")
-                art_widget.add_class("hidden")
-
-            for i, choice in enumerate(self.current_node.choices):
-                btn_id = f"choice-t{self.turn_count}-{i}"
-                label = f"[{i + 1}] {choice.text}"
-                btn = Button(label, id=btn_id, variant="primary")
-                choices_container.mount(btn)
-        self._update_status_bar()
 
         # Remove the last journal entry
         journal_list = self.query_one("#journal-list", ListView)
@@ -794,34 +693,20 @@ class CYOAApp(App):
 
         self.notify("↩ Undid last choice.", severity="information", timeout=2)
 
-    # UX: Save game to JSON
     def action_save_game(self) -> None:
         """Serialize the current game state to a JSON save file."""
-        if not self.current_story_title or not self.current_node:
+        if not self.engine or not self.engine.story_title or not self.engine.current_node:
             self.notify("Nothing to save yet.", severity="warning", timeout=2)
             return
 
         os.makedirs(constants.SAVES_DIR, exist_ok=True)
-        # Build a safe filename from the story title
         safe_title = "".join(
-            c if c.isalnum() or c in " _-" else "_" for c in self.current_story_title
+            c if c.isalnum() or c in " _-" else "_" for c in self.engine.story_title
         )
-        save_path = os.path.join(constants.SAVES_DIR, f"{safe_title}_turn{self.turn_count}.json")
+        save_path = os.path.join(constants.SAVES_DIR, f"{safe_title}_turn{self.engine.turn_count}.json")
 
-        save_data = {
-            "version": 1,
-            "story_title": self.current_story_title,
-            "turn_count": self.turn_count,
-            "current_story_text": self._current_story,
-            "inventory": self.inventory,
-            "player_stats": self.player_stats,
-            "starting_prompt": self.starting_prompt,
-            "current_node": self.current_node.model_dump() if self.current_node else None,
-            "context_history": self.story_context.history if self.story_context else [],
-            "current_scene_id": self.current_scene_id,
-            "last_choice_text": self.last_choice_text,
-            "last_raw_narrative": self._last_raw_narrative,
-        }
+        save_data = self.engine.get_save_data()
+        save_data["current_story_text"] = self._current_story
 
         try:
             with open(save_path, "w", encoding="utf-8") as f:
@@ -855,7 +740,7 @@ class CYOAApp(App):
         self.push_screen(LoadGameScreen(save_files), on_selected)
 
     def _restore_from_save(self, save_path: str) -> None:
-        """Load game state from a JSON save file."""
+        """Load game state via the engine."""
         try:
             with open(save_path, encoding="utf-8") as f:
                 data = json.load(f)
@@ -863,44 +748,22 @@ class CYOAApp(App):
             self.notify(f"Load failed: {e}", severity="error", timeout=3)
             return
 
-        bus.emit("story_started", title=self.current_story_title)
+        if not self.engine:
+            return
 
-        self.turn_count = data.get("turn_count", 1)
         self._current_story = data.get("current_story_text", LOADING_ART)
-        self.inventory = data.get("inventory", [])
-        self.player_stats = data.get("player_stats", {"health": 100, "gold": 0, "reputation": 0})
-        self.current_story_title = data.get("story_title")
-        self.current_scene_id = data.get("current_scene_id")
-        self.last_choice_text = data.get("last_choice_text")
-        self._last_raw_narrative = data.get("last_raw_narrative")
-        self._undo_snapshot = None
         self._loading_suffix_shown = False
 
-        node_data = data.get("current_node")
-        if node_data:
-            self.current_node = StoryNode(**node_data)
-        else:
-            self.current_node = None
+        self.engine.load_save_data(data)
 
-        # Restore story context
-        context_history = data.get("context_history", [])
-        self.story_context = StoryContext(
-            starting_prompt=data.get("starting_prompt", self.starting_prompt),
-            token_budget=self.generator.token_budget if self.generator else DEFAULT_TOKEN_BUDGET,
-            token_counter=self.generator.provider.count_tokens if self.generator else None,
-        )
-        self.story_context.history = context_history
-
-        # Re-render the UI
+        # Sync UI
         self.query_one("#story-text", Markdown).update(self._current_story)
         self._scroll_to_bottom()
         self.query_one("#choices-container").remove_children()
         self.query_one("#journal-list", ListView).clear()
-        if self.current_node:
-            self.display_node(self.current_node)
-        self._update_status_bar()
+
         self.notify(
-            f"📂 Loaded save from Turn {self.turn_count}.",
+            f"📂 Loaded save from Turn {self.engine.turn_count}.",
             severity="information",
             timeout=3,
         )
@@ -920,118 +783,38 @@ class CYOAApp(App):
         panel = self.query_one("#story-map-panel")
         panel.toggle_class("hidden")
 
-    @work(exclusive=True)
-    async def generate_next_step(self, choice_text: str | None = None) -> None:  # noqa: C901
-        # RAG: retrieve relevant past scenes and inject as memory
-        if (
-            self._last_raw_narrative
-            and self.story_context
-            and self.generator
-            and self.db
-            and self.current_story_title
-        ):
-            memories = await self.memory.query_async(self._last_raw_narrative, n=3)
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-new-adventure":
+            await self.action_restart()
+            return
 
-            # Inject NPC-specific memories based on previous scene's NPCs
-            if self.current_node and getattr(self.current_node, "npcs_present", None):
-                for npc in self.current_node.npcs_present:
-                    npc_memories = await self.npc_memory.query_async(
-                        npc, self._last_raw_narrative, n=2
-                    )
-                    for mem in npc_memories:
-                        if mem not in memories:
-                            memories.append(mem)
+        if event.button.id == "btn-retry":
+            self.show_loading()
+            if self.engine:
+                await self.engine._generate_next()
+            return
 
-            self.story_context.inject_memory(memories)
+        button_id = event.button.id
+        if button_id and button_id.startswith("choice-"):
+            try:
+                choice_idx = int(button_id.split("-")[-1])
+                await self._trigger_choice(choice_idx)
+            except (ValueError, IndexError):
+                pass
 
-            # ── Rolling Summarization ────────────────────────────────────────
-            # When the context is ~80 % full, compress the oldest turn pairs
-            # into a concise "Story So Far" paragraph so narrative momentum is
-            # never lost when the sliding window trims old content.
-            if self.story_context.needs_summarization():
-                self.notify(
-                    "📜 Archiving old chapters…",
-                    severity="information",
-                    timeout=4,
-                )
-                await self.generator.update_story_summaries_async(self.story_context)
-            # ────────────────────────────────────────────────────────────────
-
-            # Check speculation cache
-            cached_node = None
-            if choice_text:
-                cached_node = self.speculation_cache.get_node(
-                    self.current_scene_id or "", choice_text
-                )
-
-            if cached_node:
-                # Performance optimization: use the pre-calculated node
-                node = cached_node
-                # Simulated minimal stream to maintain UI feel
-                self._stream_narrative("*(Recalling future memories...)* ")
-                await asyncio.sleep(0.1)
-            else:
-                # Streaming: pass on_token callback so typewriter fires live
-                def on_token(partial: str) -> None:
-                    self._stream_narrative(partial)
-
-                node = await self.generator.generate_next_node_async(
-                    self.story_context, on_token_chunk=on_token
-                )
-
-            # Update KV cache state for the *current* scene (the one we just entered)
-            # This allows instant rewinding back to this scene later.
-            state = await self.generator.save_state_async()
-            if state and self.current_scene_id:
-                self.speculation_cache.set_state(self.current_scene_id, state)
-            self._last_raw_narrative = node.narrative
-            self.current_node = node  # Added
-
-            for item in getattr(node, "items_gained", []):
-                if item not in self.inventory:
-                    self.inventory.append(item)
-            for item in getattr(node, "items_lost", []):
-                if item in self.inventory:
-                    self.inventory.remove(item)
-
-            for stat, change in getattr(node, "stat_updates", {}).items():
-                self.player_stats[stat] = self.player_stats.get(stat, 0) + change
-
-            # Fix #4: embed the scene in the RAG store from the worker thread,
-            # not from display_node() on the UI thread.
-            scene_id = self.current_scene_id or str(uuid.uuid4())
-            await self.memory.add_async(scene_id, node.narrative)
-
-            # Embed NPC-specific memory
-            if getattr(node, "npcs_present", None):
-                for npc in node.npcs_present:
-                    await self.npc_memory.add_async(npc, scene_id, node.narrative)
-
-            choices_text = [choice.text for choice in node.choices]
-            prev_scene_id = self.current_scene_id
-            prev_choice = self.last_choice_text
-
-            new_id = await self.db.save_scene_async(
-                narrative=node.narrative,
-                available_choices=choices_text,
-                story_title=self.current_story_title,
-                source_scene_id=prev_scene_id,
-                choice_text=prev_choice,
-            )
-            self.current_scene_id = new_id
-            self.update_story_map()
-
-            # Flush any remaining throttled stream chars before final render
-            if self._stream_token_buffer > 0:
-                self.query_one("#story-text", Markdown).update(self._current_story)
-            self.display_node(node)
+    async def action_choose(self, number: str) -> None:
+        """Select a choice by its 1-based index."""
+        idx = int(number) - 1
+        query = self.query(f"#choice-t{self.turn_count}-{idx}")
+        if query:
+            await self._trigger_choice(idx)
 
     @work(exclusive=True)
     async def action_branch_past(self) -> None:
-        if not self.db or not self.current_scene_id:
+        if not self.engine or not self.engine.db or not self.engine.current_scene_id:
             return
 
-        history = await asyncio.to_thread(self.db.get_scene_history_path, self.current_scene_id)
+        history = await asyncio.to_thread(self.engine.db.get_scene_history_path, self.engine.current_scene_id)
         if not history or not history.get("scenes"):
             return
 
@@ -1043,54 +826,46 @@ class CYOAApp(App):
 
     @work(exclusive=True)
     async def restore_to_scene(self, idx: int, history: dict[str, Any]) -> None:
+        if not self.engine:
+            return
+
         self.query_one("#choices-container").remove_children()
         self.query_one("#loading").remove_class("hidden")
-        # Strip shifting text if present
-        suffix = "\n\n*(The ancient texts are shifting...)*"
-        if self._loading_suffix_shown and self._current_story.endswith(suffix):
-            self._current_story = self._current_story[: -len(suffix)]
-            self._loading_suffix_shown = False
 
         fracture_msg = f"\n\n***\n\n**[Time fractures... you return to Turn {idx + 1}]**"
         self._current_story += fracture_msg
-
-        bus.emit("choice_made", choice_text=f"Time fracture back to Turn {idx + 1}")
-
         self.query_one("#story-text", Markdown).update(self._current_story)
         self._scroll_to_bottom()
 
+        # Update engine state manually for branch (future: engine should have a branch method)
         target_scene = history["scenes"][idx]
-
-        self.story_context = StoryContext(starting_prompt=self.starting_prompt)
+        self.engine.story_context = StoryContext(
+            starting_prompt=self.engine.starting_prompt,
+            token_budget=self.generator.token_budget if self.generator else 2048,
+            token_counter=self.generator.provider.count_tokens if self.generator else None,
+        )
         for i in range(idx):
-            self.story_context.add_turn(history["scenes"][i]["narrative"], history["choices"][i])
+            self.engine.story_context.add_turn(history["scenes"][i]["narrative"], history["choices"][i])
 
-        self.current_scene_id = target_scene["id"]
-        self.last_choice_text = history["choices"][idx - 1] if idx > 0 else None
-        self._last_raw_narrative = target_scene["narrative"]
-        self.turn_count = idx + 1
-        # TODO: A fully correct branch integration requires tracking `items` per-turn in Neo4j.
-        # For now, we blank it gracefully on branch, requiring the player to re-find items or the LLM to hallucinate them back.
-        self.inventory = []
-        self.player_stats = {"health": 100, "gold": 0, "reputation": 0}
-        self.memory = NarrativeMemory()
-        self.npc_memory = NPCMemory()
+        self.engine.current_scene_id = target_scene["id"]
+        self.engine.last_choice_text = history["choices"][idx - 1] if idx > 0 else None
+        self.engine.turn_count = idx + 1
+        self.engine.inventory = []
+        self.engine.player_stats = {"health": 100, "gold": 0, "reputation": 0}
+
+        # Clear and rebuild memories
+        self.engine.memory = NarrativeMemory()
+        self.engine.npc_memory = NPCMemory()
         for i in range(idx + 1):
             past_scene_id = history["scenes"][i]["id"]
             past_narrative = history["scenes"][i]["narrative"]
-            await self.memory.add_async(past_scene_id, past_narrative)
+            await self.engine.memory.add_async(past_scene_id, past_narrative)
 
-            if "npcs_present" in history["scenes"][i] and history["scenes"][i]["npcs_present"]:
-                for npc in history["scenes"][i]["npcs_present"]:
-                    await self.npc_memory.add_async(npc, past_scene_id, past_narrative)
-
-        # ── KV-Cache optimization ───────────────────────────────────────────
-        # Restore model state for this scene if we have a checkpoint cached
+        # Restore model state
         if self.generator:
-            state = self.speculation_cache.get_state(self.current_scene_id)
+            state = self.engine.speculation_cache.get_state(self.engine.current_scene_id)
             if state:
                 await self.generator.load_state_async(state)
-        # ────────────────────────────────────────────────────────────────────
 
         journal_list = self.query_one("#journal-list", ListView)
         journal_list.clear()
@@ -1105,16 +880,16 @@ class CYOAApp(App):
             choices=choices,
             is_ending=len(choices) == 0,
         )
-
+        self.engine.current_node = node
         self.display_node(node)
         self.update_story_map()
 
     @work(exclusive=True)
     async def update_story_map(self) -> None:
-        if not self.db or not self.current_story_title:
+        if not self.engine or not self.engine.db or not self.engine.story_title:
             return
 
-        tree_data = await asyncio.to_thread(self.db.get_story_tree, self.current_story_title)
+        tree_data = await asyncio.to_thread(self.engine.db.get_story_tree, self.engine.story_title)
         if not tree_data:
             return
 
@@ -1134,7 +909,7 @@ class CYOAApp(App):
         def add_children(parent_node: Any, scene_id: str) -> None:
             scene = nodes[scene_id]
             preview = scene["narrative"][:25].replace("\\n", " ").strip() + "..."
-            if scene_id == self.current_scene_id:
+            if scene_id == self.engine.current_scene_id:
                 label = f"[b][green]> {preview}[/green][/b]"
             else:
                 label = preview

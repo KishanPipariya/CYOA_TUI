@@ -84,7 +84,7 @@ async def test_app_startup_and_loading_state(mock_app_dependencies):
 
     async with app.run_test() as pilot:
         # Give the background workers a moment to process initial generation
-        await pilot.pause(1.0)
+        await pilot.pause(1.5)
 
         # Verify the story text container updated with the mock narrative
         app.query_one("#story-text", Markdown)
@@ -117,19 +117,19 @@ async def test_stats_display_reflects_player_stats(mock_app_dependencies):
         assert stats_label.has_class("health-high")
 
         # Update stats to mid-health
-        app.player_stats["health"] = 50
+        app.engine.player_stats["health"] = 50
         app._update_status_bar()
         assert "Health: 50" in str(stats_label.render())
         assert stats_label.has_class("health-mid")
 
         # Update stats to low-health
-        app.player_stats["health"] = 20
+        app.engine.player_stats["health"] = 20
         app._update_status_bar()
         assert "Health: 20" in str(stats_label.render())
         assert stats_label.has_class("health-low")
 
         # Update stats to dead
-        app.player_stats["health"] = 0
+        app.engine.player_stats["health"] = 0
         app._update_status_bar()
         # Use .plain to get the text without markup/formatting
         rendered_text = stats_label.render().plain
@@ -146,13 +146,13 @@ async def test_inventory_updates_on_item_gain_and_loss(mock_app_dependencies):
         await pilot.pause(1.0)
 
         # Initial inventory should have Broken Sword (from node1)
-        assert "Broken Sword" in app.inventory
+        assert "Broken Sword" in app.engine.inventory
 
         # Gain an item via a choice that returns node2 (which has Health Potion)
         await pilot.press("1")
         await pilot.pause(1.0)
-        assert "Health Potion" in app.inventory
-        assert "Broken Sword" in app.inventory
+        assert "Health Potion" in app.engine.inventory
+        assert "Broken Sword" in app.engine.inventory
 
         # Mock item loss: Manually trigger a display update for a hypothetical node that loses an item
         from cyoa.core.models import Choice, StoryNode
@@ -167,11 +167,11 @@ async def test_inventory_updates_on_item_gain_and_loss(mock_app_dependencies):
 
         # We can't easily force the generator to return this without more complex patching,
         # but we can test the display_node logic which handles the updates.
-        # Use a unique turn_count to avoid ID collisions in tests
+        # colocate unique turn_count to avoid ID collisions in tests
         app.turn_count = 99
         app.display_node(loss_node)
 
-        app.inventory.remove("Health Potion")
+        app.engine.inventory.remove("Health Potion")
         app._update_status_bar()
         inv_label = app.query_one("#inventory-display", Label)
         assert "Health Potion" not in inv_label.render().plain
@@ -300,11 +300,11 @@ async def test_game_over_state_and_restart(mock_app_dependencies):
         await pilot.pause(1.0)  # Back to Node 1
 
         # Verify reset
-        assert app.turn_count == 1
+        assert app.engine.turn_count == 1
         assert "You awaken in a test dungeon." in app._current_story
-        assert app.inventory == ["Broken Sword"]
-        assert app.player_stats["health"] == 100
-        assert app.player_stats["gold"] == 0
+        assert app.engine.inventory == ["Broken Sword"]
+        assert app.engine.player_stats["health"] == 100
+        assert app.engine.player_stats["gold"] == 0
 
 
 @pytest.mark.asyncio
@@ -327,11 +327,11 @@ async def test_app_restart_via_keyboard(mock_app_dependencies):
         await pilot.press("y")
         await pilot.pause(1.0)  # Node 1 again
 
-        assert app.turn_count == 1
+        assert app.engine.turn_count == 1
         assert "You awaken in a test dungeon." in app._current_story
-        assert app.inventory == ["Broken Sword"]
-        assert app.player_stats["health"] == 100
-        assert app.player_stats["gold"] == 0
+        assert app.engine.inventory == ["Broken Sword"]
+        assert app.engine.player_stats["health"] == 100
+        assert app.engine.player_stats["gold"] == 0
 
         journal_list = app.query_one("#journal-list", ListView)
         assert len(list(journal_list.children)) == 0
@@ -505,15 +505,15 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
         # Set some unique state
         from cyoa.core.models import Choice, StoryNode
 
-        app.inventory = ["Unique Item 1", "Unique Item 2"]
-        app.player_stats = {"health": 88, "gold": 123, "reputation": 5}
-        app.turn_count = 5
+        app.engine.inventory = ["Unique Item 1", "Unique Item 2"]
+        app.engine.player_stats = {"health": 88, "gold": 123, "reputation": 5}
+        app.engine.turn_count = 5
         node = StoryNode(
             narrative="A unique story begins.",
             choices=[Choice(text="Continue"), Choice(text="Quit")],
             title="Test Adventure",
         )
-        app.current_node = node
+        app.engine.current_node = node
         app._current_story = "Previous history.\n\n---\n\n" + node.narrative
 
         # Save
@@ -523,7 +523,7 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
         # Create a new app instance to simulate loading fresh
         app2 = CYOAApp(model_path="dummy_path.gguf")
         async with app2.run_test() as pilot2:
-            await pilot2.pause(0.2)
+            await pilot2.pause(1.0) # Wait for engine to initialize
 
             # Find the save file
             save_files = [f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]
@@ -534,10 +534,10 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
             app2._restore_from_save(save_path)
 
             # Verify restoration
-            assert app2.turn_count == 5
-            assert app2.inventory == ["Unique Item 1", "Unique Item 2"]
-            assert app2.player_stats["health"] == 88
-            assert app2.player_stats["gold"] == 123
+            assert app2.engine.turn_count == 5
+            assert app2.engine.inventory == ["Unique Item 1", "Unique Item 2"]
+            assert app2.engine.player_stats["health"] == 88
+            assert app2.engine.player_stats["gold"] == 123
             # After restore, _current_story should contain the narrative
             assert "unique story" in app2._current_story
             stats_label2_text = app2.query_one("#stats-display").render().plain

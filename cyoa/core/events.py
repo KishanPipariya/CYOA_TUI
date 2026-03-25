@@ -41,3 +41,30 @@ class EventBus:
 
 # Global Singleton Event Bus instance
 bus = EventBus()
+
+
+# Event names
+class Events:
+    # Engine lifecycle
+    ENGINE_STARTED = "engine.started"
+    ENGINE_RESTARTED = "engine.restarted"
+
+    # Narrative flow
+    CHOICE_MADE = "engine.choice_made"
+    NODE_GENERATING = "engine.node_generating"
+    TOKEN_STREAMED = "engine.token_streamed"
+    NODE_COMPLETED = "engine.node_completed"
+
+    # State updates
+    STATS_UPDATED = "engine.stats_updated"
+    INVENTORY_UPDATED = "engine.inventory_updated"
+    STORY_TITLE_GENERATED = "engine.story_title_generated"
+
+    # Endings and errors
+    ENDING_REACHED = "engine.ending_reached"
+    ERROR_OCCURRED = "engine.error_occurred"
+    STATUS_MESSAGE = "engine.status_message"
+
+    # External integrations
+    DB_SAVED = "db.saved"
+    MEMORY_INDEXED = "memory.indexed"

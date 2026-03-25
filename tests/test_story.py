@@ -604,6 +604,9 @@ class TestBranchingLogic:
         # Provide a mock generator that never produces real nodes so restore_to_scene
         # can be driven in isolation without loading the real LLM.
         mock_gen = MagicMock()
+        mock_gen.token_budget = 2048
+        mock_gen.provider = MagicMock()
+        mock_gen.provider.count_tokens = MagicMock(return_value=10)
         mock_gen.generate_next_node_async = AsyncMock(
             return_value=StoryNode(
                 narrative="You stand up.",
@@ -616,6 +619,8 @@ class TestBranchingLogic:
             )
         )
         mock_gen.update_story_summaries_async = AsyncMock()
+        mock_gen.save_state_async = AsyncMock(return_value=b"state")
+        mock_gen.load_state_async = AsyncMock()
 
         with (
             patch("cyoa.ui.app.ModelBroker", return_value=mock_gen),
@@ -627,10 +632,13 @@ class TestBranchingLogic:
             mock_db.save_scene_async = AsyncMock(return_value="sid")
 
             app = CYOAApp(model_path="dummy")
-            app.current_scene_id = "scene-3"
-            app._current_story = "You wake up.\n\nYou stand up.\n\nYou walk left into a wall."
-
             async with app.run_test() as pilot:
+                # Wait for engine to initialize
+                await pilot.pause(0.5)
+
+                app.engine.current_scene_id = "scene-3"
+                app._current_story = "You wake up.\n\nYou stand up.\n\nYou walk left into a wall."
+
                 # Allow the initial startup worker to settle
                 await pilot.pause(0.2)
 
@@ -641,26 +649,25 @@ class TestBranchingLogic:
                 await pilot.pause(0.3)
 
                 # Check context
-                assert app.current_scene_id == "scene-2"
-                assert app.last_choice_text == "Stand"
-                assert app._last_raw_narrative == "You stand up."
+                assert app.engine.current_scene_id == "scene-2"
+                assert app.engine.last_choice_text == "Stand"
 
                 # Context history should correctly have prompt + (narrative, choice) pairs up to idx
-                assert app.story_context is not None
+                assert app.engine.story_context is not None
                 assert (
-                    len(app.story_context.history) == 3
+                    len(app.engine.story_context.history) == 3
                 )  # User Prompt + Assistant Scene 1 + User Choice 1
-                assert "You wake up." in app.story_context.history[1]["content"]
-                assert "Stand" in app.story_context.history[2]["content"]
+                assert "You wake up." in app.engine.story_context.history[1]["content"]
+                assert "Stand" in app.engine.story_context.history[2]["content"]
 
     def test_action_branch_past_aborts_if_no_history(self):
-        """action_branch_past should return early if there is no db or current scene."""
+        """action_branch_past should return early if there is no engine."""
         from cyoa.ui.app import CYOAApp
 
         app = CYOAApp(model_path="dummy")
 
-        # db is None
-        assert app.db is None
+        # engine is None (until mount/initialize)
+        assert app.engine is None
 
         # Mock work decorator to just call the function
         def mock_call_from_thread(callback, *args, **kwargs):
@@ -710,8 +717,14 @@ class TestProceduralItemSystem:
         )
 
         mock_gen = MagicMock()
+        mock_gen.token_budget = 2048
+        mock_provider = MagicMock()
+        mock_provider.count_tokens = MagicMock(return_value=10)
+        mock_gen.provider = mock_provider
         mock_gen.generate_next_node_async = AsyncMock(return_value=mock_node)
         mock_gen.update_story_summaries_async = AsyncMock()
+        mock_gen.save_state_async = AsyncMock(return_value=b"state")
+        mock_gen.load_state_async = AsyncMock()
 
         # Use a factory callable (matching test_tui.py's _mock_generator pattern)
         # so StoryGenerator(...) instantiation returns the pre-built mock_gen.
@@ -729,7 +742,7 @@ class TestProceduralItemSystem:
 
             app = CYOAApp(model_path="dummy")
             async with app.run_test() as pilot:
-                # Give the initialize_and_start @work task time to fully complete
-                await pilot.pause(0.5)
+                # Wait for engine to initialize
+                await pilot.pause(1.0)
 
-                assert app.inventory == ["Shiny Key", "Map"]
+                assert app.engine.inventory == ["Shiny Key", "Map"]

@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
-from cyoa.core.models import StoryNode
-
 
 class PromptComponent(ABC):
     """Abstract base class for a component that contributes to the LLM prompt."""

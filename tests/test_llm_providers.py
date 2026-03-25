@@ -7,29 +7,27 @@ from cyoa.llm.providers import LlamaCppProvider, OllamaProvider
 
 # ── LlamaCppProvider Tests ───────────────────────────────────────────────────
 
-
 @pytest.fixture
 def mock_llama():
     with patch("cyoa.llm.providers.Llama") as mock:
         instance = mock.return_value
-        instance.tokenize.return_value = [1, 2, 3]  # 3 tokens
+        instance.tokenize.return_value = [1, 2, 3] # 3 tokens
 
         def mock_cc(*args, **kwargs):
             if kwargs.get("stream"):
                 return [{"choices": [{"delta": {"content": '{"narrative": "Test"}'}}]}]
-            return {"choices": [{"message": {"content": '{"narrative": "Test"}'}}]}
-
+            return {
+                "choices": [{"message": {"content": '{"narrative": "Test"}'}}]
+            }
         instance.create_chat_completion.side_effect = mock_cc
 
         yield mock
-
 
 def test_llama_cpp_token_count(mock_llama):
     provider = LlamaCppProvider(model_path="dummy.gguf")
     count = provider.count_tokens("Hello world")
     assert count == 3
     mock_llama.return_value.tokenize.assert_called_once()
-
 
 @pytest.mark.asyncio
 async def test_llama_cpp_generate_json(mock_llama):
@@ -44,16 +42,15 @@ async def test_llama_cpp_generate_json(mock_llama):
     # In generate_json, it actually calls stream and joins
     mock_llama.return_value.create_chat_completion.assert_called()
 
-
 @pytest.mark.asyncio
 async def test_llama_cpp_stream_json(mock_llama):
     provider = LlamaCppProvider(model_path="dummy.gguf")
 
     # Mock streaming output
     mock_stream = [
-        {"choices": [{"delta": {"content": '{"narr'}}]},
-        {"choices": [{"delta": {"content": 'ative": "Test"'}}]},
-        {"choices": [{"delta": {"content": "}"}}]},
+        {"choices": [{"delta": {"content": '{"narr'}}] },
+        {"choices": [{"delta": {"content": 'ative": "Test"'}}] },
+        {"choices": [{"delta": {"content": "}"}}] }
     ]
     mock_llama.return_value.create_chat_completion.side_effect = None
     mock_llama.return_value.create_chat_completion.return_value = mock_stream
@@ -65,9 +62,7 @@ async def test_llama_cpp_stream_json(mock_llama):
     # Combined chunks should result in '{"narrative": "Test"}'
     assert "".join(chunks) == '{"narrative": "Test"}'
 
-
 # ── OllamaProvider Tests ─────────────────────────────────────────────────────
-
 
 @pytest.mark.asyncio
 async def test_ollama_generate_json():
@@ -92,7 +87,6 @@ async def test_ollama_generate_json():
         assert payload["format"] == schema
         assert payload["stream"] is False
 
-
 @pytest.mark.asyncio
 async def test_ollama_stream_json():
     # Helper for async iteration
@@ -103,9 +97,9 @@ async def test_ollama_stream_json():
     # Use MagicMock for the response object so its methods don't return coroutines by default
     mock_response = MagicMock()
     mock_lines = [
-        json.dumps({"message": {"content": '{"narr'}}),
+        json.dumps({"message": {"content": '{"narr' }}),
         json.dumps({"message": {"content": 'ative": "Ollama"}'}}),
-        json.dumps({"done": True}),
+        json.dumps({"done": True})
     ]
     # aiter_lines should return an async iterator
     mock_response.aiter_lines.return_value = async_iter(mock_lines)
