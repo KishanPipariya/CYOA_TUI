@@ -116,3 +116,53 @@ async def test_ollama_stream_json():
             chunks.append(chunk)
 
         assert "".join(chunks) == '{"narrative": "Ollama"}'
+
+
+# ── MockProvider Tests ───────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_mock_provider_generate_json():
+    from cyoa.llm.providers import MockProvider
+
+    provider = MockProvider()
+    schema = {"type": "object"}
+    messages = [{"role": "user", "content": "hi"}]
+
+    result = await provider.generate_json(messages, schema)
+    data = json.loads(result)
+
+    assert "narrative" in data
+    assert "choices" in data
+    assert len(data["choices"]) >= 2
+    assert "The Mockingbird" in data["npcs_present"]
+
+
+@pytest.mark.asyncio
+async def test_mock_provider_stream_json():
+    from cyoa.llm.providers import MockProvider
+
+    provider = MockProvider()
+    chunks = []
+    async for chunk in provider.stream_json([{"role": "user", "content": "hi"}], {}):
+        chunks.append(chunk)
+
+    full_json = "".join(chunks)
+    data = json.loads(full_json)
+    assert "narrative" in data
+    assert "digital void" in data["narrative"]
+
+
+@pytest.mark.asyncio
+async def test_model_broker_fallback_to_mock():
+    from cyoa.llm.broker import ModelBroker, StoryContext
+    from cyoa.llm.providers import MockProvider
+
+    # Use a non-existent path
+    m_path = "completely_non_existent_model_1212.gguf"
+    broker = ModelBroker(model_path=m_path)
+    assert isinstance(broker.provider, MockProvider)
+
+    ctx = StoryContext("start")
+    node = await broker.generate_next_node_async(ctx)
+    assert "digital void" in node.narrative

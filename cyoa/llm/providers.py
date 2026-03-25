@@ -402,3 +402,65 @@ class OllamaProvider(LLMProvider):
         except Exception:
             session.end(success=False)
             raise
+
+
+class MockProvider(LLMProvider):
+    """A lightweight mock provider that returns canned responses.
+    Useful for testing and development when the heavy model files are missing.
+    """
+
+    def __init__(self, model_name: str = "mock-model"):
+        self.model_name = model_name
+
+    def count_tokens(self, text: str) -> int:
+        return len(text) // 4
+
+    async def generate_text(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> str:
+        # Simple summary fallback
+        if "summar" in str(messages[-1].get("content", "")).lower():
+            return "The journey continues through the digital mists, where reality is but a memory."
+        return "This is a mock narrative generated because the real model is unavailable. You are in a safe, simulated environment."
+
+    async def generate_json(
+        self,
+        messages: list[dict[str, str]],
+        schema: dict[str, Any],
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> str:
+        data = {
+            "narrative": "You are standing in a digital void. The real model weights were not found, so you are talking to a ghost in the machine. Around you, fragments of data shimmer like stars.",
+            "title": "The Ghost in the Machine",
+            "items_gained": ["Static Spark"],
+            "items_lost": [],
+            "npcs_present": ["The Mockingbird"],
+            "stat_updates": {"sanity": -1},
+            "choices": [
+                {"text": "Search for reality."},
+                {"text": "Accept the simulation."},
+            ],
+            "is_ending": False,
+            "mood": "mysterious",
+        }
+        return json.dumps(data)
+
+    async def stream_json(
+        self,
+        messages: list[dict[str, str]],
+        schema: dict[str, Any],
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> AsyncIterator[str]:
+        full_json = await self.generate_json(messages, schema, max_tokens, temperature)
+        # Yield in chunks to simulate streaming
+        chunk_size = 20
+        for i in range(0, len(full_json), chunk_size):
+            yield full_json[i : i + chunk_size]
+            import asyncio
+
+            await asyncio.sleep(0.005)

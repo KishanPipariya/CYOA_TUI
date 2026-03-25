@@ -21,7 +21,7 @@ from cyoa.llm.pipeline import (
     PromptPipeline,
     SummarizationComponent,
 )
-from cyoa.llm.providers import LlamaCppProvider, LLMProvider, OllamaProvider
+from cyoa.llm.providers import LlamaCppProvider, LLMProvider, MockProvider, OllamaProvider
 
 __all__ = ["StoryContext", "ModelBroker", "SpeculationCache"]
 
@@ -291,6 +291,11 @@ class ModelBroker:
                 logger.warning("No model path provided, using default: %s", m_path)
 
             n_ctx_val = n_ctx or int(os.getenv("LLM_N_CTX", "4096"))
+            if not os.path.exists(m_path):
+                logger.warning(
+                    f"Model file '{m_path}' not found. Falling back to MockProvider for development."
+                )
+                return MockProvider(model_name=m_path)
             return LlamaCppProvider(model_path=m_path, n_ctx=n_ctx_val)
 
     async def generate_summary_async(self, turns_to_compress: list[dict[str, str]]) -> str:

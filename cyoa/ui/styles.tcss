@@ -137,6 +137,66 @@ Button {
     margin-top: 1;
 }
 
+/* ── Atmosphere / Mood Shifts ────────────────────────────────── */
+
+#main-container {
+    transition: background 300ms, border 300ms;
+}
+
+/* Mysterious: Deep purples and indigo */
+.mood-mysterious #story-container {
+    border: thick $primary;
+    color: violet 80%;
+}
+.mood-mysterious #choices-container {
+    border: double $primary;
+}
+
+/* Heroic: Gold and bright highlights */
+.mood-heroic #story-container {
+    border: thick #FFD700;
+    color: #FFFACD;
+}
+.mood-heroic #choices-container {
+    border: solid #FFD700;
+}
+
+/* Combat: Red alerts and aggressive borders */
+.mood-combat #story-container {
+    border: heavy $error;
+    color: $error 80%;
+}
+.mood-combat #choices-container {
+    border: solid $error;
+}
+
+/* Ethereal: Cyan, celestial glow */
+.mood-ethereal #story-container {
+    border: outer cyan;
+    color: lightcyan;
+}
+.mood-ethereal #choices-container {
+    border: dashed cyan;
+}
+
+/* Dark: Gritty grays and dim text */
+.mood-dark #story-container {
+    border: tall gray;
+    color: silver;
+}
+.mood-dark #choices-container {
+    border: solid gray;
+}
+
+/* Grimy: Earthy greens and browns */
+.mood-grimy #story-container {
+    border: heavy #556B2F;
+    color: #BDB76B;
+}
+.mood-grimy #choices-container {
+    border: solid #556B2F;
+}
+
 /* ── Utilities ──────────────────────────────────────────────── */
 .hidden {
     display: none;

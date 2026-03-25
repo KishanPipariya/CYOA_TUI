@@ -77,6 +77,16 @@ class CYOAApp(App):
 
     # Fix #4: Reactive turn counter displayed in footer
     turn_count: reactive[int] = reactive(1)
+    mood: reactive[str] = reactive("default")
+
+    def watch_mood(self, old_mood: str, new_mood: str) -> None:
+        """Update the main container class when the mood changes."""
+        try:
+            container = self.query_one("#main-container")
+            container.remove_class(f"mood-{old_mood}")
+            container.add_class(f"mood-{new_mood}")
+        except Exception:
+            pass
 
     def __init__(
         self,
@@ -231,6 +241,7 @@ class CYOAApp(App):
 
     def _handle_engine_started(self) -> None:
         self.turn_count = 1
+        self.mood = "default"
         self.query_one("#journal-list", ListView).clear()
 
     def _handle_engine_restarted(self) -> None:
@@ -503,6 +514,7 @@ class CYOAApp(App):
     def display_node(self, node: StoryNode) -> None:
         """Render a newly generated StoryNode to the UI (after streaming completes)."""
         self.query_one("#loading").add_class("hidden")
+        self.mood = getattr(node, "mood", "default")
 
         is_error = node.narrative.startswith(constants.ERROR_NARRATIVE_PREFIX)
 

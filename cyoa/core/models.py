@@ -37,6 +37,10 @@ class StoryNode(BaseModel):
         default=False,
         description="Set to true if this narrative is a definitive ending to the story (victory, death, etc). If true, choices may be empty.",
     )
+    mood: str = Field(
+        default="default",
+        description="The atmospheric mood of the current scene (e.g., 'mysterious', 'heroic', 'combat', 'ethereal', 'dark', 'grimy').",
+    )
 
     @model_validator(mode="after")
     def validate_choices_count(self) -> "StoryNode":
