@@ -5,6 +5,7 @@ from typing import Any
 
 from cyoa.core.events import Events, bus
 from cyoa.core.models import Choice, StoryNode
+from cyoa.core.observability import EngineObservedSession
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
 from cyoa.llm.broker import ModelBroker, SpeculationCache, StoryContext
@@ -49,30 +50,29 @@ class StoryEngine:
 
     async def initialize(self) -> None:
         """Start a brand-new adventure."""
-        logger.info("Initializing Story Engine...")
+        with EngineObservedSession("initialize"):
+            self.story_context = StoryContext(
+                starting_prompt=self.starting_prompt,
+                token_budget=self.broker.token_budget,
+                token_counter=self.broker.provider.count_tokens,
+            )
 
-        self.story_context = StoryContext(
-            starting_prompt=self.starting_prompt,
-            token_budget=self.broker.token_budget,
-            token_counter=self.broker.provider.count_tokens,
-        )
+            self.turn_count = 1
+            self.inventory = []
+            self.player_stats = {"health": 100, "gold": 0, "reputation": 0}
+            self.current_node = None
+            self.story_title = None
+            self.current_scene_id = None
+            self.last_choice_text = None
+            self._undo_snapshot = None
 
-        self.turn_count = 1
-        self.inventory = []
-        self.player_stats = {"health": 100, "gold": 0, "reputation": 0}
-        self.current_node = None
-        self.story_title = None
-        self.current_scene_id = None
-        self.last_choice_text = None
-        self._undo_snapshot = None
+            # Reset memories for a new session
+            # Note: If these were persistent (e.g. ChromaDB on disk), we'd need to handle that.
+            # NarrativeMemory() creates a new collection by default in current impl.
+            # But we'll trust the caller if they want to reuse them.
 
-        # Reset memories for a new session
-        # Note: If these were persistent (e.g. ChromaDB on disk), we'd need to handle that.
-        # NarrativeMemory() creates a new collection by default in current impl.
-        # But we'll trust the caller if they want to reuse them.
-
-        bus.emit(Events.ENGINE_STARTED)
-        await self._generate_next()
+            bus.emit(Events.ENGINE_STARTED)
+            await self._generate_next()
 
     async def restart(self) -> None:
         """Restart the engine with the same configuration."""
@@ -87,22 +87,26 @@ class StoryEngine:
             logger.warning("Choice made before engine was ready.")
             return
 
-        # Snapshot for undo BEFORE making changes
-        self._create_undo_snapshot()
+        with EngineObservedSession("make_choice") as session:
+            if session.span:
+                session.span.set_attribute("choice.text", choice_text)
 
-        bus.emit(Events.CHOICE_MADE, choice_text=choice_text)
+            # Snapshot for undo BEFORE making changes
+            self._create_undo_snapshot()
 
-        # Update the LLM context (history and state)
-        self.story_context.add_turn(
-            self.current_node.narrative,
-            choice_text,
-            self.inventory,
-            self.player_stats,
-        )
+            bus.emit(Events.CHOICE_MADE, choice_text=choice_text)
 
-        self.last_choice_text = choice_text
-        self.turn_count += 1
-        await self._generate_next(choice_text=choice_text)
+            # Update the LLM context (history and state)
+            self.story_context.add_turn(
+                self.current_node.narrative,
+                choice_text,
+                self.inventory,
+                self.player_stats,
+            )
+
+            self.last_choice_text = choice_text
+            self.turn_count += 1
+            await self._generate_next(choice_text=choice_text)
 
     async def _generate_next(self, choice_text: str | None = None) -> None:
         """Orchestrate the generation of the next story node, including RAG and DB saving."""
@@ -140,62 +144,67 @@ class StoryEngine:
             bus.emit(Events.TOKEN_STREAMED, token=token)
 
         try:
-            if cached_node:
-                # Simulated minimal stream to maintain UI feel
-                bus.emit(Events.TOKEN_STREAMED, token="*(Recalling future memories...)* ")
-                await asyncio.sleep(0.1)
-                node = cached_node
-            else:
-                node = await self.broker.generate_next_node_async(
-                    self.story_context, on_token_chunk=on_token
-                )
+            with EngineObservedSession("process_turn") as session:
+                if cached_node:
+                    # Simulated minimal stream to maintain UI feel
+                    bus.emit(Events.TOKEN_STREAMED, token="*(Recalling future memories...)* ")
+                    await asyncio.sleep(0.1)
+                    node = cached_node
+                    if session.span:
+                        session.span.set_attribute("engine.cache_hit", True)
+                else:
+                    node = await self.broker.generate_next_node_async(
+                        self.story_context, on_token_chunk=on_token
+                    )
+                    if session.span:
+                        session.span.set_attribute("engine.cache_hit", False)
 
-            # 4. Save State (KV cache) if available
-            state = await self.broker.save_state_async()
-            if state and self.current_scene_id:
-                self.speculation_cache.set_state(self.current_scene_id, state)
+                # 4. Save State (KV cache) if available
+                state = await self.broker.save_state_async()
+                if state and self.current_scene_id:
+                    self.speculation_cache.set_state(self.current_scene_id, state)
 
-            # 5. Apply updates
-            self._apply_node_updates(node)
-            self.current_node = node
+                # 5. Apply updates
+                self._apply_node_updates(node)
+                self.current_node = node
 
-            # 6. First node check (Title)
-            if self.turn_count == 1:
-                # If first node, generate story title if not present
-                generated_title = node.title if node.title else "Untitled Adventure"
-                if self.db:
-                    self.story_title = await asyncio.to_thread(
-                        self.db.create_story_node_and_get_title, generated_title
+                # 6. First node check (Title)
+                if self.turn_count == 1:
+                    # If first node, generate story title if not present
+                    generated_title = node.title if node.title else "Untitled Adventure"
+                    if self.db:
+                        self.story_title = await asyncio.to_thread(
+                            self.db.create_story_node_and_get_title, generated_title
+                        )
+                    else:
+                        self.story_title = generated_title
+                    bus.emit(Events.STORY_TITLE_GENERATED, title=self.story_title)
+
+                # 7. Persistence and Indexing
+                new_id = self.current_scene_id or str(uuid.uuid4())
+                # Background indexing
+                await self.memory.add_async(new_id, node.narrative)
+                if getattr(node, "npcs_present", None):
+                    for npc in node.npcs_present:
+                        await self.npc_memory.add_async(npc, new_id, node.narrative)
+
+                # Database save
+                if self.db and self.story_title:
+                    choices_text = [choice.text for choice in node.choices]
+                    self.current_scene_id = await self.db.save_scene_async(
+                        narrative=node.narrative,
+                        available_choices=choices_text,
+                        story_title=self.story_title,
+                        source_scene_id=self.current_scene_id,
+                        choice_text=choice_text,
                     )
                 else:
-                    self.story_title = generated_title
-                bus.emit(Events.STORY_TITLE_GENERATED, title=self.story_title)
+                    self.current_scene_id = new_id
 
-            # 7. Persistence and Indexing
-            new_id = self.current_scene_id or str(uuid.uuid4())
-            # Background indexing
-            await self.memory.add_async(new_id, node.narrative)
-            if getattr(node, "npcs_present", None):
-                for npc in node.npcs_present:
-                    await self.npc_memory.add_async(npc, new_id, node.narrative)
+                bus.emit(Events.NODE_COMPLETED, node=node)
 
-            # Database save
-            if self.db and self.story_title:
-                choices_text = [choice.text for choice in node.choices]
-                self.current_scene_id = await self.db.save_scene_async(
-                    narrative=node.narrative,
-                    available_choices=choices_text,
-                    story_title=self.story_title,
-                    source_scene_id=self.current_scene_id,
-                    choice_text=choice_text,
-                )
-            else:
-                self.current_scene_id = new_id
-
-            bus.emit(Events.NODE_COMPLETED, node=node)
-
-            if node.is_ending:
-                bus.emit(Events.ENDING_REACHED, node=node)
+                if node.is_ending:
+                    bus.emit(Events.ENDING_REACHED, node=node)
 
         except Exception as e:
             logger.error(f"Story Engine error: {e}", exc_info=True)
@@ -248,25 +257,26 @@ class StoryEngine:
         if not self._undo_snapshot or not self.story_context:
             return False
 
-        snap = self._undo_snapshot
-        self.turn_count = snap["turn_count"]
-        self.current_node = snap["current_node"]
-        self.inventory = list(snap["inventory"])
-        self.player_stats = dict(snap["player_stats"])
-        self.story_context.history = snap["story_context_history"]
-        self.story_title = snap["story_title"]
-        self.current_scene_id = snap["current_scene_id"]
-        self.last_choice_text = snap["last_choice_text"]
+        with EngineObservedSession("undo"):
+            snap = self._undo_snapshot
+            self.turn_count = snap["turn_count"]
+            self.current_node = snap["current_node"]
+            self.inventory = list(snap["inventory"])
+            self.player_stats = dict(snap["player_stats"])
+            self.story_context.history = snap["story_context_history"]
+            self.story_title = snap["story_title"]
+            self.current_scene_id = snap["current_scene_id"]
+            self.last_choice_text = snap["last_choice_text"]
 
-        self._undo_snapshot = None
+            self._undo_snapshot = None
 
-        bus.emit(Events.STATS_UPDATED, stats=dict(self.player_stats))
-        bus.emit(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
-        # Trigger UI refresh for node
-        if self.current_node:
-            bus.emit(Events.NODE_COMPLETED, node=self.current_node)
+            bus.emit(Events.STATS_UPDATED, stats=dict(self.player_stats))
+            bus.emit(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
+            # Trigger UI refresh for node
+            if self.current_node:
+                bus.emit(Events.NODE_COMPLETED, node=self.current_node)
 
-        return True
+            return True
 
     def get_save_data(self) -> dict[str, Any]:
         """Produce a dictionary of the current state for saving."""

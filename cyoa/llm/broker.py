@@ -18,7 +18,7 @@ from cyoa.core.constants import (
     DEFAULT_LLM_TEMPERATURE,
 )
 from cyoa.core.models import Choice, StoryNode
-from cyoa.core.observability import record_repair_attempt
+from cyoa.core.observability import EngineObservedSession, record_repair_attempt
 from cyoa.llm.pipeline import (
     DirectiveComponent,
     GoalComponent,
@@ -367,7 +367,8 @@ class ModelBroker:
                 context._chapter_scene_count = 0
 
         # Apply the updates to the context (also triggers pruning)
-        context.set_hierarchical_summary(scene=new_scene, chapter=new_chapter, arc=new_arc)
+        with EngineObservedSession("update_summaries"):
+            context.set_hierarchical_summary(scene=new_scene, chapter=new_chapter, arc=new_arc)
 
     async def _generate_dense_summary(
         self,

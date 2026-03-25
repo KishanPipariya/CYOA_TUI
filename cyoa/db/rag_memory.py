@@ -12,6 +12,8 @@ import uuid
 from collections import deque
 from typing import Any
 
+from cyoa.core.observability import DBObservedSession
+
 __all__ = ["NarrativeMemory", "NPCMemory"]
 
 try:
@@ -90,13 +92,15 @@ class NarrativeMemory:
         def _sync_add() -> None:
             if not self._ensure_ready() or self._collection is None:
                 return
-            try:
-                self._collection.upsert(
-                    ids=[scene_id],
-                    documents=[narrative],
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.error("RAG memory: failed to add scene %s: %s", scene_id, e)
+            with DBObservedSession("chroma", "add_narrative"):
+                try:
+                    self._collection.upsert(
+                        ids=[scene_id],
+                        documents=[narrative],
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.error("RAG memory: failed to add scene %s: %s", scene_id, e)
+                    raise
 
         await asyncio.to_thread(_sync_add)
 
@@ -115,18 +119,19 @@ class NarrativeMemory:
         def _sync_query() -> list[str]:
             if not self._ensure_ready() or self._collection is None:
                 return list(self._fallback)[-n:]
-            try:
-                count = self._collection.count()
-                if count == 0:
+            with DBObservedSession("chroma", "query_narrative"):
+                try:
+                    count = self._collection.count()
+                    if count == 0:
+                        return list(self._fallback)[-n:]
+                    results = self._collection.query(
+                        query_texts=[text],
+                        n_results=min(n, count),
+                    )
+                    return results["documents"][0] if results["documents"] else []
+                except Exception as e:  # noqa: BLE001
+                    logger.error("RAG memory: query failed: %s", e)
                     return list(self._fallback)[-n:]
-                results = self._collection.query(
-                    query_texts=[text],
-                    n_results=min(n, count),
-                )
-                return results["documents"][0] if results["documents"] else []
-            except Exception as e:  # noqa: BLE001
-                logger.error("RAG memory: query failed: %s", e)
-                return list(self._fallback)[-n:]
 
         return await asyncio.to_thread(_sync_query)
 
@@ -199,18 +204,20 @@ class NPCMemory:
             if safe_name not in self._collections:
                 return
 
-            try:
-                self._collections[safe_name].upsert(
-                    ids=[scene_id],
-                    documents=[narrative],
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.error(
-                    "RAG NPC memory: failed to add scene %s for %s: %s",
-                    scene_id,
-                    npc_name,
-                    e,
-                )
+            with DBObservedSession("chroma", f"add_npc_{safe_name}"):
+                try:
+                    self._collections[safe_name].upsert(
+                        ids=[scene_id],
+                        documents=[narrative],
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.error(
+                        "RAG NPC memory: failed to add scene %s for %s: %s",
+                        scene_id,
+                        npc_name,
+                        e,
+                    )
+                    raise
 
         await asyncio.to_thread(_sync_add)
 
@@ -232,21 +239,22 @@ class NPCMemory:
                 buffer = self._fallbacks.get(npc_name, deque())
                 return list(buffer)[-n:]
 
-            try:
-                collection = self._collections[safe_name]
-                count = collection.count()
-                if count == 0:
+            with DBObservedSession("chroma", f"query_npc_{safe_name}"):
+                try:
+                    collection = self._collections[safe_name]
+                    count = collection.count()
+                    if count == 0:
+                        buffer = self._fallbacks.get(npc_name, deque())
+                        return list(buffer)[-n:]
+
+                    results = collection.query(
+                        query_texts=[text],
+                        n_results=min(n, count),
+                    )
+                    return results["documents"][0] if results["documents"] else []
+                except Exception as e:  # noqa: BLE001
+                    logger.error("RAG NPC memory: query failed for %s: %s", npc_name, e)
                     buffer = self._fallbacks.get(npc_name, deque())
                     return list(buffer)[-n:]
-
-                results = collection.query(
-                    query_texts=[text],
-                    n_results=min(n, count),
-                )
-                return results["documents"][0] if results["documents"] else []
-            except Exception as e:  # noqa: BLE001
-                logger.error("RAG NPC memory: query failed for %s: %s", npc_name, e)
-                buffer = self._fallbacks.get(npc_name, deque())
-                return list(buffer)[-n:]
 
         return await asyncio.to_thread(_sync_query)

@@ -82,6 +82,112 @@ failure_counter = meter.create_counter(
     description="Failed LLM generations",
 )
 
+# DB Metrics
+db_latency_histogram = meter.create_histogram(
+    name="db.operation_latency",
+    description="Database operation latency",
+    unit="ms",
+)
+
+db_operation_counter = meter.create_counter(
+    name="db.operations",
+    description="Number of database operations",
+)
+
+db_error_counter = meter.create_counter(
+    name="db.errors",
+    description="Number of database errors",
+)
+
+# Engine Metrics
+engine_turn_duration_histogram = meter.create_histogram(
+    name="engine.turn_duration",
+    description="Time taken to process a single turn",
+    unit="ms",
+)
+
+engine_event_counter = meter.create_counter(
+    name="engine.events",
+    description="Significant engine events",
+)
+
+
+class DBObservedSession:
+    """Helper to track timing and errors for a single DB call."""
+
+    def __init__(self, db_type: str, operation: str):
+        self.db_type = db_type
+        self.operation = operation
+        self.start_time = None
+        self.span = None
+
+    def __enter__(self):
+        self.start_time = time.perf_counter()
+        # Use provided operation name directly for span
+        self.span = tracer.start_span(
+            f"db.{self.db_type}.{self.operation}",
+            attributes={"db.type": self.db_type, "db.operation": self.operation},
+        )
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        duration_ms = (time.perf_counter() - self.start_time) * 1000
+        db_latency_histogram.record(
+            duration_ms, {"db.type": self.db_type, "db.operation": self.operation}
+        )
+        db_operation_counter.add(
+            1, {"db.type": self.db_type, "db.operation": self.operation}
+        )
+
+        if exc_type:
+            db_error_counter.add(
+                1,
+                {
+                    "db.type": self.db_type,
+                    "db.operation": self.operation,
+                    "error_type": exc_type.__name__,
+                },
+            )
+            if self.span:
+                self.span.record_exception(exc_val)
+                self.span.set_status(trace.Status(trace.StatusCode.ERROR))
+
+        if self.span:
+            self.span.end()
+
+
+class EngineObservedSession:
+    """Helper to track timing for engine operations."""
+
+    def __init__(self, operation: str):
+        self.operation = operation
+        self.start_time = None
+        self.span = None
+
+    def __enter__(self):
+        self.start_time = time.perf_counter()
+        self.span = tracer.start_span(
+            f"engine.{self.operation}",
+            attributes={"engine.operation": self.operation},
+        )
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        duration_ms = (time.perf_counter() - self.start_time) * 1000
+        if self.operation == "process_turn":
+            engine_turn_duration_histogram.record(duration_ms)
+
+        engine_event_counter.add(
+            1, {"engine.operation": self.operation, "success": str(exc_type is None)}
+        )
+
+        if exc_type and self.span:
+            self.span.record_exception(exc_val)
+            self.span.set_status(trace.Status(trace.StatusCode.ERROR))
+
+        if self.span:
+            self.span.end()
+
 
 class LLMObservedSession:
     """Helper to track timing and token counts for a single LLM call."""

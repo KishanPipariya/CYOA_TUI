@@ -7,6 +7,7 @@ from neo4j import GraphDatabase
 from neo4j.exceptions import AuthError, ServiceUnavailable
 
 from cyoa.core.constants import DEFAULT_NEO4J_URI
+from cyoa.core.observability import DBObservedSession
 
 logger = logging.getLogger(__name__)
 
@@ -67,33 +68,36 @@ class CYOAGraphDB:
         )
 
         final_title = generated_title
-        with self.driver.session() as session:
-            result = session.run(query_check, base_title=generated_title)
-            existing_titles = [record["title"] for record in result]
+        with DBObservedSession("neo4j", "create_story_node") as session_obs:
+            with self.driver.session() as session:
+                result = session.run(query_check, base_title=generated_title)
+                existing_titles = [record["title"] for record in result]
 
-            if existing_titles:
-                max_mod = 0
-                for title in existing_titles:
-                    if title == generated_title:
-                        max_mod = max(max_mod, 1)
-                    elif title.startswith(f"{generated_title} ("):
-                        try:
-                            mod_str = title[len(generated_title) + 2 : -1]
-                            max_mod = max(max_mod, int(mod_str))
-                        except ValueError:
-                            pass
+                if existing_titles:
+                    max_mod = 0
+                    for title in existing_titles:
+                        if title == generated_title:
+                            max_mod = max(max_mod, 1)
+                        elif title.startswith(f"{generated_title} ("):
+                            try:
+                                mod_str = title[len(generated_title) + 2 : -1]
+                                max_mod = max(max_mod, int(mod_str))
+                            except ValueError:
+                                pass
 
-                if max_mod > 0:
-                    final_title = f"{generated_title} ({max_mod + 1})"
+                    if max_mod > 0:
+                        final_title = f"{generated_title} ({max_mod + 1})"
 
-            query_create = """
-            CREATE (s:Story {
-                id: $story_id,
-                title: $final_title
-            })
-            RETURN s.title AS title
-            """
-            session.run(query_create, story_id=str(uuid.uuid4()), final_title=final_title)
+                query_create = """
+                CREATE (s:Story {
+                    id: $story_id,
+                    title: $final_title
+                })
+                RETURN s.title AS title
+                """
+                session.run(query_create, story_id=str(uuid.uuid4()), final_title=final_title)
+                if session_obs.span:
+                    session_obs.span.set_attribute("story.title", final_title)
 
         return final_title
 
@@ -118,18 +122,23 @@ class CYOAGraphDB:
         RETURN s.id AS scene_id
         """
 
-        with self.driver.session() as session:
-            result = session.run(
-                query,
-                scene_id=scene_id,
-                narrative=narrative,
-                available_choices=available_choices,
-                story_title=story_title,
-            )
-            record = result.single()
-            if record is None:
-                return scene_id
-            return str(record["scene_id"])
+        with DBObservedSession("neo4j", "create_scene_node") as session_obs:
+            with self.driver.session() as session:
+                result = session.run(
+                    query,
+                    scene_id=scene_id,
+                    narrative=narrative,
+                    available_choices=available_choices,
+                    story_title=story_title,
+                )
+                record = result.single()
+                if record is None:
+                    return scene_id
+                
+                final_id = str(record["scene_id"])
+                if session_obs.span:
+                    session_obs.span.set_attribute("scene.id", final_id)
+                return final_id
 
     def create_choice_edge(
         self, source_scene_id: str, target_scene_id: str, choice_text: str
@@ -145,13 +154,14 @@ class CYOAGraphDB:
         RETURN r
         """
 
-        with self.driver.session() as session:
-            session.run(
-                query,
-                source_id=source_scene_id,
-                target_id=target_scene_id,
-                choice_text=choice_text,
-            )
+        with DBObservedSession("neo4j", "create_choice_edge"):
+            with self.driver.session() as session:
+                session.run(
+                    query,
+                    source_id=source_scene_id,
+                    target_id=target_scene_id,
+                    choice_text=choice_text,
+                )
 
     async def save_scene_async(
         self,

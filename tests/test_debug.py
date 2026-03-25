@@ -15,6 +15,7 @@ async def test_debug_stats():
     mock_provider.count_tokens = MagicMock(return_value=10)
     mock_gen.provider = mock_provider
     mock_gen.generate_next_node_async = AsyncMock(return_value=StoryNode(narrative="Test", choices=[], is_ending=True))
+    mock_gen.save_state_async = AsyncMock(return_value=None)
 
     with patch("cyoa.ui.app.ModelBroker", return_value=mock_gen), patch("cyoa.ui.app.CYOAGraphDB"):
         app = CYOAApp(model_path="dummy")

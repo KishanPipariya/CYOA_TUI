@@ -421,10 +421,17 @@ class MockProvider(LLMProvider):
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> str:
+        session = LLMObservedSession(model_name=self.model_name, task="generate_text").start()
         # Simple summary fallback
         if "summar" in str(messages[-1].get("content", "")).lower():
-            return "The journey continues through the digital mists, where reality is but a memory."
-        return "This is a mock narrative generated because the real model is unavailable. You are in a safe, simulated environment."
+            content = "The journey continues through the digital mists, where reality is but a memory."
+        else:
+            content = "This is a mock narrative generated because the real model is unavailable. You are in a safe, simulated environment."
+        
+        session.report_first_token()
+        session.report_token(self.count_tokens(content))
+        session.end(success=True)
+        return content
 
     async def generate_json(
         self,
@@ -433,6 +440,7 @@ class MockProvider(LLMProvider):
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> str:
+        session = LLMObservedSession(model_name=self.model_name, task="generate_json").start()
         data = {
             "narrative": "You are standing in a digital void. The real model weights were not found, so you are talking to a ghost in the machine. Around you, fragments of data shimmer like stars.",
             "title": "The Ghost in the Machine",
@@ -447,7 +455,11 @@ class MockProvider(LLMProvider):
             "is_ending": False,
             "mood": "mysterious",
         }
-        return json.dumps(data)
+        content = json.dumps(data)
+        session.report_first_token()
+        session.report_token(self.count_tokens(content))
+        session.end(success=True)
+        return content
 
     async def stream_json(
         self,
