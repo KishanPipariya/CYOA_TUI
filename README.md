@@ -20,7 +20,7 @@ A dark fantasy Choose-Your-Adventure game generated entirely by a local Large La
     *   **Model Brokers**: Supports fallbacks and alternative providers.
     *   **Token Budgeting**: Smart context management using `tiktoken` to prevent overflow and maintain long-term coherence.
 *   **Persistent Graph World**: Every playthrough is saved to a **Neo4j** graph database, mapping choices to narrative branches for a truly persistent multiverse.
-*   **RAG Memory**: Long-term story consistency powered by **ChromaDB** for vector-based memory retrieval.
+*   **RAG Memory**: Long-term story consistency powered by **ChromaDB** for vector-based memory retrieval. Includes a graceful fallback to recent-session memory if ChromaDB is unavailable, ensuring long-term context is always prioritized.
 *   **Deep Observability**: Full **OpenTelemetry** integration. Trace every prompt, latency, and token usage via Jaeger, and monitor system health through Prometheus & Grafana.
 
 ---
