@@ -6,6 +6,8 @@ from typing import Any
 from neo4j import GraphDatabase
 from neo4j.exceptions import AuthError, ServiceUnavailable
 
+from cyoa.core.constants import DEFAULT_NEO4J_URI
+
 logger = logging.getLogger(__name__)
 
 
@@ -17,9 +19,9 @@ class CYOAGraphDB:
         password: str | None = None,
     ) -> None:
         """Initialize the connection to Neo4j. Reads credentials from env vars if not provided."""
-        uri = uri or os.getenv("NEO4J_URI", "bolt://localhost:7687")
-        user = user or os.getenv("NEO4J_USER", "neo4j")
-        password = password or os.getenv("NEO4J_PASSWORD", "cyoa_password")
+        uri = uri or os.getenv("NEO4J_URI", DEFAULT_NEO4J_URI)
+        user = user or os.getenv("NEO4J_USER")
+        password = password or os.getenv("NEO4J_PASSWORD")
         self.driver = None  # Initialize to None
 
         try:

@@ -46,3 +46,15 @@ ERROR_NARRATIVE_PREFIX = "The universe encounters an anomaly"
 
 # Characters-per-token estimate (conservative for English prose).
 CHARS_PER_TOKEN = 4
+
+# LLM Hyperparameters
+DEFAULT_LLM_N_CTX = 4096
+DEFAULT_LLM_TEMPERATURE = 0.6
+DEFAULT_LLM_MAX_TOKENS = 512
+DEFAULT_LLM_SUMMARY_MAX_TOKENS = 200
+DEFAULT_LLM_REPAIR_ATTEMPTS = 2
+DEFAULT_LLM_SUMMARY_THRESHOLD = 0.8
+
+# --- Database & Persistence ---
+
+DEFAULT_NEO4J_URI = "bolt://localhost:7687"

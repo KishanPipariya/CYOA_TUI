@@ -6,7 +6,7 @@ services:
       - "7474:7474" # Browser interface
       - "7687:7687" # Bolt routing 
     environment:
-      - NEO4J_AUTH=neo4j/cyoa_password # Default auth: user=neo4j, password=cyoa_password
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD}
       # Add APOC (Awesome Procedures on Cypher) plugin which is very useful for advanced graphs
       - NEO4J_PLUGINS=["apoc"]
     volumes:
@@ -52,7 +52,7 @@ services:
     ports:
       - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
       - GF_USERS_ALLOW_SIGN_UP=false
     depends_on:
       - prometheus

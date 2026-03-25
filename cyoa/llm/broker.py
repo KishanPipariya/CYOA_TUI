@@ -8,7 +8,15 @@ from typing import Any
 import jinja2
 import jiter
 
-from cyoa.core.constants import CHARS_PER_TOKEN
+from cyoa.core.constants import (
+    CHARS_PER_TOKEN,
+    DEFAULT_LLM_MAX_TOKENS,
+    DEFAULT_LLM_N_CTX,
+    DEFAULT_LLM_REPAIR_ATTEMPTS,
+    DEFAULT_LLM_SUMMARY_MAX_TOKENS,
+    DEFAULT_LLM_SUMMARY_THRESHOLD,
+    DEFAULT_LLM_TEMPERATURE,
+)
 from cyoa.core.models import Choice, StoryNode
 from cyoa.core.observability import record_repair_attempt
 from cyoa.llm.pipeline import (
@@ -31,7 +39,9 @@ DEFAULT_TOKEN_BUDGET = int(os.getenv("LLM_TOKEN_BUDGET", "2048"))
 # Rolling summarization fires when the number of stored turn *pairs* reaches
 # this fraction of token_budget. At 0.8 we still have 20% headroom before the
 # hard sliding-window truncation kicks in.
-SUMMARIZATION_THRESHOLD = float(os.getenv("LLM_SUMMARY_THRESHOLD", "0.8"))
+SUMMARIZATION_THRESHOLD = float(
+    os.getenv("LLM_SUMMARY_THRESHOLD", str(DEFAULT_LLM_SUMMARY_THRESHOLD))
+)
 
 
 logger = logging.getLogger(__name__)
@@ -269,12 +279,16 @@ class ModelBroker:
         self.token_budget = int(os.getenv("LLM_TOKEN_BUDGET", str(default_budget)))
 
         self._schema = StoryNode.model_json_schema()
-        self._temperature = float(os.getenv("LLM_TEMPERATURE", "0.6"))
-        self._max_tokens = int(os.getenv("LLM_MAX_TOKENS", "512"))
+        self._temperature = float(os.getenv("LLM_TEMPERATURE", str(DEFAULT_LLM_TEMPERATURE)))
+        self._max_tokens = int(os.getenv("LLM_MAX_TOKENS", str(DEFAULT_LLM_MAX_TOKENS)))
         # Maximum tokens for the "Story So Far" summary paragraph.
-        self._summary_max_tokens = int(os.getenv("LLM_SUMMARY_MAX_TOKENS", "200"))
+        self._summary_max_tokens = int(
+            os.getenv("LLM_SUMMARY_MAX_TOKENS", str(DEFAULT_LLM_SUMMARY_MAX_TOKENS))
+        )
         # Number of recursive repair attempts if JSON structure or schema fails
-        self._repair_attempts = int(os.getenv("LLM_REPAIR_ATTEMPTS", "2"))
+        self._repair_attempts = int(
+            os.getenv("LLM_REPAIR_ATTEMPTS", str(DEFAULT_LLM_REPAIR_ATTEMPTS))
+        )
 
     def _create_provider_from_env(
         self, model_path: str | None = None, n_ctx: int | None = None
@@ -290,7 +304,7 @@ class ModelBroker:
                 m_path = "models/mistral-7b-instruct-v0.2.Q4_K_M.gguf"
                 logger.warning("No model path provided, using default: %s", m_path)
 
-            n_ctx_val = n_ctx or int(os.getenv("LLM_N_CTX", "4096"))
+            n_ctx_val = n_ctx or int(os.getenv("LLM_N_CTX", str(DEFAULT_LLM_N_CTX)))
             if not os.path.exists(m_path):
                 logger.warning(
                     f"Model file '{m_path}' not found. Falling back to MockProvider for development."

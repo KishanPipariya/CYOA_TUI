@@ -51,19 +51,29 @@ Clone the repository and sync dependencies:
 uv sync
 ```
 
-### 2. Launch Infrastructure
+### 2. Configure Environment Variables
+Copy the example environment file and adjust as needed:
+```bash
+cp .env.example .env
+```
+Key variables to configure:
+*   **`LLM_MODEL_PATH`**: Path to your local `.gguf` file (e.g., `models/qwen2.5-14b.gguf`).
+*   **`NEO4J_PASSWORD`**: Your Neo4j database password (setup in `.env`).
+*   **`OTEL_EXPORTER_OTLP_ENDPOINT`**: OTLP endpoint for observability (default: `http://localhost:4318`).
+
+### 3. Launch Infrastructure
 Start the database and observability containers:
 ```bash
 docker-compose up -d
 ```
-*   **Neo4j UI**: `http://localhost:7474` (User: `neo4j` / Pass: `cyoa_password`)
+*   **Neo4j UI**: `http://localhost:7474` (User: `neo4j` / Pass: `your_configured_password`)
 *   **Jaeger Traces**: `http://localhost:16686`
 *   **Grafana Dashboards**: `http://localhost:3001` (Admin / admin)
 
-### 3. Start the Adventure
-Run the application with your model path:
+### 4. Start the Adventure
+Run the application (it will use the model path from `.env` or you can override it):
 ```bash
-uv run python main.py --model path/to/qwen2.5-14b.gguf --theme dark_dungeon
+uv run python main.py --model path/to/model.gguf
 ```
 
 ---
@@ -75,6 +85,24 @@ uv run python main.py --model path/to/qwen2.5-14b.gguf --theme dark_dungeon
 | `--model` | **Required**. Path to the local `.gguf` file. |
 | `--theme` | Theme choice (e.g., `dark_dungeon`, `space_explorer`). |
 | `--prompt` | Override starting prompt directly. |
+
+---
+
+## Configuration Reference
+
+The following environment variables can be set in your `.env` file:
+
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `LLM_MODEL_PATH` | Path to your local GGUF model file. | `models/...` |
+| `LLM_PROVIDER` | LLM backend: `llama_cpp`, `ollama`, or `mock`. | `llama_cpp` |
+| `NEO4J_URI` | Neo4j connection URI. | `bolt://localhost:7687` |
+| `NEO4J_USER` | Neo4j username. | `neo4j` |
+| `NEO4J_PASSWORD` | Neo4j password. | *(Required)* |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint. | *(None)* |
+| `LLM_N_CTX` | Model context window size. | `4096` |
+| `LLM_TEMPERATURE` | Narrative sampling temperature. | `0.6` |
+| `LLM_MAX_TOKENS` | Max tokens for narrative generation. | `512` |
 
 ---
 
