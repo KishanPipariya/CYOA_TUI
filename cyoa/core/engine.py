@@ -4,7 +4,7 @@ import uuid
 from typing import Any
 
 from cyoa.core.events import Events, bus
-from cyoa.core.models import Choice, StoryNode
+from cyoa.core.models import StoryNode
 from cyoa.core.observability import EngineObservedSession
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
@@ -322,5 +322,5 @@ class StoryEngine:
         bus.emit(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
         if self.current_node:
             bus.emit(Events.NODE_COMPLETED, node=self.current_node)
-        
+
         bus.emit(Events.STORY_TITLE_GENERATED, title=self.story_title)

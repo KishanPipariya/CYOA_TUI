@@ -18,7 +18,6 @@ from cyoa.core.constants import (
     DEFAULT_LLM_TEMPERATURE,
 )
 from cyoa.core.models import Choice, ExtractionNode, NarratorNode, StoryNode
-
 from cyoa.core.observability import EngineObservedSession, record_repair_attempt
 from cyoa.llm.pipeline import (
     DirectiveComponent,
@@ -539,7 +538,7 @@ class ModelBroker:
 
                 logger.warning("Narrator repair attempt %d/%d for error: %s", attempts, self._repair_attempts, e)
                 record_repair_attempt(model_name="narrator", error_type=type(e).__name__)
-                
+
                 messages = list(messages)
                 messages.append({"role": "assistant", "content": content})
                 messages.append({

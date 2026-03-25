@@ -350,7 +350,7 @@ class TestStoryNodeEnding:
     def test_mood_defaults_and_assignment(self):
         node = _make_node()
         assert node.mood == "default"
-        
+
         node_with_mood = StoryNode(
             narrative="A scary cave.",
             choices=[Choice(text="Enter"), Choice(text="Run")],

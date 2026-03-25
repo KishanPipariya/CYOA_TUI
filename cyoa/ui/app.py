@@ -6,6 +6,7 @@ from typing import Any, ClassVar
 
 from textual import work
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.reactive import reactive
 from textual.theme import Theme
@@ -20,7 +21,6 @@ from textual.widgets import (
     Static,
     Tree,
 )
-from textual.binding import Binding
 
 from cyoa.core import constants, utils
 from cyoa.core.engine import StoryEngine
@@ -28,7 +28,7 @@ from cyoa.core.events import Events, bus
 from cyoa.core.models import Choice, StoryNode
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
-from cyoa.llm.broker import ModelBroker, SpeculationCache, StoryContext
+from cyoa.llm.broker import ModelBroker, StoryContext
 from cyoa.ui.ascii_art import SCENE_ART
 from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, ThemeSpinner
 

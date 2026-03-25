@@ -427,7 +427,7 @@ class MockProvider(LLMProvider):
             content = "The journey continues through the digital mists, where reality is but a memory."
         else:
             content = "This is a mock narrative generated because the real model is unavailable. You are in a safe, simulated environment."
-        
+
         session.report_first_token()
         session.report_token(self.count_tokens(content))
         session.end(success=True)
@@ -441,10 +441,10 @@ class MockProvider(LLMProvider):
         temperature: float = 0.7,
     ) -> str:
         session = LLMObservedSession(model_name=self.model_name, task="generate_json").start()
-        
+
         # Determine which phase we are in based on the schema
         required = schema.get("required", [])
-        
+
         if "narrative" in required:
             # Narrator phase
             data = {

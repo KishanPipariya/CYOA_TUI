@@ -134,7 +134,7 @@ class CYOAGraphDB:
                 record = result.single()
                 if record is None:
                     return scene_id
-                
+
                 final_id = str(record["scene_id"])
                 if session_obs.span:
                     session_obs.span.set_attribute("scene.id", final_id)

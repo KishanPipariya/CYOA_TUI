@@ -8,7 +8,7 @@ from cyoa.ui.app import CYOAApp
 
 @pytest.mark.asyncio
 async def test_debug_stats():
-    from unittest.mock import MagicMock, AsyncMock
+    from unittest.mock import AsyncMock, MagicMock
     mock_gen = MagicMock()
     mock_gen.token_budget = 2048
     mock_provider = MagicMock()
