@@ -441,20 +441,44 @@ class MockProvider(LLMProvider):
         temperature: float = 0.7,
     ) -> str:
         session = LLMObservedSession(model_name=self.model_name, task="generate_json").start()
-        data = {
-            "narrative": "You are standing in a digital void. The real model weights were not found, so you are talking to a ghost in the machine. Around you, fragments of data shimmer like stars.",
-            "title": "The Ghost in the Machine",
-            "items_gained": ["Static Spark"],
-            "items_lost": [],
-            "npcs_present": ["The Mockingbird"],
-            "stat_updates": {"sanity": -1},
-            "choices": [
-                {"text": "Search for reality."},
-                {"text": "Accept the simulation."},
-            ],
-            "is_ending": False,
-            "mood": "mysterious",
-        }
+        
+        # Determine which phase we are in based on the schema
+        required = schema.get("required", [])
+        
+        if "narrative" in required:
+            # Narrator phase
+            data = {
+                "narrative": "You are standing in a digital void. The real model weights were not found, so you are talking to a ghost in the machine. Around you, fragments of data shimmer like stars.",
+                "title": "The Ghost in the Machine",
+                "npcs_present": ["The Mockingbird"],
+                "choices": [
+                    {"text": "Search for reality."},
+                    {"text": "Accept the simulation."},
+                ],
+                "is_ending": False,
+                "mood": "mysterious",
+            }
+        elif "stat_updates" in required:
+            # Judge / Extraction phase
+            data = {
+                "items_gained": ["Static Spark"],
+                "items_lost": [],
+                "stat_updates": {"reputation": 1},
+            }
+        else:
+            # Fallback (StoryNode or unknown) — include legacy strings for test compatibility
+            data = {
+                "narrative": "You are standing in a digital void. Mock narrative.",
+                "title": "Mock Title",
+                "items_gained": ["Static Spark"],
+                "items_lost": [],
+                "npcs_present": ["The Mockingbird"],
+                "stat_updates": {"sanity": -1},
+                "choices": [{"text": "Choice 1"}, {"text": "Choice 2"}],
+                "is_ending": False,
+                "mood": "default",
+            }
+
         content = json.dumps(data)
         session.report_first_token()
         session.report_token(self.count_tokens(content))

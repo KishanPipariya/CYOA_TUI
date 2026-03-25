@@ -261,12 +261,14 @@ class TestModelBrokerFallback:
 
         mock_provider = MagicMock(spec=LLMProvider)
         # First call returns garbage, second returns valid JSON
+        # Three calls: Narrator Failure, Narrator Repair Success, Extraction Phase
         mock_provider.generate_json = AsyncMock(
             side_effect=[
                 "GARBAGE {",
                 json.dumps(
                     {"narrative": "Repaired!", "choices": [{"text": "OK"}, {"text": "Cancel"}]}
                 ),
+                json.dumps({"items_gained": [], "items_lost": [], "stat_updates": {}}),
             ]
         )
 
@@ -275,7 +277,7 @@ class TestModelBrokerFallback:
         node = await broker.generate_next_node_async(ctx)
 
         assert node.narrative == "Repaired!"
-        assert mock_provider.generate_json.call_count == 2
+        assert mock_provider.generate_json.call_count == 3
 
         # Verify the second call included the error message
         repair_messages = mock_provider.generate_json.call_args_list[1][1]["messages"]

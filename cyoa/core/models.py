@@ -50,3 +50,48 @@ class StoryNode(BaseModel):
                     f"Non-ending narrative must have 2 to 4 choices, but got {len(self.choices)}."
                 )
         return self
+
+
+class NarratorNode(BaseModel):
+    """The first phase of the Judge pattern: Narrative and Choices only."""
+
+    narrative: str = Field(
+        description="The unfolding story text describing what just happened and the current situation."
+    )
+    title: str | None = Field(
+        default=None,
+        description="The generated title for this story adventure. (Only necessary for the very first turn).",
+    )
+    npcs_present: list[str] = Field(
+        default_factory=list,
+        description="A list of named NPCs present in the current scene.",
+    )
+    choices: list[Choice] = Field(
+        description="A list of 0 to 4 choices for the user's next action.",
+        json_schema_extra={"minItems": 0, "maxItems": 4},
+    )
+    is_ending: bool = Field(
+        default=False,
+        description="Set to true if this narrative is a definitive conclusion.",
+    )
+    mood: str = Field(
+        default="default",
+        description="Atmospheric keyword (mysterious, heroic, combat, etc).",
+    )
+
+
+class ExtractionNode(BaseModel):
+    """The second phase: Extracting specific state changes from the narrative."""
+
+    items_gained: list[str] = Field(
+        default_factory=list,
+        description="Specific items the narrative explicitly states the player acquired.",
+    )
+    items_lost: list[str] = Field(
+        default_factory=list,
+        description="Specific items the narrative explicitly states the player lost or used.",
+    )
+    stat_updates: dict[str, int] = Field(
+        default_factory=dict,
+        description="Health, gold, or reputation changes derived from the narrative. E.g. {'health': -5}.",
+    )

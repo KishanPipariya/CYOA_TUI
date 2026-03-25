@@ -20,6 +20,7 @@ from textual.widgets import (
     Static,
     Tree,
 )
+from textual.binding import Binding
 
 from cyoa.core import constants, utils
 from cyoa.core.engine import StoryEngine
@@ -58,21 +59,21 @@ class CYOAApp(App):
     CSS_PATH = "styles.tcss"
 
     BINDINGS: ClassVar[list[Any]] = [
-        ("d", "toggle_dark", "Toggle dark mode"),
-        ("b", "branch_past", "Branch from Past"),
-        ("j", "toggle_journal", "Toggle Journal"),
-        ("m", "toggle_story_map", "Toggle Story Map"),
-        ("h", "show_help", "Help"),
-        ("u", "undo", "Undo"),
-        ("s", "save_game", "Save"),
-        ("l", "load_game", "Load"),
-        ("q", "request_quit", "Quit"),
-        ("r", "request_restart", "Restart"),
-        ("space", "skip_typewriter", "Skip Narrator"),
-        ("1", "choose('1')", "Choice 1"),
-        ("2", "choose('2')", "Choice 2"),
-        ("3", "choose('3')", "Choice 3"),
-        ("4", "choose('4')", "Choice 4"),
+        Binding("d", "toggle_dark", "Theme", show=True),
+        Binding("b", "branch_past", "Branch", show=True),
+        Binding("j", "toggle_journal", "Journal", show=True),
+        Binding("m", "toggle_story_map", "Map", show=True),
+        Binding("h", "show_help", "Help", show=True),
+        Binding("u", "undo", "Undo", show=True),
+        Binding("s", "save_game", "Save", show=True),
+        Binding("l", "load_game", "Load", show=True),
+        Binding("q", "request_quit", "Quit", show=True),
+        Binding("r", "request_restart", "Restart", show=True),
+        Binding("space", "skip_typewriter", "Skip", show=True),
+        Binding("1", "choose('1')", "Choice 1", show=False),
+        Binding("2", "choose('2')", "Choice 2", show=False),
+        Binding("3", "choose('3')", "Choice 3", show=False),
+        Binding("4", "choose('4')", "Choice 4", show=False),
     ]
 
     # Fix #4: Reactive turn counter displayed in footer
@@ -586,7 +587,7 @@ class CYOAApp(App):
             )
             for i, choice in enumerate(node.choices):
                 btn_id = f"choice-{uuid.uuid4().hex[:8]}"
-                btn = Button(f"[{i + 1}] {choice.text}", id=btn_id, variant="default")
+                btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="default")
                 choices_container.mount(btn)
         elif node.is_ending:
             end_btn = Button("✦ Start a New Adventure", id="btn-new-adventure", variant="success")
@@ -594,7 +595,7 @@ class CYOAApp(App):
         else:
             for i, choice in enumerate(node.choices):
                 btn_id = f"choice-t{self.turn_count}-{i}"
-                btn = Button(f"[{i + 1}] {choice.text}", id=btn_id, variant="primary")
+                btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="primary")
                 choices_container.mount(btn)
 
     async def _trigger_choice(self, choice_idx: int) -> None:

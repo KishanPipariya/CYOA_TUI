@@ -125,6 +125,32 @@ ThemeSpinner {
 Button {
     width: 100%;
     margin-bottom: 1;
+    height: 3; /* Taller buttons for a more premium feel */
+}
+
+Button > .textual-button--label {
+    text-align: left;
+    padding-left: 2;
+}
+
+/* ── Footer ────────────────────────────────────────────────── */
+Footer {
+    background: transparent;
+    color: $text-muted;
+    dock: bottom;
+    padding: 0 1;
+}
+
+Footer > .footer--key {
+    background: $accent 20%;
+    color: $accent;
+    text-style: bold;
+    margin-right: 1;
+}
+
+Footer > .footer--highlight {
+    background: $accent;
+    color: $surface;
 }
 
 /* Ending button gets a special success variant treatment */

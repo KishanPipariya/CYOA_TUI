@@ -85,6 +85,7 @@ async def test_app_startup_and_loading_state(mock_app_dependencies):
     async with app.run_test() as pilot:
         # Give the background workers a moment to process initial generation
         await pilot.pause(1.5)
+        app.action_skip_typewriter()
 
         # Verify the story text container updated with the mock narrative
         app.query_one("#story-text", Markdown)
@@ -94,8 +95,8 @@ async def test_app_startup_and_loading_state(mock_app_dependencies):
         choices_container = app.query_one("#choices-container", Container)
         buttons = list(choices_container.query(Button))
         assert len(buttons) == 2
-        assert str(buttons[0].label) == "[1] Go North"
-        assert str(buttons[1].label) == "[2] Go South"
+        assert str(buttons[0].label) == "1  Go North"
+        assert str(buttons[1].label) == "2  Go South"
 
         # Verify inventory was updated
         inventory_label = app.query_one("#inventory-display", Label)
@@ -213,12 +214,14 @@ async def test_choice_selection_via_keyboard(mock_app_dependencies):
     async with app.run_test() as pilot:
         # Wait for initial load
         await pilot.pause(1.0)
+        app.action_skip_typewriter()
 
         # Press '1' to select the first choice ("Go North")
         await pilot.press("1")
 
         # Pause to let the worker thread process the next mock node
         await pilot.pause(1.0)
+        app.action_skip_typewriter()
 
         # Verify the story text appended the new narrative
         app.query_one("#story-text", Markdown)
@@ -228,8 +231,8 @@ async def test_choice_selection_via_keyboard(mock_app_dependencies):
         choices_container = app.query_one("#choices-container", Container)
         buttons = list(choices_container.query(Button))
         assert len(buttons) == 2
-        assert str(buttons[0].label) == "[1] Open Door"
-        assert str(buttons[1].label) == "[2] Go Back"
+        assert str(buttons[0].label) == "1  Open Door"
+        assert str(buttons[1].label) == "2  Go Back"
 
         # Verify inventory accumulated the new item
         inventory_label = app.query_one("#inventory-display", Label)
@@ -270,8 +273,8 @@ async def test_choice_selection_via_click(mock_app_dependencies):
         choices_container = app.query_one("#choices-container", Container)
         buttons = list(choices_container.query(Button))
         assert len(buttons) == 2
-        assert str(buttons[0].label) == "[1] Open Door"
-        assert str(buttons[1].label) == "[2] Go Back"
+        assert str(buttons[0].label) == "1  Open Door"
+        assert str(buttons[1].label) == "2  Go Back"
 
 
 @pytest.mark.asyncio
@@ -410,8 +413,8 @@ async def test_choice_buttons_have_number_labels(mock_app_dependencies):
         buttons = list(choices_container.query(Button))
 
         assert len(buttons) == 2
-        assert str(buttons[0].label).startswith("[1]")
-        assert str(buttons[1].label).startswith("[2]")
+        assert str(buttons[0].label).startswith("1 ")
+        assert str(buttons[1].label).startswith("2 ")
 
 
 @pytest.mark.asyncio
@@ -421,6 +424,7 @@ async def test_undo_restores_previous_state(mock_app_dependencies):
 
     async with app.run_test() as pilot:
         await pilot.pause(1.0)  # Node 1
+        app.action_skip_typewriter()
 
         assert app.turn_count == 1
         original_story = app._current_story
@@ -428,6 +432,7 @@ async def test_undo_restores_previous_state(mock_app_dependencies):
         # Make a choice
         await pilot.press("1")
         await pilot.pause(1.0)  # Node 2
+        app.action_skip_typewriter()
         assert app.turn_count == 2
         assert "You went North." in app._current_story
 

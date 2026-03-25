@@ -17,7 +17,8 @@ from cyoa.core.constants import (
     DEFAULT_LLM_SUMMARY_THRESHOLD,
     DEFAULT_LLM_TEMPERATURE,
 )
-from cyoa.core.models import Choice, StoryNode
+from cyoa.core.models import Choice, ExtractionNode, NarratorNode, StoryNode
+
 from cyoa.core.observability import EngineObservedSession, record_repair_attempt
 from cyoa.llm.pipeline import (
     DirectiveComponent,
@@ -278,7 +279,10 @@ class ModelBroker:
         default_budget = (n_ctx or 4096) // 2
         self.token_budget = int(os.getenv("LLM_TOKEN_BUDGET", str(default_budget)))
 
+        self._narrator_schema = NarratorNode.model_json_schema()
+        self._extraction_schema = ExtractionNode.model_json_schema()
         self._schema = StoryNode.model_json_schema()
+
         self._temperature = float(os.getenv("LLM_TEMPERATURE", str(DEFAULT_LLM_TEMPERATURE)))
         self._max_tokens = int(os.getenv("LLM_MAX_TOKENS", str(DEFAULT_LLM_MAX_TOKENS)))
         # Maximum tokens for the "Story So Far" summary paragraph.
@@ -496,9 +500,12 @@ class ModelBroker:
         on_token_chunk: Callable[[str], None] | None = None,
     ) -> StoryNode:
         """
-        Generate the next story node asynchronously.
-        Includes a repair loop for resilient JSON extraction.
+        Generate the next story node asynchronously using the 'Judge' pattern.
+        
+        Phase 1: Narrator - Generate narrative, choices, and atmospheric tags.
+        Phase 2: Judge - Extract state changes (items, stats) from the narrative.
         """
+        # PHASE 1: NARRATOR
         stream = on_token_chunk is not None
         messages = context.get_messages()
         attempts = 0
@@ -506,24 +513,23 @@ class ModelBroker:
 
         last_error = None
         content = ""
+        narrator_node = None
 
         while attempts < max_attempts:
             try:
                 if attempts == 0 and stream and on_token_chunk is not None:
-                    # Initial attempt with streaming
                     content = await self._stream_with_callback_async(messages, on_token_chunk)
                 else:
-                    # Non-streaming for initial (if requested) or repair attempts
                     content = await self.provider.generate_json(
                         messages=messages,
-                        schema=self._schema,
+                        schema=self._narrator_schema,
                         temperature=self._temperature if attempts == 0 else 0.2,
                         max_tokens=self._max_tokens,
                     )
 
                 data = json.loads(content)
-                # Pydantic validation via StoryNode constructor
-                return StoryNode(**data)
+                narrator_node = NarratorNode(**data)
+                break
 
             except (json.JSONDecodeError, TypeError, ValueError, Exception) as e:
                 attempts += 1
@@ -531,40 +537,71 @@ class ModelBroker:
                 if attempts >= max_attempts:
                     break
 
-                logger.warning(
-                    "JSON repair attempt %d/%d for error: %s. Content snippet: %s",
-                    attempts,
-                    self._repair_attempts,
-                    e,
-                    content[:100],
-                )
-
-                # Record the repair attempt in OpenTelemetry
-                model_name = getattr(
-                    self.provider, "model_path", getattr(self.provider, "model", "unknown")
-                )
-                record_repair_attempt(model_name=model_name, error_type=type(e).__name__)
-
-                # Append the faulty response and a correction prompt for the next attempt
+                logger.warning("Narrator repair attempt %d/%d for error: %s", attempts, self._repair_attempts, e)
+                record_repair_attempt(model_name="narrator", error_type=type(e).__name__)
+                
                 messages = list(messages)
                 messages.append({"role": "assistant", "content": content})
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Your previous output was invalid JSON. Fix the following error: {e}. "
-                            "Respond with ONLY the corrected JSON. Do not change the narrative content."
-                        ),
-                    }
-                )
+                messages.append({
+                    "role": "user",
+                    "content": f"Your previous output was invalid JSON. Fix the following error: {e}. Respond with ONLY the corrected JSON narrative."
+                })
 
-        # Final fallback if all attempts fail
-        logger.error(
-            "Failed to parse LLM output after %d attempts: %s\nLast output was: %s",
-            attempts,
-            last_error,
-            content,
+        if not narrator_node:
+            logger.error("Narrator phase failed: %s", last_error)
+            return self._get_fallback_node()
+
+        # PHASE 2: JUDGE (Extraction)
+        extraction_node = await self._extract_state_delta_async(narrator_node.narrative)
+
+        # Combine into final StoryNode
+        return StoryNode(
+            narrative=narrator_node.narrative,
+            title=narrator_node.title,
+            npcs_present=narrator_node.npcs_present,
+            choices=narrator_node.choices,
+            is_ending=narrator_node.is_ending,
+            mood=narrator_node.mood,
+            items_gained=extraction_node.items_gained,
+            items_lost=extraction_node.items_lost,
+            stat_updates=extraction_node.stat_updates,
         )
+
+    async def _extract_state_delta_async(self, narrative: str) -> ExtractionNode:
+        """
+        Secondary phase: A focused LLM call to extract structured state changes 
+        from the provided narrative text.
+        """
+        judge_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are the 'Judge' for a role-playing game. Your task is to extract "
+                    "player state changes from the narrative text provided. "
+                    "Extract ONLY items gained, items lost, and stat updates (health, gold, reputation). "
+                    "If the narrative doesn't mention a change, return an empty list or 0 for that field."
+                )
+            },
+            {
+                "role": "user",
+                "content": f"Extract state changes from this narrative:\n\n{narrative}"
+            }
+        ]
+
+        try:
+            content = await self.provider.generate_json(
+                messages=judge_messages,
+                schema=self._extraction_schema,
+                temperature=0.0,  # Strict extraction
+                max_tokens=256,
+            )
+            data = json.loads(content)
+            return ExtractionNode(**data)
+        except Exception as e:
+            logger.warning("Judge extraction failed: %s. Returning empty state delta.", e)
+            return ExtractionNode()
+
+    def _get_fallback_node(self) -> StoryNode:
         return StoryNode(
             narrative=(
                 "The universe encounters an anomaly (LLM failed to format its response). "
@@ -589,10 +626,11 @@ class ModelBroker:
 
         async for token in self.provider.stream_json(
             messages=messages,
-            schema=self._schema,
+            schema=self._narrator_schema,
             temperature=self._temperature,
             max_tokens=self._max_tokens,
         ):
+
             buffer += token
 
             try:

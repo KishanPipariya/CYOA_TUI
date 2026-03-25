@@ -152,8 +152,8 @@ class ConfirmScreen(ModalScreen[bool]):
         with Container(id="confirm-dialog"):
             yield Label(self._message, id="confirm-message")
             with Horizontal(id="confirm-buttons"):
-                yield Button("Yes (y)", id="btn-confirm-yes", variant="error")
-                yield Button("No (n)", id="btn-confirm-no", variant="primary")
+                yield Button("[b]Y[/b]es", id="btn-confirm-yes", variant="error")
+                yield Button("[b]N[/b]o", id="btn-confirm-no", variant="primary")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-confirm-yes":
@@ -172,25 +172,26 @@ HELP_TEXT = """\
 # ⌨️ Keyboard Shortcuts
 
 | Key | Action |
-|-----|--------|
-| **1 – 4** | Select a choice by number |
-| **d** | Toggle dark / light mode |
-| **j** | Toggle the Journal panel |
-| **m** | Toggle the Story Map panel |
-| **b** | Branch from a past scene |
-| **u** | Undo last choice |
-| **s** | Save game |
-| **l** | Load a saved game |
-| **r** | Restart the adventure |
-| **h** | Show this help screen |
-| **q** | Quit the game |
+|:---:|:-------|
+| [b][reverse] 1 – 4 [/reverse][/b] | Select a choice by number |
+| [b][reverse]  D  [/reverse][/b] | Change Theme (Dark/Light) |
+| [b][reverse]  J  [/reverse][/b] | Toggle Journal panel |
+| [b][reverse]  M  [/reverse][/b] | Toggle Story Map panel |
+| [b][reverse]  B  [/reverse][/b] | Branch from past scene |
+| [b][reverse]  U  [/reverse][/b] | Undo last choice |
+| [b][reverse]  S  [/reverse][/b] | Save Game |
+| [b][reverse]  L  [/reverse][/b] | Load Game |
+| [b][reverse]  R  [/reverse][/b] | Restart Adventure |
+| [b][reverse]  H  [/reverse][/b] | Show this help screen |
+| [b][reverse]SPACE[/reverse][/b] | Skip typewriter narrator |
+| [b][reverse]  Q  [/reverse][/b] | Quit Game |
 
 ---
 
 # 📊 Player Stats
 
 | Stat | Description |
-|------|-------------|
+|:-----|:------------|
 | ❤️ **Health** | Your vitality. Low health disables risky choices. |
 | 🪙 **Gold** | Currency earned through the adventure. |
 | 🌟 **Reputation** | Your standing — high rep unlocks dialogue. |
@@ -236,7 +237,7 @@ class HelpScreen(ModalScreen[None]):
         with Container(id="help-dialog"):
             with Container(id="help-content"):
                 yield Markdown(HELP_TEXT, id="help-text")
-            yield Button("Close (Esc)", id="btn-help-close", variant="primary")
+            yield Button("Close [b](Esc)[/b]", id="btn-help-close", variant="primary")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-help-close":
@@ -288,7 +289,7 @@ class LoadGameScreen(ModalScreen[str]):
         with Container(id="load-dialog"):
             yield Label("[b]📂 Load Game[/b] \u2014 Select a save file", id="load-title")
             yield ListView(id="load-list")
-            yield Button("Cancel (Esc)", id="btn-load-cancel", variant="error")
+            yield Button("Cancel [b](Esc)[/b]", id="btn-load-cancel", variant="error")
 
     def on_mount(self) -> None:
         list_view = self.query_one("#load-list", ListView)
