@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import uuid
+from pathlib import Path
 from typing import Any, ClassVar
 
 from textual import work
@@ -79,13 +80,75 @@ class CYOAApp(App):
     # Fix #4: Reactive turn counter displayed in footer
     turn_count: reactive[int] = reactive(1)
     mood: reactive[str] = reactive("default")
+    _themes_cached_config: dict[str, Any] | None = None
+
+    def _load_themes_config(self) -> dict[str, Any]:
+        """Load the mood-to-theme mapping from themes.json with rudimentary caching."""
+        if self._themes_cached_config is not None:
+            return self._themes_cached_config
+
+        themes_path = Path(__file__).parent.parent.parent / "themes" / "themes.json"
+        if themes_path.exists():
+            try:
+                with open(themes_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        self._themes_cached_config = data
+                        return data
+            except Exception:
+                pass
+        return {}
 
     def watch_mood(self, old_mood: str, new_mood: str) -> None:
-        """Update the main container class when the mood changes."""
+        """Update the main container class and application theme when the mood changes."""
         try:
             container = self.query_one("#main-container")
             container.remove_class(f"mood-{old_mood}")
             container.add_class(f"mood-{new_mood}")
+
+            # Look up atmospheric theme in themes.json
+            themes_config = self._load_themes_config()
+            # Try specific mood, then default, then return empty if none found
+            mood_config = themes_config.get(new_mood, themes_config.get("default", {}))
+
+            if mood_config:
+                # 1. Update Spinner frames
+                try:
+                    spinner = self.query_one("#loading", ThemeSpinner)
+                    if "spinner_frames" in mood_config:
+                        spinner.frames = mood_config["spinner_frames"]
+                        spinner._frame_idx = 0
+                except Exception:
+                    pass
+
+                # 2. Update App Theme (accent color)
+                accent = mood_config.get("accent_color")
+                if accent:
+                    from textual.theme import BUILTIN_THEMES
+
+                    base_theme_name = "textual-dark" if self.dark else "textual-light"
+                    base_theme = BUILTIN_THEMES.get(base_theme_name)
+                    if base_theme:
+                        theme_name = f"mood-{new_mood}"
+                        # Re-register theme with new accent
+                        self.register_theme(
+                            Theme(
+                                name=theme_name,
+                                primary=base_theme.primary,
+                                secondary=base_theme.secondary,
+                                warning=base_theme.warning,
+                                error=base_theme.error,
+                                success=base_theme.success,
+                                accent=accent,
+                                foreground=base_theme.foreground,
+                                background=base_theme.background,
+                                surface=base_theme.surface,
+                                panel=base_theme.panel,
+                                boost=base_theme.boost,
+                                dark=base_theme.dark,
+                            )
+                        )
+                        self.theme = theme_name
         except Exception:
             pass
 

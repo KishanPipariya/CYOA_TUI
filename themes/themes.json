@@ -1,0 +1,37 @@
+{
+  "mysterious": {
+    "accent_color": "violet",
+    "spinner_frames": ["(o)", "(O)", "(o)", "(.)"],
+    "description": "Deep purples and indigo atmospheric shifts."
+  },
+  "heroic": {
+    "accent_color": "gold",
+    "spinner_frames": ["(★)", "(☆)", "(★)", "( )"],
+    "description": "Gold and bright highlights for epic moments."
+  },
+  "combat": {
+    "accent_color": "red",
+    "spinner_frames": ["⚔️", "🔪", "🛡️", "🤜"],
+    "description": "Red alerts and aggressive borders during battle."
+  },
+  "ethereal": {
+    "accent_color": "cyan",
+    "spinner_frames": ["✨", "🌟", "💠", "💎"],
+    "description": "Cyan, celestial glow for mystical scenes."
+  },
+  "dark": {
+    "accent_color": "gray",
+    "spinner_frames": ["🌑", "🌚", "🌑", "🌑"],
+    "description": "Gritty grays and dim text for shadows."
+  },
+  "grimy": {
+    "accent_color": "green",
+    "spinner_frames": ["🤢", "🦠", "🧼", "💨"],
+    "description": "Earthy greens and browns for squalor."
+  },
+  "default": {
+    "accent_color": "blue",
+    "spinner_frames": ["[-]", "[\\]", "[|]", "[/]"],
+    "description": "Standard adventure appearance."
+  }
+}
