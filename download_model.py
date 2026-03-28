@@ -1,9 +1,10 @@
+import logging
 import os
 import sys
-import logging
 from pathlib import Path
+
+from dotenv import load_dotenv, set_key
 from huggingface_hub import hf_hub_download
-from dotenv import set_key, load_dotenv
 
 # Setup logging with a premium feel
 logging.basicConfig(
@@ -27,7 +28,7 @@ def get_total_ram_gb() -> float:
             cmd = ["sysctl", "-n", "hw.memsize"]
             val = subprocess.check_output(cmd).decode().strip()
             return int(val) / (1024**3)
-        
+
         # Generic POSIX (Linux)
         return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024**3)
     except Exception:
@@ -52,7 +53,7 @@ def check_for_existing_model() -> str | None:
     """Find if a GGUF model already exists in standard locations."""
     if ENV_FILE.exists():
         load_dotenv(ENV_FILE)
-    
+
     # Priority 1: .env path
     env_model = os.getenv("LLM_MODEL_PATH")
     if env_model and Path(env_model).is_file():
@@ -68,7 +69,7 @@ def check_for_existing_model() -> str | None:
         model_ggufs = list(MODEL_DIR.glob("*.gguf"))
         if model_ggufs:
             return str(model_ggufs[0])
-            
+
     return None
 
 def setup_env_file():
@@ -80,7 +81,7 @@ def setup_env_file():
 
 def main():
     logger.info("--- CYOA Model Bootstrapper ---")
-    
+
     existing = check_for_existing_model()
     if existing:
         logger.info(f"Existing model detected: {existing}")
@@ -89,18 +90,18 @@ def main():
 
     ram = get_total_ram_gb()
     repo_id, filename, desc = recommend_model(ram)
-    
+
     logger.info(f"Hardware Detection: {ram:.1f} GB RAM identified.")
     logger.info(f"Target Model: {desc}")
     logger.info(f"Repository: {repo_id}")
-    
+
     confirm = input(f"\nProceed with download of '{filename}'? (y/n): ")
     if confirm.lower() != 'y':
         logger.warn("Download aborted by user.")
         return
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     try:
         logger.info("Initializing download via HuggingFace Hub (this may take a while)...")
         final_path = hf_hub_download(
@@ -109,16 +110,16 @@ def main():
             local_dir=MODEL_DIR,
             local_dir_use_symlinks=False
         )
-        
+
         setup_env_file()
         relative_path = os.path.relpath(final_path, os.getcwd())
         set_key(str(ENV_FILE), "LLM_MODEL_PATH", relative_path)
-        
+
         logger.info("--------------------------------------------------")
         logger.info(f"SUCCESS: Model downloaded to {relative_path}")
         logger.info("Application is now ready to launch.")
         logger.info("--------------------------------------------------")
-        
+
     except KeyboardInterrupt:
         logger.warn("\nDownload interrupted by user.")
         sys.exit(1)

@@ -90,7 +90,7 @@ class CYOAApp(App):
         themes_path = Path(__file__).parent.parent.parent / "themes" / "themes.json"
         if themes_path.exists():
             try:
-                with open(themes_path, "r", encoding="utf-8") as f:
+                with open(themes_path, encoding="utf-8") as f:
                     data = json.load(f)
                     if isinstance(data, dict):
                         self._themes_cached_config = data
