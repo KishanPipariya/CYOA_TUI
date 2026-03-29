@@ -46,6 +46,11 @@ class CYOAGraphDB:
             logger.error(f"Unexpected Graph DB connection error: {e}")
             self.driver = None
 
+    @property
+    def is_online(self) -> bool:
+        """Returns True if the database connection is active."""
+        return self.driver is not None
+
     def close(self) -> None:
         """Close the database connection."""
         if self.driver:
@@ -68,36 +73,40 @@ class CYOAGraphDB:
         )
 
         final_title = generated_title
-        with DBObservedSession("neo4j", "create_story_node") as session_obs:
-            with self.driver.session() as session:
-                result = session.run(query_check, base_title=generated_title)
-                existing_titles = [record["title"] for record in result]
+        try:
+            with DBObservedSession("neo4j", "create_story_node") as session_obs:
+                with self.driver.session() as session:
+                    result = session.run(query_check, base_title=generated_title)
+                    existing_titles = [record["title"] for record in result]
 
-                if existing_titles:
-                    max_mod = 0
-                    for title in existing_titles:
-                        if title == generated_title:
-                            max_mod = max(max_mod, 1)
-                        elif title.startswith(f"{generated_title} ("):
-                            try:
-                                mod_str = title[len(generated_title) + 2 : -1]
-                                max_mod = max(max_mod, int(mod_str))
-                            except ValueError:
-                                pass
+                    if existing_titles:
+                        max_mod = 0
+                        for title in existing_titles:
+                            if title == generated_title:
+                                max_mod = max(max_mod, 1)
+                            elif title.startswith(f"{generated_title} ("):
+                                try:
+                                    mod_str = title[len(generated_title) + 2 : -1]
+                                    max_mod = max(max_mod, int(mod_str))
+                                except ValueError:
+                                    pass
 
-                    if max_mod > 0:
-                        final_title = f"{generated_title} ({max_mod + 1})"
+                        if max_mod > 0:
+                            final_title = f"{generated_title} ({max_mod + 1})"
 
-                query_create = """
-                CREATE (s:Story {
-                    id: $story_id,
-                    title: $final_title
-                })
-                RETURN s.title AS title
-                """
-                session.run(query_create, story_id=str(uuid.uuid4()), final_title=final_title)
-                if session_obs.span:
-                    session_obs.span.set_attribute("story.title", final_title)
+                    query_create = """
+                    CREATE (s:Story {
+                        id: $story_id,
+                        title: $final_title
+                    })
+                    RETURN s.title AS title
+                    """
+                    session.run(query_create, story_id=str(uuid.uuid4()), final_title=final_title)
+                    if session_obs.span:
+                        session_obs.span.set_attribute("story.title", final_title)
+        except (ServiceUnavailable, Exception) as e: # noqa: BLE001
+            logger.warning(f"Neo4j error during story creation: {e}")
+            self.driver = None
 
         return final_title
 
@@ -122,23 +131,28 @@ class CYOAGraphDB:
         RETURN s.id AS scene_id
         """
 
-        with DBObservedSession("neo4j", "create_scene_node") as session_obs:
-            with self.driver.session() as session:
-                result = session.run(
-                    query,
-                    scene_id=scene_id,
-                    narrative=narrative,
-                    available_choices=available_choices,
-                    story_title=story_title,
-                )
-                record = result.single()
-                if record is None:
-                    return scene_id
+        try:
+            with DBObservedSession("neo4j", "create_scene_node") as session_obs:
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        scene_id=scene_id,
+                        narrative=narrative,
+                        available_choices=available_choices,
+                        story_title=story_title,
+                    )
+                    record = result.single()
+                    if record is None:
+                        return scene_id
 
-                final_id = str(record["scene_id"])
-                if session_obs.span:
-                    session_obs.span.set_attribute("scene.id", final_id)
-                return final_id
+                    final_id = str(record["scene_id"])
+                    if session_obs.span:
+                        session_obs.span.set_attribute("scene.id", final_id)
+                    return final_id
+        except (ServiceUnavailable, Exception) as e: # noqa: BLE001
+            logger.warning(f"Neo4j error during scene creation: {e}")
+            self.driver = None
+            return scene_id
 
     def create_choice_edge(
         self, source_scene_id: str, target_scene_id: str, choice_text: str
@@ -147,21 +161,18 @@ class CYOAGraphDB:
         if not self.driver:
             return
 
-        query = """
-        MATCH (source:Scene {id: $source_id})
-        MATCH (target:Scene {id: $target_id})
-        CREATE (source)-[r:LEADS_TO {action_text: $choice_text}]->(target)
-        RETURN r
-        """
-
-        with DBObservedSession("neo4j", "create_choice_edge"):
-            with self.driver.session() as session:
-                session.run(
-                    query,
-                    source_id=source_scene_id,
-                    target_id=target_scene_id,
-                    choice_text=choice_text,
-                )
+        try:
+            with DBObservedSession("neo4j", "create_choice_edge"):
+                with self.driver.session() as session:
+                    session.run(
+                        query,
+                        source_id=source_scene_id,
+                        target_id=target_scene_id,
+                        choice_text=choice_text,
+                    )
+        except (ServiceUnavailable, Exception) as e: # noqa: BLE001
+            logger.warning(f"Neo4j error during edge creation: {e}")
+            self.driver = None
 
     async def save_scene_async(
         self,
@@ -198,23 +209,28 @@ class CYOAGraphDB:
         RETURN nodes(path) AS scenes, relationships(path) AS choices
         """
 
-        with self.driver.session() as session:
-            result = session.run(query, current_id=current_scene_id)
-            record = result.single()
-            if not record:
-                return None
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, current_id=current_scene_id)
+                record = result.single()
+                if not record:
+                    return None
 
-            scenes = [
-                {
-                    "id": n["id"],
-                    "narrative": n["narrative"],
-                    "available_choices": n.get("available_choices", []),
-                }
-                for n in record["scenes"]
-            ]
-            choices = [r["action_text"] for r in record["choices"]]
+                scenes = [
+                    {
+                        "id": n["id"],
+                        "narrative": n["narrative"],
+                        "available_choices": n.get("available_choices", []),
+                    }
+                    for n in record["scenes"]
+                ]
+                choices = [r["action_text"] for r in record["choices"]]
 
-            return {"scenes": scenes, "choices": choices}
+                return {"scenes": scenes, "choices": choices}
+        except (ServiceUnavailable, Exception) as e: # noqa: BLE001
+            logger.warning(f"Neo4j error during history retrieval: {e}")
+            self.driver = None
+            return None
 
     def get_all_story_scenes(self, story_title: str) -> list[dict]:
         """
@@ -240,47 +256,53 @@ class CYOAGraphDB:
         LIMIT 1
         """
 
-        with self.driver.session() as session:
-            result = session.run(query, story_title=story_title)
-            root = result.single()
-            if not root:
-                return []
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, story_title=story_title)
+                root = result.single()
+                if not root:
+                    return []
 
-            ordered = []
-            current_id = root["id"]
-            current_narrative = root["narrative"]
+                ordered = []
+                current_id = root["id"]
+                current_narrative = root["narrative"]
 
-            # Walk forward along LEADS_TO edges
-            while current_id:
-                edge_query = """
-                MATCH (s:Scene {id: $scene_id})-[r:LEADS_TO]->(next:Scene)
-                RETURN r.action_text AS choice, next.id AS next_id,
-                       next.narrative AS next_narrative
-                LIMIT 1
-                """
-                edge_result = session.run(edge_query, scene_id=current_id)
-                edge_record = edge_result.single()
+                # Walk forward along LEADS_TO edges
+                while current_id:
+                    edge_query = """
+                    MATCH (s:Scene {id: $scene_id})-[r:LEADS_TO]->(next:Scene)
+                    RETURN r.action_text AS choice, next.id AS next_id,
+                           next.narrative AS next_narrative
+                    LIMIT 1
+                    """
+                    edge_result = session.run(edge_query, scene_id=current_id)
+                    edge_record = edge_result.single()
 
-                if edge_record:
-                    ordered.append(
-                        {
-                            "id": current_id,
-                            "narrative": current_narrative,
-                            "choice_taken": edge_record["choice"],
-                        }
-                    )
-                    current_id = edge_record["next_id"]
-                    current_narrative = edge_record["next_narrative"]
-                else:
-                    # Leaf / current scene — no outgoing edge
-                    ordered.append(
-                        {
-                            "id": current_id,
-                            "narrative": current_narrative,
-                            "choice_taken": None,
-                        }
-                    )
-                    break
+                    if edge_record:
+                        ordered.append(
+                            {
+                                "id": current_id,
+                                "narrative": current_narrative,
+                                "choice_taken": edge_record["choice"],
+                            }
+                        )
+                        current_id = edge_record["next_id"]
+                        current_narrative = edge_record["next_narrative"]
+                    else:
+                        # Leaf / current scene — no outgoing edge
+                        ordered.append(
+                            {
+                                "id": current_id,
+                                "narrative": current_narrative,
+                                "choice_taken": None,
+                            }
+                        )
+                        break
+        except (ServiceUnavailable, Exception) as e: # noqa: BLE001
+            logger.warning(f"Neo4j error during scenes retrieval: {e}")
+            self.driver = None
+            return []
+
 
         return ordered
 
@@ -307,18 +329,23 @@ class CYOAGraphDB:
         edges: dict[str, list[dict[str, Any]]] = {}
         has_incoming = set()
 
-        with self.driver.session() as session:
-            result = session.run(query, story_title=story_title)
-            for record in result:
-                sid = record["id"]
-                nxt = record["next_id"]
-                if sid not in nodes:
-                    nodes[sid] = {"id": sid, "narrative": record["narrative"]}
-                if sid not in edges:
-                    edges[sid] = []
-                if nxt:
-                    edges[sid].append({"target_id": nxt, "choice": record["choice"]})
-                    has_incoming.add(nxt)
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, story_title=story_title)
+                for record in result:
+                    sid = record["id"]
+                    nxt = record["next_id"]
+                    if sid not in nodes:
+                        nodes[sid] = {"id": sid, "narrative": record["narrative"]}
+                    if sid not in edges:
+                        edges[sid] = []
+                    if nxt:
+                        edges[sid].append({"target_id": nxt, "choice": record["choice"]})
+                        has_incoming.add(nxt)
+        except (ServiceUnavailable, Exception) as e: # noqa: BLE001
+            logger.warning(f"Neo4j error during story tree retrieval: {e}")
+            self.driver = None
+            return {}
 
         if not nodes:
             return {}

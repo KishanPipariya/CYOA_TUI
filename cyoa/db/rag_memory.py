@@ -50,6 +50,15 @@ class NarrativeMemory:
         # 'memories' context even in degraded mode.
         self._fallback: deque[str] = deque(maxlen=10)
 
+    @property
+    def is_online(self) -> bool:
+        """Returns True if ChromaDB is available and ready."""
+        return self._available and (self._collection is not None or not self._init_attempted)
+
+    def verify_availability(self) -> bool:
+        """Explicitly attempt to initialize ChromaDB and return status."""
+        return self._ensure_ready()
+
     def _ensure_ready(self) -> bool:
         """Create the chroma client and collection on first use. Returns False if unavailable."""
         if not self._available:
@@ -100,7 +109,7 @@ class NarrativeMemory:
                     )
                 except Exception as e:  # noqa: BLE001
                     logger.error("RAG memory: failed to add scene %s: %s", scene_id, e)
-                    raise
+                    self._available = False
 
         await asyncio.to_thread(_sync_add)
 
@@ -150,6 +159,15 @@ class NPCMemory:
 
         # Fallback: Dictionary of NPC names to their recent scene buffers
         self._fallbacks: dict[str, deque[str]] = {}
+
+    @property
+    def is_online(self) -> bool:
+        """Returns True if the basic Chroma client is available."""
+        return self._available
+
+    def verify_availability(self) -> bool:
+        """Explicitly attempt to initialize the basic Chroma client and return status."""
+        return self._ensure_ready("test_init")
 
     def _ensure_ready(self, npc_name: str) -> bool:
         if not self._available:
@@ -217,7 +235,7 @@ class NPCMemory:
                         npc_name,
                         e,
                     )
-                    raise
+                    self._available = False
 
         await asyncio.to_thread(_sync_add)
 

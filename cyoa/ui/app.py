@@ -294,6 +294,22 @@ class CYOAApp(App):
                     starting_prompt=self.starting_prompt,
                     db=CYOAGraphDB(),
                 )
+            
+            # 2. Check for Graceful Degradation (Graph / RAG)
+            if self.engine.db and not self.engine.db.is_online:
+                self.notify(
+                    "Graph DB not found. Proceeding with ephemeral memory only.",
+                    severity="warning",
+                    timeout=5
+                )
+
+            # Check Chroma availability without forcing model download if it's lazy
+            if not self.engine.memory.is_online:
+                 self.notify(
+                    "RAG Engine unavailable. Basic memory fallback active.",
+                    severity="warning",
+                    timeout=5
+                )
 
             await self.engine.initialize()
 
