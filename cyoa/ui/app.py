@@ -169,6 +169,7 @@ class CYOAApp(App):
         self.generator: ModelBroker | None = None
         self.engine: StoryEngine | None = None
         self._current_story: str = LOADING_ART
+        self._current_turn_text: str = LOADING_ART
         self._loading_suffix_shown: bool = False
 
         # Typewriter Narrator state
@@ -217,7 +218,7 @@ class CYOAApp(App):
         with Horizontal():
             with Container(id="main-container"):
                 with VerticalScroll(id="story-container"):
-                    yield Markdown(LOADING_ART, id="story-text")
+                    yield Markdown(LOADING_ART, classes="story-turn", id="initial-turn")
                     yield Static("", id="scene-art")
                 # Dedicated status bar between story and choices
                 with Container(id="status-bar"):
@@ -244,6 +245,8 @@ class CYOAApp(App):
     async def on_mount(self) -> None:
         self.query_one("#choices-container").border_title = "Choices"
         self.query_one("#story-container").border_title = "Story"
+
+        self._current_turn_widget = self.query_one("#initial-turn", Markdown)
 
         # Subscribe to Engine Events
         bus.subscribe(Events.ENGINE_STARTED, self._handle_engine_started)
@@ -385,11 +388,6 @@ class CYOAApp(App):
     @work(group="typewriter", exclusive=True)
     async def _typewriter_worker(self) -> None:
         """Background worker that smoothly reveals narrative text from the queue."""
-        try:
-            story_md = self.query_one("#story-text", Markdown)
-        except Exception:
-            return
-
         last_refresh = 0.0
         # Throttle Markdown re-renders to ~30fps max to avoid UI lag on long stories
         REFRESH_LIMIT = 0.033
@@ -406,7 +404,8 @@ class CYOAApp(App):
                 # Throttled UI update
                 now = asyncio.get_event_loop().time()
                 if now - last_refresh >= REFRESH_LIMIT or not self._typewriter_active_chunk:
-                    story_md.update(self._current_story)
+                    if hasattr(self, "_current_turn_widget"):
+                        self._current_turn_widget.update(self._current_turn_text)
                     if self._is_at_bottom():
                         self._scroll_to_bottom(animate=False)
                     last_refresh = now
@@ -423,10 +422,14 @@ class CYOAApp(App):
         batch_size = 1
         if q_size > constants.TYPEWRITER_CATCHUP_THRESHOLD:
             # Extreme catchup: grab everything and exit loops
-            self._current_story += "".join(self._typewriter_active_chunk)
+            to_add = "".join(self._typewriter_active_chunk)
+            self._current_story += to_add
+            self._current_turn_text += to_add
             self._typewriter_active_chunk.clear()
             while not self._typewriter_queue.empty():
-                self._current_story += self._typewriter_queue.get_nowait()
+                to_add = self._typewriter_queue.get_nowait()
+                self._current_story += to_add
+                self._current_turn_text += to_add
         elif q_size > 10:
             batch_size = constants.TYPEWRITER_MAX_BATCH
 
@@ -434,6 +437,7 @@ class CYOAApp(App):
             to_add = "".join(self._typewriter_active_chunk[:batch_size])
             self._typewriter_active_chunk = self._typewriter_active_chunk[batch_size:]
             self._current_story += to_add
+            self._current_turn_text += to_add
 
     def action_skip_typewriter(self) -> None:
         """Instantly reveal all pending text in the typewriter queue."""
@@ -442,18 +446,23 @@ class CYOAApp(App):
 
         # Flush active chunk
         if self._typewriter_active_chunk:
-            self._current_story += "".join(self._typewriter_active_chunk)
+            to_add = "".join(self._typewriter_active_chunk)
+            self._current_story += to_add
+            self._current_turn_text += to_add
             self._typewriter_active_chunk.clear()
 
         # Flush queue
         while not self._typewriter_queue.empty():
             try:
-                self._current_story += self._typewriter_queue.get_nowait()
+                to_add = self._typewriter_queue.get_nowait()
+                self._current_story += to_add
+                self._current_turn_text += to_add
             except asyncio.QueueEmpty:
                 break
         self._is_typing = False
         try:
-            self.query_one("#story-text", Markdown).update(self._current_story)
+            if hasattr(self, "_current_turn_widget"):
+                self._current_turn_widget.update(self._current_turn_text)
             self._scroll_to_bottom()
         except Exception:
             pass
@@ -471,15 +480,17 @@ class CYOAApp(App):
             suffix = "\n\n*(The ancient texts are shifting...)*"
             if self._current_story.endswith(suffix):
                 self._current_story = self._current_story[: -len(suffix)]
+            if self._current_turn_text.endswith(suffix):
+                self._current_turn_text = self._current_turn_text[: -len(suffix)]
             self._loading_suffix_shown = False
             self.query_one("#loading").add_class("hidden")
 
-            # Start of a new turn: prepend separator via the queue
             if self._current_story == LOADING_ART:
                 self._current_story = ""
+                self._current_turn_text = ""
                 self._typewriter_queue.put_nowait(partial)
             else:
-                self._typewriter_queue.put_nowait(f"\n\n---\n\n{partial}")
+                self._typewriter_queue.put_nowait(partial)
         else:
             self._typewriter_queue.put_nowait(partial)
 
@@ -505,9 +516,12 @@ class CYOAApp(App):
 
         if not self._loading_suffix_shown:
             # Perf #2: append suffix and set flag — avoids str.replace later
-            self._current_story += "\n\n*(The ancient texts are shifting...)*"
+            suffix = "\n\n*(The ancient texts are shifting...)*"
+            self._current_story += suffix
+            self._current_turn_text += suffix
             self._loading_suffix_shown = True
-            self.query_one("#story-text", Markdown).update(self._current_story)
+            if hasattr(self, "_current_turn_widget"):
+                self._current_turn_widget.update(self._current_turn_text)
             # Force scroll on new turn so player sees their choice immediately
             self._scroll_to_bottom()
 
@@ -582,8 +596,6 @@ class CYOAApp(App):
 
         is_error = node.narrative.startswith(constants.ERROR_NARRATIVE_PREFIX)
 
-        self.query_one("#story-text", Markdown)
-
         # Detect and update the separate ASCII art widget
         art = _detect_scene_art(node.narrative) if not is_error else None
         art_widget = self.query_one("#scene-art", Static)
@@ -600,9 +612,14 @@ class CYOAApp(App):
             suffix = "\n\n*(The ancient texts are shifting...)*"
             if self._current_story.endswith(suffix):
                 self._current_story = self._current_story[: -len(suffix)]
+            if self._current_turn_text.endswith(suffix):
+                self._current_turn_text = self._current_turn_text[: -len(suffix)]
 
-            sep = "\n\n---\n\n" if self._current_story != LOADING_ART else ""
-            self._typewriter_queue.put_nowait(f"{sep}{node.narrative}")
+            if self._current_story == LOADING_ART:
+                self._current_story = ""
+                self._current_turn_text = ""
+                
+            self._typewriter_queue.put_nowait(node.narrative)
         else:
             # Streaming happened. Sync to the finalized narrative.
             self.action_skip_typewriter()
@@ -612,14 +629,18 @@ class CYOAApp(App):
                 prefix = self._current_story[: last_sep + len("\n\n---\n\n")]
                 self._current_story = prefix + node.narrative
             else:
-                # First node or missing separator
                 self._current_story = node.narrative
+                
+            self._current_turn_text = node.narrative
 
         if is_error and "⚠️" not in node.narrative:
-            self._current_story += "\n\n> ⚠️ **An error occurred.** The story engine could not generate a valid response."
+            error_msg = "\n\n> ⚠️ **An error occurred.** The story engine could not generate a valid response."
+            self._current_story += error_msg
+            self._current_turn_text += error_msg
 
         try:
-            self.query_one("#story-text", Markdown).update(self._current_story)
+            if hasattr(self, "_current_turn_widget"):
+                self._current_turn_widget.update(self._current_turn_text)
         except Exception:
             pass
 
@@ -676,6 +697,16 @@ class CYOAApp(App):
         # 1. Instant UI feedback
         self.action_skip_typewriter()
         self._current_story += f"\n\n> **You chose:** {choice_text}"
+        self._current_story += "\n\n---\n\n"
+
+        container = self.query_one("#story-container")
+        choice_md = Markdown(f"**You chose:** {choice_text}", classes="player-choice")
+        container.mount(choice_md, before="#scene-art")
+        
+        new_turn = Markdown("", classes="story-turn")
+        container.mount(new_turn, before="#scene-art")
+        self._current_turn_widget = new_turn
+        self._current_turn_text = ""
 
         selected_label = f"[{choice_idx + 1}] {choice_text}"
         self.show_loading(selected_label=selected_label)
@@ -699,7 +730,15 @@ class CYOAApp(App):
             return
 
         self._current_story = LOADING_ART
-        self.query_one("#story-text", Markdown).update(LOADING_ART)
+        self._current_turn_text = LOADING_ART
+        
+        container = self.query_one("#story-container")
+        await container.query(Markdown).remove()
+            
+        new_turn = Markdown(LOADING_ART, classes="story-turn", id="initial-turn")
+        await container.mount(new_turn, before="#scene-art")
+        self._current_turn_widget = new_turn
+        
         self.query_one("#scene-art", Static).update("")
         self.query_one("#scene-art", Static).add_class("hidden")
         self.query_one("#choices-container").remove_children()
@@ -749,15 +788,29 @@ class CYOAApp(App):
             self.notify("Nothing to undo.", severity="warning", timeout=2)
             return
 
-        # UI-specific restoration
-        # Note: self._current_story needs careful handling since it's the cumulative Markdown
         # Find the last separator and truncate back to it.
         sep = "\n\n> **You chose:**"
         last_choice_pos = self._current_story.rfind(sep)
         if last_choice_pos != -1:
             self._current_story = self._current_story[:last_choice_pos]
 
-        self.query_one("#story-text", Markdown).update(self._current_story)
+        # UI-specific restoration
+        container = self.query_one("#story-container")
+        
+        turns = list(container.query(".story-turn"))
+        choices = list(container.query(".player-choice"))
+        
+        if len(turns) > 1:
+            turns[-1].remove()
+            if choices:
+                choices[-1].remove()
+            self._current_turn_widget = turns[-2]
+            self._current_turn_text = self.engine.current_node.narrative if self.engine.current_node else ""
+        else:
+            self._current_turn_text = self._current_story
+            if hasattr(self, "_current_turn_widget"):
+                self._current_turn_widget.update(self._current_turn_text)
+
         self.query_one("#loading").add_class("hidden")
         self._scroll_to_bottom()
 
@@ -828,12 +881,20 @@ class CYOAApp(App):
             return
 
         self._current_story = data.get("current_story_text", LOADING_ART)
+        self._current_turn_text = self._current_story
         self._loading_suffix_shown = False
 
         self.engine.load_save_data(data)
 
         # Sync UI
-        self.query_one("#story-text", Markdown).update(self._current_story)
+        container = self.query_one("#story-container")
+        for md in container.query(Markdown):
+            md.remove()
+        
+        new_turn = Markdown(self._current_turn_text, classes="story-turn")
+        container.mount(new_turn, before="#scene-art")
+        self._current_turn_widget = new_turn
+        
         self._scroll_to_bottom()
         self.query_one("#choices-container").remove_children()
         self.query_one("#journal-list", ListView).clear()
@@ -910,7 +971,16 @@ class CYOAApp(App):
 
         fracture_msg = f"\n\n***\n\n**[Time fractures... you return to Turn {idx + 1}]**"
         self._current_story += fracture_msg
-        self.query_one("#story-text", Markdown).update(self._current_story)
+        
+        container = self.query_one("#story-container")
+        frac_md = Markdown(f"**[Time fractures... you return to Turn {idx + 1}]**", classes="player-choice")
+        container.mount(frac_md, before="#scene-art")
+        
+        new_turn = Markdown("", classes="story-turn")
+        container.mount(new_turn, before="#scene-art")
+        self._current_turn_widget = new_turn
+        self._current_turn_text = ""
+        
         self._scroll_to_bottom()
 
         # Update engine state manually for branch (future: engine should have a branch method)

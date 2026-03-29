@@ -88,7 +88,6 @@ async def test_app_startup_and_loading_state(mock_app_dependencies):
         app.action_skip_typewriter()
 
         # Verify the story text container updated with the mock narrative
-        app.query_one("#story-text", Markdown)
         assert "You awaken in a test dungeon." in app._current_story
 
         # Verify choices were generated
@@ -224,7 +223,6 @@ async def test_choice_selection_via_keyboard(mock_app_dependencies):
         app.action_skip_typewriter()
 
         # Verify the story text appended the new narrative
-        app.query_one("#story-text", Markdown)
         assert "You went North." in app._current_story
 
         # Check that the UI choice buttons updated to the new choices
