@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import pathlib
+from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
@@ -234,24 +235,42 @@ class StoryContext:
 
 
 class SpeculationCache:
-    """Stores pre-calculated story nodes to reduce perceived latency."""
+    """Stores pre-calculated story nodes and KV states with LRU eviction."""
 
-    def __init__(self) -> None:
-        self._nodes: dict[str, StoryNode] = {}
+    def __init__(self, max_nodes: int = 50, max_states: int = 5) -> None:
+        self._max_nodes = max_nodes
+        self._max_states = max_states
+        self._nodes: OrderedDict[str, StoryNode] = OrderedDict()
         # We also store the KV states if available
-        self._states: dict[str, Any] = {}
+        self._states: OrderedDict[str, Any] = OrderedDict()
 
     def get_node(self, scene_id: str, choice_text: str) -> StoryNode | None:
-        return self._nodes.get(f"{scene_id}:{choice_text}")
+        key = f"{scene_id}:{choice_text}"
+        if key in self._nodes:
+            self._nodes.move_to_end(key)
+            return self._nodes[key]
+        return None
 
     def set_node(self, scene_id: str, choice_text: str, node: StoryNode) -> None:
-        self._nodes[f"{scene_id}:{choice_text}"] = node
+        key = f"{scene_id}:{choice_text}"
+        if key in self._nodes:
+            self._nodes.move_to_end(key)
+        self._nodes[key] = node
+        if len(self._nodes) > self._max_nodes:
+            self._nodes.popitem(last=False)
 
     def get_state(self, scene_id: str) -> Any:
-        return self._states.get(scene_id)
+        if scene_id in self._states:
+            self._states.move_to_end(scene_id)
+            return self._states[scene_id]
+        return None
 
     def set_state(self, scene_id: str, state: Any) -> None:
+        if scene_id in self._states:
+            self._states.move_to_end(scene_id)
         self._states[scene_id] = state
+        if len(self._states) > self._max_states:
+            self._states.popitem(last=False)
 
     def clear_nodes(self) -> None:
         self._nodes.clear()
