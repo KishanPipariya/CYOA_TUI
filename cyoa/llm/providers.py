@@ -75,6 +75,27 @@ class LLMProvider(abc.ABC):
         ...
 
 
+class _InterruptionLogitsProcessor:
+    """Check a threading.Event and force-stop generation by emitting the EOS token.
+    This allows truly interrupting the C++ generation loop in llama.cpp.
+    """
+
+    def __init__(self, cancel_event: threading.Event, eos_token_id: int):
+        self.cancel_event = cancel_event
+        self.eos_token_id = eos_token_id
+
+    def __call__(self, input_ids: Any, scores: Any) -> Any:
+        if self.cancel_event.is_set():
+            # Force selecting the EOS token by setting its score to a very large
+            # value and all others to very small. This breaks the C++ generation loop.
+            import numpy as np
+
+            # Note: scores is typically a numpy array in modern llama-cpp-python
+            scores.fill(-np.inf)
+            scores[self.eos_token_id] = 0.0
+        return scores
+
+
 class LlamaCppProvider(LLMProvider):
     def __init__(self, model_path: str, n_ctx: int = 4096):
         cpu_threads = max(1, (os.cpu_count() or 8) // 2)
@@ -115,6 +136,7 @@ class LlamaCppProvider(LLMProvider):
         schema: dict[str, Any] | None,
         max_tokens: int,
         temperature: float,
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
         """Prepare parameters for Llama.create_chat_completion."""
         params: dict[str, Any] = {
@@ -125,6 +147,12 @@ class LlamaCppProvider(LLMProvider):
         }
         if schema:
             params["response_format"] = {"type": "json_object", "schema": schema}
+
+        if cancel_event:
+            # Inject the interruption processor to stop generation mid-token
+            params["logits_processor"] = [
+                _InterruptionLogitsProcessor(cancel_event, self.llm.token_eos())
+            ]
         return params
 
     async def _run_cancellable_stream(
@@ -153,7 +181,9 @@ class LlamaCppProvider(LLMProvider):
                         session.end(success=False)
                         return
 
-                    params = self._prepare_stream_params(messages, schema, max_tokens, temperature)
+                    params = self._prepare_stream_params(
+                        messages, schema, max_tokens, temperature, cancel_event
+                    )
                     stream = self.llm.create_chat_completion(**cast(Any, params))
                     for chunk in cast(Iterator[Any], stream):
                         if cancel_event.is_set():
