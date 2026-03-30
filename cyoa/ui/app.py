@@ -58,6 +58,8 @@ class CYOAApp(App):
 
     # Fix #8: CSS loaded from external file
     CSS_PATH = "styles.tcss"
+    theme = "textual-dark"
+    dark = True
 
     BINDINGS: ClassVar[list[Any]] = [
         Binding("d", "toggle_dark", "Theme", show=True),
@@ -191,7 +193,8 @@ class CYOAApp(App):
         if self._accent_color:
             from textual.theme import BUILTIN_THEMES
 
-            base_theme = BUILTIN_THEMES.get("textual-dark")
+            base_theme_name = "textual-dark" if self.dark else "textual-light"
+            base_theme = BUILTIN_THEMES.get(base_theme_name)
             if base_theme:
                 # Theme requires at least `primary` to be specified
                 self.register_theme(
