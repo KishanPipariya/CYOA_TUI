@@ -1059,8 +1059,8 @@ class CYOAApp(App):
         self.engine.current_scene_id = target_scene["id"]
         self.engine.last_choice_text = history["choices"][idx - 1] if idx > 0 else None
         self.engine.turn_count = idx + 1
-        self.engine.inventory = []
-        self.engine.player_stats = {"health": 100, "gold": 0, "reputation": 0}
+        self.engine.inventory = target_scene.get("inventory", [])
+        self.engine.player_stats = target_scene.get("player_stats", {"health": 100, "gold": 0, "reputation": 0})
 
         # Clear and rebuild memories
         self.engine.memory = NarrativeMemory()

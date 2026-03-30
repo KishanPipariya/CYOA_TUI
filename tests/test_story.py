@@ -786,6 +786,66 @@ class TestBranchingLogic:
                 assert "You wake up." in app.engine.story_context.history[1]["content"]
                 assert "Stand" in app.engine.story_context.history[2]["content"]
 
+    @pytest.mark.asyncio
+    @pytest.mark.no_worker_mock
+    async def test_restore_to_scene_restores_stats(self):
+        """Restoring to a past scene should restore player_stats and inventory from history."""
+        from cyoa.ui.app import CYOAApp
+
+        history = {
+            "scenes": [
+                {
+                    "id": "scene-1",
+                    "narrative": "You wake up.",
+                    "available_choices": ["Stand", "Sleep"],
+                    "player_stats": {"health": 80, "gold": 5, "reputation": 0},
+                    "inventory": ["Old Key"],
+                },
+            ],
+            "choices": [],
+        }
+
+        mock_gen = MagicMock()
+        mock_gen.token_budget = 2048
+        mock_gen.provider = MagicMock()
+        mock_gen.provider.count_tokens = MagicMock(return_value=10)
+        mock_gen.generate_next_node_async = AsyncMock(
+            return_value=StoryNode(
+                narrative="You stand up.",
+                choices=[Choice(text="Walk"), Choice(text="Wait")],
+                stat_updates={},
+                items_gained=[],
+            )
+        )
+        mock_gen.update_story_summaries_async = AsyncMock()
+        mock_gen.save_state_async = AsyncMock(return_value=None)
+        mock_gen.load_state_async = AsyncMock()
+
+        with (
+            patch("cyoa.ui.app.ModelBroker", return_value=mock_gen),
+            patch("cyoa.ui.app.CYOAGraphDB") as mock_db_cls,
+        ):
+            mock_db = mock_db_cls.return_value
+            mock_db.create_story_node_and_get_title.return_value = "Test Story"
+            mock_db.get_story_tree.return_value = None
+            mock_db.save_scene_async = AsyncMock(return_value="sid")
+
+            app = CYOAApp(model_path="dummy")
+            async with app.run_test() as pilot:
+                await pilot.pause(0.5)
+
+                # Simulate being at a later turn with different stats
+                app.engine.inventory = ["Sword"]
+                app.engine.player_stats = {"health": 100, "gold": 50, "reputation": 10}
+
+                # Restore to Turn 1
+                app.restore_to_scene(idx=0, history=history)
+                await pilot.pause(0.3)
+
+                # Check stats and inventory
+                assert app.engine.player_stats == {"health": 80, "gold": 5, "reputation": 0}
+                assert app.engine.inventory == ["Old Key"]
+
     def test_action_branch_past_aborts_if_no_history(self):
         """action_branch_past should return early if there is no engine."""
         from cyoa.ui.app import CYOAApp

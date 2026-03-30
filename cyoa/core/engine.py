@@ -248,6 +248,8 @@ class StoryEngine:
                         story_title=self.state.story_title,
                         source_scene_id=self.state.current_scene_id,
                         choice_text=choice_text,
+                        player_stats=self.state.player_stats,
+                        inventory=self.state.inventory,
                     )
                 else:
                     self.state.current_scene_id = new_id
