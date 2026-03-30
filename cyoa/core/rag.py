@@ -60,3 +60,19 @@ class RAGManager:
         if getattr(node, "npcs_present", None):
             for npc in node.npcs_present:
                 await self.npc_memory.add_async(npc, scene_id, node.narrative)
+
+    async def reset(self) -> None:
+        """Clear all current session memories."""
+        self.memory = NarrativeMemory()
+        self.npc_memory = NPCMemory()
+
+    async def rebuild_async(self, history_scenes: list[dict[str, Any]]) -> None:
+        """Rebuild memory from a list of past scenes."""
+        await self.reset()
+        for scene in history_scenes:
+            scene_id = scene["id"]
+            narrative = scene["narrative"]
+            await self.memory.add_async(scene_id, narrative)
+            if scene.get("npcs_present"):
+                for npc in scene["npcs_present"]:
+                    await self.npc_memory.add_async(npc, scene_id, narrative)

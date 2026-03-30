@@ -27,10 +27,9 @@ from textual.widgets import (
 from cyoa.core import constants, utils
 from cyoa.core.engine import StoryEngine
 from cyoa.core.events import Events, bus
-from cyoa.core.models import Choice, StoryNode
+from cyoa.core.models import StoryNode
 from cyoa.db.graph_db import CYOAGraphDB
-from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
-from cyoa.llm.broker import ModelBroker, StoryContext
+from cyoa.llm.broker import ModelBroker
 from cyoa.ui.ascii_art import SCENE_ART
 from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, ThemeSpinner, StatusDisplay
 
@@ -1026,9 +1025,11 @@ class CYOAApp(App):
 
     @work(exclusive=True)
     async def restore_to_scene(self, idx: int, history: dict[str, Any]) -> None:
+        """Hand off restoration to the engine and update UI state."""
         if not self.engine:
             return
 
+        # 1. UI Preparation
         self.query_one("#choices-container").remove_children()
         self.query_one("#loading").remove_class("hidden")
 
@@ -1046,52 +1047,16 @@ class CYOAApp(App):
         
         self._scroll_to_bottom()
 
-        # Update engine state manually for branch (future: engine should have a branch method)
-        target_scene = history["scenes"][idx]
-        self.engine.story_context = StoryContext(
-            starting_prompt=self.engine.starting_prompt,
-            token_budget=self.generator.token_budget if self.generator else 2048,
-            token_counter=self.generator.provider.count_tokens if self.generator else None,
-        )
-        for i in range(idx):
-            self.engine.story_context.add_turn(history["scenes"][i]["narrative"], history["choices"][i])
-
-        self.engine.current_scene_id = target_scene["id"]
-        self.engine.last_choice_text = history["choices"][idx - 1] if idx > 0 else None
-        self.engine.turn_count = idx + 1
-        self.engine.inventory = target_scene.get("inventory", [])
-        self.engine.player_stats = target_scene.get("player_stats", {"health": 100, "gold": 0, "reputation": 0})
-
-        # Clear and rebuild memories
-        self.engine.memory = NarrativeMemory()
-        self.engine.npc_memory = NPCMemory()
-        for i in range(idx + 1):
-            past_scene_id = history["scenes"][i]["id"]
-            past_narrative = history["scenes"][i]["narrative"]
-            await self.engine.memory.add_async(past_scene_id, past_narrative)
-
-        # Restore model state
-        if self.generator:
-            state = self.engine.speculation_cache.get_state(self.engine.current_scene_id)
-            if state:
-                await self.generator.load_state_async(state)
-
+        # 2. Journal Sync
         journal_list = self.query_one("#journal-list", ListView)
         journal_list.clear()
         for i in range(idx):
             journal_list.append(ListItem(Label(f"Turn {i + 1}: {history['choices'][i]}")))
         journal_list.scroll_end(animate=False)
 
-        available = target_scene.get("available_choices") or []
-        choices = [Choice(text=c) for c in available]
-        node = StoryNode(
-            narrative=target_scene["narrative"],
-            choices=choices,
-            is_ending=len(choices) == 0,
-        )
-        self.engine.current_node = node
-        self.display_node(node)
-        self.update_story_map()
+        # 3. Hand off the core logic to the engine
+        # Engine events (STATS_UPDATED, INVENTORY_UPDATED, NODE_COMPLETED) will refresh the UI
+        await self.engine.branch_to_scene(idx, history)
 
     @work(exclusive=True)
     async def update_story_map(self) -> None:

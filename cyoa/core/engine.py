@@ -4,7 +4,7 @@ import uuid
 from typing import Any
 
 from cyoa.core.events import Events, bus
-from cyoa.core.models import StoryNode
+from cyoa.core.models import Choice, StoryNode
 from cyoa.core.observability import EngineObservedSession
 from cyoa.core.rag import RAGManager
 from cyoa.core.state import GameState
@@ -314,3 +314,47 @@ class StoryEngine:
             token_counter=self.broker.provider.count_tokens,
         )
         self.story_context.history = data.get("context_history", [])
+
+    async def branch_to_scene(self, idx: int, history: dict[str, Any]) -> None:
+        """Restore the engine state to a specific scene from the history."""
+        # 1. Rebuild user-facing context history
+        self.story_context = StoryContext(
+            starting_prompt=self.starting_prompt,
+            token_budget=self.broker.token_budget,
+            token_counter=self.broker.provider.count_tokens,
+        )
+        for i in range(idx):
+            self.story_context.add_turn(history["scenes"][i]["narrative"], history["choices"][i])
+
+        # 2. Update state manager
+        target_scene = history["scenes"][idx]
+        self.state.current_scene_id = target_scene["id"]
+        self.state.last_choice_text = history["choices"][idx - 1] if idx > 0 else None
+        self.state.turn_count = idx + 1
+        self.state.inventory = list(target_scene.get("inventory", []))
+        self.state.player_stats = dict(
+            target_scene.get("player_stats", {"health": 100, "gold": 0, "reputation": 0})
+        )
+
+        # 3. Rebuild memory
+        await self.rag.rebuild_async(history["scenes"][: idx + 1])
+
+        # 4. Restore provider state (KV cache) if available
+        state = self.speculation_cache.get_state(self.state.current_scene_id)
+        if state:
+            await self.broker.load_state_async(state)
+
+        # 5. Create the node for UI display
+        available = target_scene.get("available_choices") or []
+        choices = [Choice(text=c) for c in available]
+        node = StoryNode(
+            narrative=target_scene["narrative"],
+            choices=choices,
+            is_ending=len(choices) == 0,
+        )
+        self.state.current_node = node
+
+        # Emit events so UI can refresh stats/inventory/narrative
+        bus.emit(Events.STATS_UPDATED, stats=self.state.player_stats)
+        bus.emit(Events.INVENTORY_UPDATED, inventory=self.state.inventory)
+        bus.emit(Events.NODE_COMPLETED, node=node)
