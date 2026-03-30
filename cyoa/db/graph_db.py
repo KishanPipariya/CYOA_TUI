@@ -335,8 +335,6 @@ class CYOAGraphDB:
             return []
 
 
-        return ordered
-
     def get_story_tree(self, story_title: str) -> dict:
         """
         Returns all nodes and edges for the given story to build a topological tree.
@@ -391,16 +389,6 @@ class CYOAGraphDB:
             logger.warning(f"Neo4j story tree retrieval skipped: {e}")
             return {}
 
-        if not nodes:
-            return {}
-
-        root_id = None
-        for n in nodes:
-            if n not in has_incoming:
-                root_id = n
-                break
-
-        return {"root_id": root_id, "nodes": nodes, "edges": edges}
 
 
 # Example Usage removed for production cleanup.
