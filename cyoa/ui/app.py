@@ -380,32 +380,37 @@ class CYOAApp(App):
         if not self.engine or not self.engine.story_context or not self.generator:
             return
 
-        # Give the UI some breathing room
+        # Give the UI some breathing room and wait to see if the user makes a quick choice
         await asyncio.sleep(2.0)
 
-        for choice in node.choices:
-            if self.engine.speculation_cache.get_node(self.engine.current_scene_id or "", choice.text):
-                continue
+        # Optimization: Limit speculation to only 1 "most likely" choice (the first one)
+        # to prevent resource starvation on local LLMs.
+        if not node.choices:
+            return
+            
+        choice = node.choices[0]
+        if self.engine.speculation_cache.get_node(self.engine.current_scene_id or "", choice.text):
+            return
 
-            # Clone context to speculate without polluting the main one
-            spec_context = self.engine.story_context.clone()
-            spec_context.add_turn(
-                node.narrative,
+        # Clone context to speculate without polluting the main one
+        spec_context = self.engine.story_context.clone()
+        spec_context.add_turn(
+            node.narrative,
+            choice.text,
+            self.engine.inventory,
+            self.engine.player_stats
+        )
+
+        try:
+            # Low-priority generation (no streaming)
+            spec_node = await self.generator.generate_next_node_async(spec_context, low_priority=True)
+            self.engine.speculation_cache.set_node(
+                self.engine.current_scene_id or "",
                 choice.text,
-                self.engine.inventory,
-                self.engine.player_stats
+                spec_node
             )
-
-            try:
-                # Low-priority generation (no streaming)
-                spec_node = await self.generator.generate_next_node_async(spec_context)
-                self.engine.speculation_cache.set_node(
-                    self.engine.current_scene_id or "",
-                    choice.text,
-                    spec_node
-                )
-            except Exception:
-                continue
+        except Exception:
+            pass
 
     @work(group="typewriter", exclusive=True)
     async def _typewriter_worker(self) -> None:

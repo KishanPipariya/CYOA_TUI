@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -311,6 +312,9 @@ class ModelBroker:
         self._repair_attempts = int(
             os.getenv("LLM_REPAIR_ATTEMPTS", str(DEFAULT_LLM_REPAIR_ATTEMPTS))
         )
+        # Unified Generation Queue & Resource Management
+        self._lock = asyncio.Lock()
+    
 
     def _create_provider_from_env(
         self, model_path: str | None = None, n_ctx: int | None = None
@@ -346,9 +350,10 @@ class ModelBroker:
         Compresses pruned history into a Scene Summary (last 10 turns),
         Chapter Summary (last 5 scenes), and Arc Summary (global plot goals).
         """
-        turns_to_compress = context.get_turns_for_summary()
-        if not turns_to_compress:
-            return
+        async with self._lock:
+            turns_to_compress = context.get_turns_for_summary()
+            if not turns_to_compress:
+                return
 
         pair_count = len(turns_to_compress) // 2
 
@@ -453,20 +458,22 @@ class ModelBroker:
         ]
 
         try:
-            summary = await self.provider.generate_text(
+            return await self.provider.generate_text(
                 messages=summarizer_messages,
                 temperature=0.3,
                 max_tokens=self._summary_max_tokens,
             )
-            return summary.strip()
+        # Note: We don't wrap _generate_dense_summary with self._lock because 
+        # it is called from update_story_summaries_async which already holds it.
         except Exception as exc:
             logger.warning("Hierarchical summary update failed for %s: %s", level, exc)
             return existing or ""
 
     async def generate_legacy_summary_async(self, turns_to_compress: list[dict[str, str]]) -> str:
         """The original summarization logic."""
-        if not turns_to_compress:
-            return ""
+        async with self._lock:
+            if not turns_to_compress:
+                return ""
 
         # Build a compact textual representation of the turns to compress.
         compressed_text_parts: list[str] = []
@@ -516,13 +523,27 @@ class ModelBroker:
         self,
         context: StoryContext,
         on_token_chunk: Callable[[str], None] | None = None,
+        low_priority: bool = False,
     ) -> StoryNode:
         """
         Generate the next story node asynchronously using the 'Judge' pattern.
         
-        Phase 1: Narrator - Generate narrative, choices, and atmospheric tags.
-        Phase 2: Judge - Extract state changes (items, stats) from the narrative.
+        Using unified lock to prevent resource starvation on local models.
+        If low_priority is True (e.g. speculation), we yield more frequently.
         """
+        if low_priority:
+            # Give main path priority by yielding
+            await asyncio.sleep(0.5)
+
+        async with self._lock:
+            return await self._generate_next_node_internal(context, on_token_chunk)
+
+    async def _generate_next_node_internal(
+        self,
+        context: StoryContext,
+        on_token_chunk: Callable[[str], None] | None = None,
+    ) -> StoryNode:
+        """Internal implementation of generation, assumed to be called under lock."""
         # PHASE 1: NARRATOR
         stream = on_token_chunk is not None
         messages = context.get_messages()

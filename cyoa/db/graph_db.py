@@ -6,6 +6,7 @@ from typing import Any
 from neo4j import GraphDatabase
 from neo4j.exceptions import AuthError, ServiceUnavailable
 
+from cyoa.core.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
 from cyoa.core.constants import DEFAULT_NEO4J_URI
 from cyoa.core.observability import DBObservedSession
 
@@ -25,6 +26,8 @@ class CYOAGraphDB:
         password = password or os.getenv("NEO4J_PASSWORD")
         self.driver = None  # Initialize to None
 
+        self.cb = CircuitBreaker("Neo4j", failure_threshold=3, reset_timeout=30.0)
+
         try:
             # Cast uri to str because the Neo4j driver expects a non-None URI
             uri_str = str(uri)
@@ -34,22 +37,25 @@ class CYOAGraphDB:
             # Verify connectivity immediately to fail fast.
             self.driver.verify_connectivity()
             logger.info("Successfully connected to Neo4j.")
-        except ServiceUnavailable as e:
-            logger.warning(f"Graph DB is offline. Proceeding without graph persistence. Error: {e}")
-            self.driver = None
         except AuthError:
             logger.error(
                 "Failed to connect to Neo4j: Authentication failed. Check username and password."
             )
             self.driver = None
-        except Exception as e:  # noqa: BLE001
-            logger.error(f"Unexpected Graph DB connection error: {e}")
-            self.driver = None
+            self.cb._on_failure(Exception("Authentication failed"))
+        except (ServiceUnavailable, Exception) as e:  # noqa: BLE001
+            logger.warning(
+                f"Graph DB is offline. Proceeding without graph persistence. Error: {e}"
+            )
+            # Keep the driver object but mark failure in CB, allowing future recovery attempts via CB mechanism
+            self.cb._on_failure(e)
+            if not isinstance(e, ServiceUnavailable):
+                self.driver = None
 
     @property
     def is_online(self) -> bool:
-        """Returns True if the database connection is active."""
-        return self.driver is not None
+        """Returns True if the database connection is active and the circuit is not open."""
+        return self.driver is not None and self.cb.is_available
 
     def close(self) -> None:
         """Close the database connection."""
@@ -64,21 +70,21 @@ class CYOAGraphDB:
         If the generated_title already exists, appends a numeric modifier.
         Returns the final unique title used.
         """
-        if not self.driver:
+        if not self.is_online:
             return generated_title
 
-        # Check if the title exists, and if so, append a modifier
-        query_check = (
-            "MATCH (s:Story) WHERE s.title STARTS WITH $base_title RETURN s.title AS title"
-        )
+        def _work() -> str:
+            # Check if the title exists, and if so, append a modifier
+            title_exists_query = (
+                "MATCH (s:Story) WHERE s.title STARTS WITH $base_title RETURN s.title AS title"
+            )
 
-        final_title = generated_title
-        try:
             with DBObservedSession("neo4j", "create_story_node") as session_obs:
                 with self.driver.session() as session:
-                    result = session.run(query_check, base_title=generated_title)
+                    result = session.run(title_exists_query, base_title=generated_title)
                     existing_titles = [record["title"] for record in result]
 
+                    final_title = generated_title
                     if existing_titles:
                         max_mod = 0
                         for title in existing_titles:
@@ -104,11 +110,13 @@ class CYOAGraphDB:
                     session.run(query_create, story_id=str(uuid.uuid4()), final_title=final_title)
                     if session_obs.span:
                         session_obs.span.set_attribute("story.title", final_title)
-        except (ServiceUnavailable, Exception) as e: # noqa: BLE001
-            logger.warning(f"Neo4j error during story creation: {e}")
-            self.driver = None
+                    return final_title
 
-        return final_title
+        try:
+            return self.cb.call(_work)
+        except (CircuitBreakerOpenError, Exception) as e:  # noqa: BLE001
+            logger.warning(f"Neo4j story creation skipped: {e}")
+            return generated_title
 
     def create_scene_node(
         self, narrative: str, available_choices: list[str], story_title: str
@@ -116,22 +124,21 @@ class CYOAGraphDB:
         """Creates a Scene node in the graph, links it to its Story, and returns its UUID."""
         scene_id = str(uuid.uuid4())
 
-        if not self.driver:
+        if not self.is_online:
             return scene_id
 
-        query = """
-        MATCH (story:Story {title: $story_title})
-        CREATE (s:Scene {
-            id: $scene_id,
-            narrative: $narrative,
-            available_choices: $available_choices,
-            story_title: $story_title
-        })
-        CREATE (s)-[:BELONGS_TO]->(story)
-        RETURN s.id AS scene_id
-        """
-
-        try:
+        def _work() -> str:
+            query = """
+            MATCH (story:Story {title: $story_title})
+            CREATE (s:Scene {
+                id: $scene_id,
+                narrative: $narrative,
+                available_choices: $available_choices,
+                story_title: $story_title
+            })
+            CREATE (s)-[:BELONGS_TO]->(story)
+            RETURN s.id AS scene_id
+            """
             with DBObservedSession("neo4j", "create_scene_node") as session_obs:
                 with self.driver.session() as session:
                     result = session.run(
@@ -149,19 +156,26 @@ class CYOAGraphDB:
                     if session_obs.span:
                         session_obs.span.set_attribute("scene.id", final_id)
                     return final_id
-        except (ServiceUnavailable, Exception) as e: # noqa: BLE001
-            logger.warning(f"Neo4j error during scene creation: {e}")
-            self.driver = None
+
+        try:
+            return self.cb.call(_work)
+        except (CircuitBreakerOpenError, Exception) as e:  # noqa: BLE001
+            logger.warning(f"Neo4j scene creation skipped: {e}")
             return scene_id
 
     def create_choice_edge(
         self, source_scene_id: str, target_scene_id: str, choice_text: str
     ) -> None:
         """Creates a LEADS_TO relationship between two scenes based on a choice."""
-        if not self.driver:
+        if not self.is_online:
             return
 
-        try:
+        def _work() -> None:
+            query = """
+            MATCH (source:Scene {id: $source_id})
+            MATCH (target:Scene {id: $target_id})
+            CREATE (source)-[r:LEADS_TO {action_text: $choice_text}]->(target)
+            """
             with DBObservedSession("neo4j", "create_choice_edge"):
                 with self.driver.session() as session:
                     session.run(
@@ -170,9 +184,11 @@ class CYOAGraphDB:
                         target_id=target_scene_id,
                         choice_text=choice_text,
                     )
-        except (ServiceUnavailable, Exception) as e: # noqa: BLE001
-            logger.warning(f"Neo4j error during edge creation: {e}")
-            self.driver = None
+
+        try:
+            self.cb.call(_work)
+        except (CircuitBreakerOpenError, Exception) as e:  # noqa: BLE001
+            logger.warning(f"Neo4j edge creation skipped: {e}")
 
     async def save_scene_async(
         self,
@@ -200,16 +216,15 @@ class CYOAGraphDB:
         """
         Retrieves the path of scenes that led to the current scene.
         """
-        if not self.driver:
+        if not self.is_online:
             return None
 
-        query = """
-        MATCH path = (start:Scene)-[:LEADS_TO*]->(current:Scene {id: $current_id})
-        WHERE NOT ()-[:LEADS_TO]->(start)
-        RETURN nodes(path) AS scenes, relationships(path) AS choices
-        """
-
-        try:
+        def _work() -> dict[str, Any] | None:
+            query = """
+            MATCH path = (start:Scene)-[:LEADS_TO*]->(current:Scene {id: $current_id})
+            WHERE NOT ()-[:LEADS_TO]->(start)
+            RETURN nodes(path) AS scenes, relationships(path) AS choices
+            """
             with self.driver.session() as session:
                 result = session.run(query, current_id=current_scene_id)
                 record = result.single()
@@ -227,9 +242,11 @@ class CYOAGraphDB:
                 choices = [r["action_text"] for r in record["choices"]]
 
                 return {"scenes": scenes, "choices": choices}
-        except (ServiceUnavailable, Exception) as e: # noqa: BLE001
-            logger.warning(f"Neo4j error during history retrieval: {e}")
-            self.driver = None
+
+        try:
+            return self.cb.call(_work)
+        except (CircuitBreakerOpenError, Exception) as e:  # noqa: BLE001
+            logger.warning(f"Neo4j history retrieval skipped: {e}")
             return None
 
     def get_all_story_scenes(self, story_title: str) -> list[dict]:
@@ -245,20 +262,19 @@ class CYOAGraphDB:
 
         Returns [] if the graph is offline or path is empty.
         """
-        if not self.driver:
+        if not self.is_online:
             return []
 
-        # Find the root scene (no incoming LEADS_TO within this story)
-        query = """
-        MATCH (story:Story {title: $story_title})<-[:BELONGS_TO]-(scene:Scene)
-        WHERE NOT ()-[:LEADS_TO]->(scene)
-        RETURN scene.id AS id, scene.narrative AS narrative
-        LIMIT 1
-        """
-
-        try:
+        def _work() -> list[dict]:
+            # Find the root scene (no incoming LEADS_TO within this story)
+            root_query = """
+            MATCH (story:Story {title: $story_title})<-[:BELONGS_TO]-(scene:Scene)
+            WHERE NOT ()-[:LEADS_TO]->(scene)
+            RETURN scene.id AS id, scene.narrative AS narrative
+            LIMIT 1
+            """
             with self.driver.session() as session:
-                result = session.run(query, story_title=story_title)
+                result = session.run(root_query, story_title=story_title)
                 root = result.single()
                 if not root:
                     return []
@@ -289,7 +305,6 @@ class CYOAGraphDB:
                         current_id = edge_record["next_id"]
                         current_narrative = edge_record["next_narrative"]
                     else:
-                        # Leaf / current scene — no outgoing edge
                         ordered.append(
                             {
                                 "id": current_id,
@@ -298,9 +313,12 @@ class CYOAGraphDB:
                             }
                         )
                         break
-        except (ServiceUnavailable, Exception) as e: # noqa: BLE001
-            logger.warning(f"Neo4j error during scenes retrieval: {e}")
-            self.driver = None
+                return ordered
+
+        try:
+            return self.cb.call(_work)
+        except (CircuitBreakerOpenError, Exception) as e:  # noqa: BLE001
+            logger.warning(f"Neo4j scenes retrieval skipped: {e}")
             return []
 
 
@@ -316,20 +334,20 @@ class CYOAGraphDB:
           "edges": { source_id: [ {"target_id": "...", "choice": "..."} ] }
         }
         """
-        if not self.driver:
+        if not self.is_online:
             return {}
 
-        query = """
-        MATCH (story:Story {title: $story_title})<-[:BELONGS_TO]-(scene:Scene)
-        OPTIONAL MATCH (scene)-[r:LEADS_TO]->(next:Scene)
-        RETURN scene.id AS id, scene.narrative AS narrative,
-               next.id AS next_id, r.action_text AS choice
-        """
-        nodes = {}
-        edges: dict[str, list[dict[str, Any]]] = {}
-        has_incoming = set()
+        def _work() -> dict:
+            query = """
+            MATCH (story:Story {title: $story_title})<-[:BELONGS_TO]-(scene:Scene)
+            OPTIONAL MATCH (scene)-[r:LEADS_TO]->(next:Scene)
+            RETURN scene.id AS id, scene.narrative AS narrative,
+                   next.id AS next_id, r.action_text AS choice
+            """
+            nodes = {}
+            edges: dict[str, list[dict[str, Any]]] = {}
+            has_incoming = set()
 
-        try:
             with self.driver.session() as session:
                 result = session.run(query, story_title=story_title)
                 for record in result:
@@ -342,9 +360,22 @@ class CYOAGraphDB:
                     if nxt:
                         edges[sid].append({"target_id": nxt, "choice": record["choice"]})
                         has_incoming.add(nxt)
-        except (ServiceUnavailable, Exception) as e: # noqa: BLE001
-            logger.warning(f"Neo4j error during story tree retrieval: {e}")
-            self.driver = None
+
+            if not nodes:
+                return {}
+
+            root_id = None
+            for n in nodes:
+                if n not in has_incoming:
+                    root_id = n
+                    break
+
+            return {"root_id": root_id, "nodes": nodes, "edges": edges}
+
+        try:
+            return self.cb.call(_work)
+        except (CircuitBreakerOpenError, Exception) as e:  # noqa: BLE001
+            logger.warning(f"Neo4j story tree retrieval skipped: {e}")
             return {}
 
         if not nodes:
