@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from cyoa.core.events import bus
@@ -15,11 +16,12 @@ class StoryLogger:
     def __init__(self, filepath: str = "story.md") -> None:
         self.filepath = filepath
         self._file_handle: Any | None = None
+        self._unsubscribers: list[Callable[[], None]] = []
 
         # Subscribe to events
-        bus.subscribe("story_started", self.on_story_started)
-        bus.subscribe("choice_made", self.on_choice_made)
-        bus.subscribe("scene_generated", self.on_scene_generated)
+        self._unsubscribers.append(bus.subscribe("story_started", self.on_story_started))
+        self._unsubscribers.append(bus.subscribe("choice_made", self.on_choice_made))
+        self._unsubscribers.append(bus.subscribe("scene_generated", self.on_scene_generated))
 
     def start_new_log(self, title: str) -> None:
         """Initialize or clear the story log file."""
@@ -54,3 +56,8 @@ class StoryLogger:
         if self._file_handle:
             self._file_handle.close()
             self._file_handle = None
+
+        # Clean up EventBus subscriptions to prevent memory leaks
+        for unsub in self._unsubscribers:
+            unsub()
+        self._unsubscribers.clear()

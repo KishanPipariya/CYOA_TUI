@@ -11,12 +11,14 @@ class EventBus:
     def __init__(self) -> None:
         self._subscribers: dict[str, list[Callable[..., None]]] = {}
 
-    def subscribe(self, event_name: str, callback: Callable[..., None]) -> None:
-        """Register a callback for a specific event."""
+    def subscribe(self, event_name: str, callback: Callable[..., None]) -> Callable[[], None]:
+        """Register a callback for a specific event. Returns a function to unsubscribe."""
         if event_name not in self._subscribers:
             self._subscribers[event_name] = []
         if callback not in self._subscribers[event_name]:
             self._subscribers[event_name].append(callback)
+
+        return lambda: self.unsubscribe(event_name, callback)
 
     def unsubscribe(self, event_name: str, callback: Callable[..., None]) -> None:
         """Remove a callback from an event's subscriber list."""

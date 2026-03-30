@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 from uuid import uuid4
 from typing import Any, ClassVar
@@ -182,6 +183,7 @@ class CYOAApp(App):
         self._current_story: str = LOADING_ART
         self._current_turn_text: str = LOADING_ART
         self._loading_suffix_shown: bool = False
+        self._unsubscribers: list[Callable[[], None]] = []
 
         # Typewriter Narrator state
 
@@ -257,18 +259,22 @@ class CYOAApp(App):
         self._current_turn_widget = self.query_one("#initial-turn", Markdown)
 
         # Subscribe to Engine Events
-        bus.subscribe(Events.ENGINE_STARTED, self._handle_engine_started)
-        bus.subscribe(Events.ENGINE_RESTARTED, self._handle_engine_restarted)
-        bus.subscribe(Events.CHOICE_MADE, self._handle_choice_made)
-        bus.subscribe(Events.NODE_GENERATING, self._handle_node_generating)
-        bus.subscribe(Events.TOKEN_STREAMED, self._handle_token_streamed)
-        bus.subscribe(Events.NODE_COMPLETED, self._handle_node_completed)
-        bus.subscribe(Events.STATS_UPDATED, self._handle_stats_updated)
-        bus.subscribe(Events.INVENTORY_UPDATED, self._handle_inventory_updated)
-        bus.subscribe(Events.STORY_TITLE_GENERATED, self._handle_title_generated)
-        bus.subscribe(Events.ENDING_REACHED, self._handle_ending_reached)
-        bus.subscribe(Events.ERROR_OCCURRED, self._handle_error)
-        bus.subscribe(Events.STATUS_MESSAGE, self._handle_status_message)
+        self._unsubscribers.extend(
+            [
+                bus.subscribe(Events.ENGINE_STARTED, self._handle_engine_started),
+                bus.subscribe(Events.ENGINE_RESTARTED, self._handle_engine_restarted),
+                bus.subscribe(Events.CHOICE_MADE, self._handle_choice_made),
+                bus.subscribe(Events.NODE_GENERATING, self._handle_node_generating),
+                bus.subscribe(Events.TOKEN_STREAMED, self._handle_token_streamed),
+                bus.subscribe(Events.NODE_COMPLETED, self._handle_node_completed),
+                bus.subscribe(Events.STATS_UPDATED, self._handle_stats_updated),
+                bus.subscribe(Events.INVENTORY_UPDATED, self._handle_inventory_updated),
+                bus.subscribe(Events.STORY_TITLE_GENERATED, self._handle_title_generated),
+                bus.subscribe(Events.ENDING_REACHED, self._handle_ending_reached),
+                bus.subscribe(Events.ERROR_OCCURRED, self._handle_error),
+                bus.subscribe(Events.STATUS_MESSAGE, self._handle_status_message),
+            ]
+        )
 
         # Start loading indicator immediately
         self.show_loading()
@@ -284,6 +290,11 @@ class CYOAApp(App):
             self.generator.close()
         if self.engine and self.engine.db:
             self.engine.db.close()
+
+        # Clean up EventBus subscriptions
+        for unsub in self._unsubscribers:
+            unsub()
+        self._unsubscribers.clear()
 
     @work(exclusive=True)
     async def initialize_and_start(self, model_path: str) -> None:
