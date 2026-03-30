@@ -543,15 +543,33 @@ class ModelBroker:
             await asyncio.sleep(0.5)
 
         async with self._lock:
-            return await self._generate_next_node_internal(context, on_token_chunk)
+            narrator_node = await self._run_narrator(context, on_token_chunk)
 
-    async def _generate_next_node_internal(
+        if not narrator_node:
+            return self._get_fallback_node()
+
+        # PHASE 2: JUDGE (Extraction) - runs without lock
+        extraction_node = await self._extract_state_delta_async(narrator_node.narrative)
+
+        # Combine into final StoryNode
+        return StoryNode(
+            narrative=narrator_node.narrative,
+            title=narrator_node.title,
+            npcs_present=narrator_node.npcs_present,
+            choices=narrator_node.choices,
+            is_ending=narrator_node.is_ending,
+            mood=narrator_node.mood,
+            items_gained=extraction_node.items_gained,
+            items_lost=extraction_node.items_lost,
+            stat_updates=extraction_node.stat_updates,
+        )
+
+    async def _run_narrator(
         self,
         context: StoryContext,
         on_token_chunk: Callable[[str], None] | None = None,
-    ) -> StoryNode:
-        """Internal implementation of generation, assumed to be called under lock."""
-        # PHASE 1: NARRATOR
+    ) -> NarratorNode | None:
+        """Internal implementation of Phase 1: Narrator."""
         stream = on_token_chunk is not None
         messages = context.get_messages()
         attempts = 0
@@ -595,23 +613,9 @@ class ModelBroker:
 
         if not narrator_node:
             logger.error("Narrator phase failed: %s", last_error)
-            return self._get_fallback_node()
+            return None
 
-        # PHASE 2: JUDGE (Extraction)
-        extraction_node = await self._extract_state_delta_async(narrator_node.narrative)
-
-        # Combine into final StoryNode
-        return StoryNode(
-            narrative=narrator_node.narrative,
-            title=narrator_node.title,
-            npcs_present=narrator_node.npcs_present,
-            choices=narrator_node.choices,
-            is_ending=narrator_node.is_ending,
-            mood=narrator_node.mood,
-            items_gained=extraction_node.items_gained,
-            items_lost=extraction_node.items_lost,
-            stat_updates=extraction_node.stat_updates,
-        )
+        return narrator_node
 
     async def _extract_state_delta_async(self, narrative: str) -> ExtractionNode:
         """
