@@ -53,6 +53,7 @@ class Events:
     CHOICE_MADE = "engine.choice_made"
     NODE_GENERATING = "engine.node_generating"
     TOKEN_STREAMED = "engine.token_streamed"
+    SUMMARIZATION_STARTED = "engine.summarization_started"
     NODE_COMPLETED = "engine.node_completed"
 
     # State updates

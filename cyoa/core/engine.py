@@ -42,6 +42,11 @@ class StoryEngine:
         # Story context (for LLM interactions)
         self.story_context: StoryContext | None = None
 
+        # Background summarization task — kept alive to prevent GC and allow
+        # inspection. A new task replaces this reference each time summarization
+        # is triggered; completed tasks are released automatically.
+        self._pending_summarization_task: asyncio.Task[None] | None = None
+
     @property
     def turn_count(self) -> int:
         return self.state.turn_count
@@ -177,10 +182,15 @@ class StoryEngine:
         # 1. RAG: Retrieve relevant memories using the manager
         await self.rag.retrieve_memories(self.state.current_node, self.story_context)
 
-        # 2. Summarization check
+        # 2. Summarization check — fire-and-forget as a background task so it
+        #    runs concurrently with (or just before) node generation instead of
+        #    blocking Time-to-First-Token for the current turn.
+        #    The updated summary will be injected into the context for the NEXT turn.
         if self.story_context.needs_summarization():
-            bus.emit(Events.STATUS_MESSAGE, message="📜 Archiving old chapters...")
-            await self.broker.update_story_summaries_async(self.story_context)
+            bus.emit(Events.SUMMARIZATION_STARTED)
+            self._pending_summarization_task = asyncio.create_task(
+                self._run_summarization_in_background(self.story_context)
+            )
 
         # 3. Speculation Cache check
         cached_node = None
@@ -250,6 +260,22 @@ class StoryEngine:
         except Exception as e:
             logger.error(f"Story Engine error: {e}", exc_info=True)
             bus.emit(Events.ERROR_OCCURRED, error=str(e))
+
+    async def _run_summarization_in_background(self, context: StoryContext) -> None:
+        """Run hierarchical summarization as a fire-and-forget background task.
+
+        This is intentionally decoupled from the main generation path so it
+        never contributes to Time-to-First-Token latency. The updated summary
+        will be available in `context` by the time the *next* turn is generated.
+        """
+        try:
+            bus.emit(Events.STATUS_MESSAGE, message="📜 Archiving old chapters...")
+            await self.broker.update_story_summaries_async(context)
+            logger.debug("Background summarization completed successfully.")
+        except Exception as exc:
+            # Failure is non-fatal — the next turn will simply run without a
+            # fresh summary, which is preferable to blocking or crashing.
+            logger.warning("Background summarization failed (non-fatal): %s", exc)
 
     def undo(self) -> bool:
         """Revert to the previous turn's state."""

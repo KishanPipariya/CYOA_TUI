@@ -314,6 +314,10 @@ class ModelBroker:
         )
         # Unified Generation Queue & Resource Management
         self._lock = asyncio.Lock()
+        # Dedicated lock for background summarization — kept separate from
+        # _lock so that fire-and-forget summarization tasks don't compete
+        # with (or deadlock against) the main generation path.
+        self._summary_lock = asyncio.Lock()
     
 
     def _create_provider_from_env(
@@ -349,8 +353,11 @@ class ModelBroker:
 
         Compresses pruned history into a Scene Summary (last 10 turns),
         Chapter Summary (last 5 scenes), and Arc Summary (global plot goals).
+
+        Uses a dedicated _summary_lock (not the main _lock) so this can safely
+        run as a background task concurrent with the main generation path.
         """
-        async with self._lock:
+        async with self._summary_lock:
             turns_to_compress = context.get_turns_for_summary()
             if not turns_to_compress:
                 return
@@ -471,7 +478,7 @@ class ModelBroker:
 
     async def generate_legacy_summary_async(self, turns_to_compress: list[dict[str, str]]) -> str:
         """The original summarization logic."""
-        async with self._lock:
+        async with self._summary_lock:
             if not turns_to_compress:
                 return ""
 

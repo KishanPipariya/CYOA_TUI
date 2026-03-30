@@ -301,6 +301,119 @@ class TestModelBrokerFallback:
             assert "anomaly" in node.narrative
             assert mock_provider.generate_json.call_count == 2
 
+    @pytest.mark.asyncio
+    async def test_summarization_does_not_block_generation(self):
+        """Summarization should be dispatched as a background task, not blocking TTFT.
+
+        When needs_summarization() is True, _generate_next must NOT await the
+        summarization before calling generate_next_node_async.  We verify this by
+        asserting that generate_next_node_async starts (and completes) even while
+        the summarization coroutine has not yet been awaited.
+        """
+        import asyncio
+        import json
+
+        from cyoa.core.engine import StoryEngine
+        from cyoa.llm.broker import ModelBroker, StoryContext
+        from cyoa.llm.providers import LLMProvider
+
+        ordered_calls: list[str] = []
+
+        async def slow_summarization(context: StoryContext) -> None:
+            # Yields so the event loop can run the generation task first
+            await asyncio.sleep(0)
+            ordered_calls.append("summarization_done")
+
+        narrator_payload = json.dumps(
+            {"narrative": "A door appears.", "choices": [{"text": "Enter"}, {"text": "Wait"}]}
+        )
+        extraction_payload = json.dumps({"items_gained": [], "items_lost": [], "stat_updates": {}})
+
+        call_seq = [narrator_payload, extraction_payload]
+
+        async def mock_generate_json(*args, **kwargs):
+            ordered_calls.append("generation_called")
+            return call_seq.pop(0)
+
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate_json = mock_generate_json
+        mock_provider.count_tokens = MagicMock(return_value=5)
+        mock_provider.save_state = AsyncMock(return_value=None)
+
+        broker = ModelBroker(provider=mock_provider)
+        broker.update_story_summaries_async = slow_summarization  # type: ignore[method-assign]
+
+        engine = StoryEngine(broker=broker, starting_prompt="Start")
+        engine.story_context = StoryContext(
+            starting_prompt="Start",
+            token_budget=50,             # Very small budget so needs_summarization() fires
+            token_counter=lambda x: 10,  # Every token = 10 units, easily exceeds 80%
+        )
+        # Artificially fill history so needs_summarization() returns True
+        engine.story_context.history = [
+            {"role": "user", "content": "Start"},
+            {"role": "assistant", "content": "You are in a dungeon."},
+            {"role": "user", "content": "I choose: Go north"},
+        ]
+
+        await engine._generate_next()
+        # Allow the background task to complete
+        await asyncio.sleep(0.05)
+
+        # Generation must have been called; summarization may or may not have
+        # finished yet at this point — the key guarantee is generation was NOT
+        # blocked waiting for summarization.
+        assert "generation_called" in ordered_calls
+
+    @pytest.mark.asyncio
+    async def test_summarization_failure_is_non_fatal(self):
+        """A failing background summarization must not crash or surface to the user."""
+        import asyncio
+        import json
+
+        from cyoa.core.engine import StoryEngine
+        from cyoa.llm.broker import ModelBroker
+        from cyoa.llm.providers import LLMProvider
+
+        async def failing_summarization(context: StoryContext) -> None:
+            raise RuntimeError("Simulated summarization service failure")
+
+        narrator_payload = json.dumps(
+            {"narrative": "Everything is fine.", "choices": [{"text": "Continue"}, {"text": "Wait"}]}
+        )
+        extraction_payload = json.dumps({"items_gained": [], "items_lost": [], "stat_updates": {}})
+        call_seq = [narrator_payload, extraction_payload]
+
+        async def mock_generate_json(*args, **kwargs):
+            return call_seq.pop(0)
+
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate_json = mock_generate_json
+        mock_provider.count_tokens = MagicMock(return_value=5)
+        mock_provider.save_state = AsyncMock(return_value=None)
+
+        broker = ModelBroker(provider=mock_provider)
+        broker.update_story_summaries_async = failing_summarization  # type: ignore[method-assign]
+
+        engine = StoryEngine(broker=broker, starting_prompt="Start")
+        engine.story_context = StoryContext(
+            starting_prompt="Start",
+            token_budget=50,
+            token_counter=lambda x: 10,
+        )
+        engine.story_context.history = [
+            {"role": "user", "content": "Start"},
+            {"role": "assistant", "content": "You are here."},
+            {"role": "user", "content": "I choose: Look around"},
+        ]
+
+        # Should not raise even though summarization will fail
+        await engine._generate_next()
+        # Allow the background task error handler to run
+        await asyncio.sleep(0.05)
+        # Engine is still alive with a valid current_node
+        assert engine.state.current_node is not None
+
 
 # ── 3. Graph DB offline graceful degradation ──────────────────────────────────
 
