@@ -3,8 +3,9 @@ from typing import Any
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.markup import escape
+from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, ListItem, ListView, Markdown, Static
+from textual.widgets import Button, Label, ListItem, ListView, Markdown, Static, ProgressBar
 
 __all__ = [
     "BranchScreen",
@@ -14,6 +15,7 @@ __all__ = [
     "LoadGameScreen",
     "SceneListItem",
     "SaveListItem",
+    "StatusDisplay",
 ]
 
 
@@ -311,3 +313,50 @@ class LoadGameScreen(ModalScreen[str]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+class StatusDisplay(Static):
+    """A reactive status bar that displays player stats and inventory."""
+
+    health = reactive(100)
+    gold = reactive(0)
+    reputation = reactive(0)
+    inventory: reactive[list[str]] = reactive([])
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(id="stats-row"):
+            yield Label("❤️ Health", id="health-label")
+            yield ProgressBar(total=100, show_percentage=False, show_eta=False, id="health-bar")
+            yield Label("", id="stats-text")
+        yield Label("🎒 Inventory: Empty", id="inventory-label")
+
+    def watch_health(self, health: int) -> None:
+        self.query_one("#health-bar", ProgressBar).progress = health
+        self._update_stats_text()
+        self._set_health_class(health)
+
+    def watch_gold(self, gold: int) -> None:
+        self._update_stats_text()
+
+    def watch_reputation(self, reputation: int) -> None:
+        self._update_stats_text()
+
+    def watch_inventory(self, inventory: list[str]) -> None:
+        inv_str = (
+            f"🎒 Inventory: {', '.join(inventory)}"
+            if inventory
+            else "🎒 Inventory: Empty"
+        )
+        self.query_one("#inventory-label", Label).update(inv_str)
+
+    def _update_stats_text(self) -> None:
+        text = f" ❤️ {self.health}% | 🪙 {self.gold} Gold | 🌟 {self.reputation} Rep"
+        self.query_one("#stats-text", Label).update(text)
+
+    def _set_health_class(self, health: int) -> None:
+        self.remove_class("health-high", "health-mid", "health-low")
+        if health < 30:
+            self.add_class("health-low")
+        elif health < 70:
+            self.add_class("health-mid")
+        else:
+            self.add_class("health-high")

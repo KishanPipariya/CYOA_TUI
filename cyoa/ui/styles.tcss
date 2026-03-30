@@ -95,26 +95,54 @@ Screen {
     margin: 0 1;
 }
 
-#stats-display {
+StatusDisplay {
+    height: auto;
+    background: $boost 10%;
+    border-top: tall $accent 30%;
+    padding: 0 1;
+    margin: 0 1;
+}
+
+#stats-row {
     height: 1;
     width: 100%;
 }
 
-#inventory-display {
+#health-label {
+    width: auto;
+    color: $text-muted;
+    margin-right: 1;
+}
+
+#health-bar {
+    width: 1fr;
     height: 1;
+}
+
+#health-bar .bar--complete {
+    background: $success;
+    transition: background 500ms;
+}
+
+#health-bar .bar--pending {
+    background: $surface;
+}
+
+.health-high #health-bar .bar--complete { background: $success; }
+.health-mid #health-bar .bar--complete { background: $warning; }
+.health-low #health-bar .bar--complete { background: $error; }
+
+#stats-text {
+    width: auto;
+    text-align: right;
+    color: $text;
+}
+
+#inventory-label {
     width: 100%;
     color: $text-muted;
-}
-
-/* Health color classes */
-.health-high {
-    color: $success;
-}
-.health-mid {
-    color: $warning;
-}
-.health-low {
-    color: $error;
+    text-style: italic;
+    margin-top: 0;
 }
 
 ThemeSpinner {

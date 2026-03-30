@@ -31,7 +31,7 @@ from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
 from cyoa.llm.broker import ModelBroker, StoryContext
 from cyoa.ui.ascii_art import SCENE_ART
-from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, ThemeSpinner
+from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, ThemeSpinner, StatusDisplay
 
 __all__ = ["CYOAApp"]
 
@@ -84,6 +84,13 @@ class CYOAApp(App):
     turn_count: reactive[int] = reactive(1)
     mood: reactive[str] = reactive("default")
     typewriter_enabled: reactive[bool] = reactive(True)
+
+    # Reactive Game State
+    health: reactive[int] = reactive(100)
+    gold: reactive[int] = reactive(0)
+    reputation: reactive[int] = reactive(0)
+    inventory: reactive[list[str]] = reactive([])
+
     _themes_cached_config: dict[str, Any] | None = None
 
     def _load_themes_config(self) -> dict[str, Any]:
@@ -229,12 +236,7 @@ class CYOAApp(App):
                 # Dedicated status bar between story and choices
                 with Container(id="status-bar"):
                     yield ThemeSpinner(frames=self.spinner_frames, id="loading")
-                    yield Label(
-                        "❤️ Health: 100 | 🪙 Gold: 0 | 🌟 Rep: 0",
-                        id="stats-display",
-                        classes="health-high",
-                    )
-                    yield Label("🎒 Inventory: Empty", id="inventory-display")
+                    yield StatusDisplay(id="status-display")
                 with Container(id="choices-container"):
                     pass
             with Container(id="journal-panel", classes="hidden"):
@@ -356,10 +358,12 @@ class CYOAApp(App):
         self.update_story_map()
 
     def _handle_stats_updated(self, stats: dict[str, int]) -> None:
-        self._update_status_bar(stats)
+        self.health = stats.get("health", 100)
+        self.gold = stats.get("gold", 0)
+        self.reputation = stats.get("reputation", 0)
 
     def _handle_inventory_updated(self, inventory: list[str]) -> None:
-        self._update_status_bar(inventory=inventory)
+        self.inventory = list(inventory)
 
     def _handle_title_generated(self, title: str) -> None:
         self.notify(f"New Chapter: {title}", severity="information", timeout=5)
@@ -572,47 +576,30 @@ class CYOAApp(App):
             # Force scroll on new turn so player sees their choice immediately
             self._scroll_to_bottom()
 
-    def _update_status_bar(
-        self,
-        stats: dict[str, int] | None = None,
-        inventory: list[str] | None = None
-    ) -> None:
-        """Refresh the two-row status bar with color-coded health."""
-        if not self.engine:
-            return
 
-        stats = stats if stats is not None else self.engine.player_stats
-        inventory = inventory if inventory is not None else self.engine.inventory
+    def watch_health(self, health: int) -> None:
+        try:
+            self.query_one(StatusDisplay).health = health
+        except Exception:
+            pass
 
-        health = stats.get("health", 0)
-        gold = stats.get("gold", 0)
-        rep = stats.get("reputation", 0)
+    def watch_gold(self, gold: int) -> None:
+        try:
+            self.query_one(StatusDisplay).gold = gold
+        except Exception:
+            pass
 
-        # Color-coded health indicator
-        if health <= 0:
-            health_tag = f"💀 Health: {health} [[DEAD]]"
-            css_class = "health-low"
-        elif health < 30:
-            health_tag = f"❤️ Health: {health} [[LOW]]"
-            css_class = "health-low"
-        elif health < 70:
-            health_tag = f"❤️ Health: {health}"
-            css_class = "health-mid"
-        else:
-            health_tag = f"❤️ Health: {health}"
-            css_class = "health-high"
+    def watch_reputation(self, reputation: int) -> None:
+        try:
+            self.query_one(StatusDisplay).reputation = reputation
+        except Exception:
+            pass
 
-        stats_label = self.query_one("#stats-display", Label)
-        stats_label.update(f"{health_tag} | 🪙 Gold: {gold} | 🌟 Rep: {rep}")
-        stats_label.remove_class("health-high", "health-mid", "health-low")
-        stats_label.add_class(css_class)
-
-        inv_str = (
-            f"🎒 Inventory: {', '.join(inventory)}"
-            if inventory
-            else "🎒 Inventory: Empty"
-        )
-        self.query_one("#inventory-display", Label).update(inv_str)
+    def watch_inventory(self, inventory: list[str]) -> None:
+        try:
+            self.query_one(StatusDisplay).inventory = inventory
+        except Exception:
+            pass
 
     def _is_at_bottom(self) -> bool:
         """Return True if the story container is near its bottom edge.
@@ -698,7 +685,12 @@ class CYOAApp(App):
         # memory.add() moved to worker thread (generate_next_step)
         # so chromadb embedding does not block the UI event loop here.
 
-        self._update_status_bar()
+        # Synchronize reactive stats
+        if self.engine:
+            self.health = self.engine.player_stats.get("health", 100)
+            self.gold = self.engine.player_stats.get("gold", 0)
+            self.reputation = self.engine.player_stats.get("reputation", 0)
+            self.inventory = list(self.engine.inventory)
 
         choices_container = self.query_one("#choices-container", Container)
         # Clear any leftover stale buttons (e.g. the disabled selected-choice button)
@@ -795,7 +787,10 @@ class CYOAApp(App):
         self.query_one("#choices-container").remove_children()
         self.query_one("#journal-list", ListView).clear()
 
-        self._update_status_bar()
+        self.health = 100
+        self.gold = 0
+        self.reputation = 0
+        self.inventory = []
         await self.engine.restart()
 
     # UX: Confirmation before restart
