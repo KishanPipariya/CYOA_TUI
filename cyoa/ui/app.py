@@ -1,8 +1,8 @@
 import asyncio
 import json
 import os
-import uuid
 from pathlib import Path
+from uuid import uuid4
 from typing import Any, ClassVar
 
 from textual import work
@@ -713,7 +713,10 @@ class CYOAApp(App):
                 Button("🔄 Retry Generation", id="btn-retry", variant="warning")
             )
             for i, choice in enumerate(node.choices):
-                btn_id = f"choice-{uuid.uuid4().hex[:8]}"
+                btn_id = f"choice-t{self.turn_count}-{i}"
+                # Defensive: ensure ID is unique if remounting on the same turn
+                for old_btn in self.query(f"#{btn_id}"):
+                    old_btn.id = f"old-{btn_id}-{uuid4().hex[:4]}"
                 btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="default")
                 choices_container.mount(btn)
         elif node.is_ending:
@@ -722,6 +725,9 @@ class CYOAApp(App):
         else:
             for i, choice in enumerate(node.choices):
                 btn_id = f"choice-t{self.turn_count}-{i}"
+                # Defensive: ensure ID is unique if remounting on the same turn
+                for old_btn in self.query(f"#{btn_id}"):
+                    old_btn.id = f"old-{btn_id}-{uuid4().hex[:4]}"
                 btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="primary")
                 choices_container.mount(btn)
 

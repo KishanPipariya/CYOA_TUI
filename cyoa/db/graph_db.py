@@ -47,10 +47,8 @@ class CYOAGraphDB:
             logger.warning(
                 f"Graph DB is offline. Proceeding without graph persistence. Error: {e}"
             )
-            # Keep the driver object but mark failure in CB, allowing future recovery attempts via CB mechanism
             self.cb._on_failure(e)
-            if not isinstance(e, ServiceUnavailable):
-                self.driver = None
+            self.driver = None
 
     @property
     def is_online(self) -> bool:

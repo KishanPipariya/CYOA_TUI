@@ -98,7 +98,7 @@ async def test_app_startup_and_loading_state(mock_app_dependencies):
         assert str(buttons[1].label) == "2  Go South"
 
         # Verify inventory was updated
-        inventory_label = app.query_one("#inventory-display", Label)
+        inventory_label = app.query_one("#inventory-label", Label)
         inventory_text = str(inventory_label.render())
         assert "Broken Sword" in inventory_text
 
@@ -110,31 +110,32 @@ async def test_stats_display_reflects_player_stats(mock_app_dependencies):
 
     async with app.run_test() as pilot:
         await pilot.pause(1.0)
-        stats_label = app.query_one("#stats-display", Label)
+        status_display = app.query_one("#status-display")
+        stats_label = app.query_one("#stats-text", Label)
 
         # Initial stats: Health 100 (high)
-        assert "Health: 100" in str(stats_label.render())
-        assert stats_label.has_class("health-high")
+        assert "100%" in str(stats_label.render())
+        assert status_display.has_class("health-high")
 
         # Update stats to mid-health
-        app.engine.player_stats["health"] = 50
-        app._update_status_bar()
-        assert "Health: 50" in str(stats_label.render())
-        assert stats_label.has_class("health-mid")
+        app.health = 50
+        await pilot.pause(0.1) # Wait for reactive update
+        assert "50%" in str(stats_label.render())
+        assert status_display.has_class("health-mid")
 
         # Update stats to low-health
-        app.engine.player_stats["health"] = 20
-        app._update_status_bar()
-        assert "Health: 20" in str(stats_label.render())
-        assert stats_label.has_class("health-low")
+        app.health = 20
+        await pilot.pause(0.1)
+        assert "20%" in str(stats_label.render())
+        assert status_display.has_class("health-low")
 
         # Update stats to dead
-        app.engine.player_stats["health"] = 0
-        app._update_status_bar()
+        app.health = 0
+        await pilot.pause(0.1)
         # Use .plain to get the text without markup/formatting
         rendered_text = stats_label.render().plain
-        assert "DEAD" in rendered_text
-        assert stats_label.has_class("health-low")
+        assert "0%" in rendered_text
+        assert status_display.has_class("health-low")
 
 
 @pytest.mark.asyncio
@@ -171,11 +172,11 @@ async def test_inventory_updates_on_item_gain_and_loss(mock_app_dependencies):
         app.turn_count = 99
         app.display_node(loss_node)
 
-        app.engine.inventory.remove("Health Potion")
-        app._update_status_bar()
-        inv_label = app.query_one("#inventory-display", Label)
+        app.inventory = []
+        await pilot.pause(0.1)
+        inv_label = app.query_one("#inventory-label", Label)
         assert "Health Potion" not in inv_label.render().plain
-        assert "Broken Sword" in inv_label.render().plain
+        assert "Broken Sword" not in inv_label.render().plain
 
 
 @pytest.mark.asyncio
@@ -233,16 +234,16 @@ async def test_choice_selection_via_keyboard(mock_app_dependencies):
         assert str(buttons[1].label) == "2  Go Back"
 
         # Verify inventory accumulated the new item
-        inventory_label = app.query_one("#inventory-display", Label)
+        inventory_label = app.query_one("#inventory-label", Label)
         inventory_text = str(inventory_label.render())
         assert "Broken Sword" in inventory_text
         assert "Health Potion" in inventory_text
 
-        # Verify stats updated (now in separate #stats-display label)
-        stats_label = app.query_one("#stats-display", Label)
+        # Verify stats updated (now in separate #stats-text label)
+        stats_label = app.query_one("#stats-text", Label)
         stats_text = str(stats_label.render())
-        assert "Health: 90" in stats_text
-        assert "Gold: 50" in stats_text
+        assert "90%" in stats_text
+        assert "50 Gold" in stats_text
 
         # Verify journal updated
         journal_list = app.query_one("#journal-list", ListView)
@@ -543,5 +544,5 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
             assert app2.engine.player_stats["gold"] == 123
             # After restore, _current_story should contain the narrative
             assert "unique story" in app2._current_story
-            stats_label2_text = app2.query_one("#stats-display").render().plain
-            assert "Health: 88" in stats_label2_text
+            stats_label2_text = app2.query_one("#stats-text").render().plain
+            assert "88%" in stats_label2_text

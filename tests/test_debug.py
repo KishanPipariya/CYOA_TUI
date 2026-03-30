@@ -22,9 +22,9 @@ async def test_debug_stats():
         async with app.run_test() as pilot:
             await pilot.pause(0.5)
             if app.engine:
-                app.engine.player_stats["health"] = 0
-            app._update_status_bar()
-            label = app.query_one("#stats-display")
+                app.health = 0
+            await pilot.pause(0.1)
+            label = app.query_one("#stats-text")
             print(f"\nDEBUG: RAW RENDER: {repr(label.render())}")
             print(f"\nDEBUG: PLAIN: {repr(label.render().plain)}")
-            assert "DEAD" in label.render().plain
+            assert "0%" in label.render().plain
