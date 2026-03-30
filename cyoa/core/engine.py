@@ -6,6 +6,8 @@ from typing import Any
 from cyoa.core.events import Events, bus
 from cyoa.core.models import StoryNode
 from cyoa.core.observability import EngineObservedSession
+from cyoa.core.rag import RAGManager
+from cyoa.core.state import GameState
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
 from cyoa.llm.broker import ModelBroker, SpeculationCache, StoryContext
@@ -31,22 +33,86 @@ class StoryEngine:
         self.broker = broker
         self.starting_prompt = starting_prompt
         self.db = db
-        self.memory = memory or NarrativeMemory()
-        self.npc_memory = npc_memory or NPCMemory()
+
+        # Extracted components
+        self.rag = RAGManager(memory=memory, npc_memory=npc_memory)
+        self.state = GameState()
         self.speculation_cache = SpeculationCache()
 
-        # Application state managed by the engine
-        self.current_node: StoryNode | None = None
-        self.inventory: list[str] = []
-        self.player_stats: dict[str, int] = {"health": 100, "gold": 0, "reputation": 0}
-        self.turn_count: int = 1
+        # Story context (for LLM interactions)
         self.story_context: StoryContext | None = None
-        self.story_title: str | None = None
-        self.current_scene_id: str | None = None
-        self.last_choice_text: str | None = None
 
-        # Snapshot for one-level undo
-        self._undo_snapshot: dict[str, Any] | None = None
+    @property
+    def turn_count(self) -> int:
+        return self.state.turn_count
+
+    @turn_count.setter
+    def turn_count(self, value: int) -> None:
+        self.state.turn_count = value
+
+    @property
+    def inventory(self) -> list[str]:
+        return self.state.inventory
+
+    @inventory.setter
+    def inventory(self, value: list[str]) -> None:
+        self.state.inventory = value
+
+    @property
+    def player_stats(self) -> dict[str, int]:
+        return self.state.player_stats
+
+    @player_stats.setter
+    def player_stats(self, value: dict[str, int]) -> None:
+        self.state.player_stats = value
+
+    @property
+    def current_node(self) -> StoryNode | None:
+        return self.state.current_node
+
+    @current_node.setter
+    def current_node(self, value: StoryNode | None) -> None:
+        self.state.current_node = value
+
+    @property
+    def story_title(self) -> str | None:
+        return self.state.story_title
+
+    @story_title.setter
+    def story_title(self, value: str | None) -> None:
+        self.state.story_title = value
+
+    @property
+    def current_scene_id(self) -> str | None:
+        return self.state.current_scene_id
+
+    @current_scene_id.setter
+    def current_scene_id(self, value: str | None) -> None:
+        self.state.current_scene_id = value
+
+    @property
+    def last_choice_text(self) -> str | None:
+        return self.state.last_choice_text
+
+    @last_choice_text.setter
+    def last_choice_text(self, value: str | None) -> None:
+        self.state.last_choice_text = value
+
+    @property
+    def memory(self) -> NarrativeMemory:
+        return self.rag.memory
+
+    @memory.setter
+    def memory(self, value: NarrativeMemory) -> None:
+        self.rag.memory = value
+
+    @property
+    def npc_memory(self) -> NPCMemory:
+        return self.rag.npc_memory
+
+    @npc_memory.setter
+    def npc_memory(self, value: NPCMemory) -> None:
+        self.rag.npc_memory = value
 
     async def initialize(self) -> None:
         """Start a brand-new adventure."""
@@ -57,19 +123,8 @@ class StoryEngine:
                 token_counter=self.broker.provider.count_tokens,
             )
 
-            self.turn_count = 1
-            self.inventory = []
-            self.player_stats = {"health": 100, "gold": 0, "reputation": 0}
-            self.current_node = None
-            self.story_title = None
-            self.current_scene_id = None
-            self.last_choice_text = None
-            self._undo_snapshot = None
-
-            # Reset memories for a new session
-            # Note: If these were persistent (e.g. ChromaDB on disk), we'd need to handle that.
-            # NarrativeMemory() creates a new collection by default in current impl.
-            # But we'll trust the caller if they want to reuse them.
+            # Reset extracted state
+            self.state.reset()
 
             bus.emit(Events.ENGINE_STARTED)
             await self._generate_next()
@@ -83,7 +138,7 @@ class StoryEngine:
 
     async def make_choice(self, choice_text: str) -> None:
         """Process a player's choice and advance the story."""
-        if not self.story_context or not self.current_node:
+        if not self.story_context or not self.state.current_node:
             logger.warning("Choice made before engine was ready.")
             return
 
@@ -92,20 +147,24 @@ class StoryEngine:
                 session.span.set_attribute("choice.text", choice_text)
 
             # Snapshot for undo BEFORE making changes
-            self._create_undo_snapshot()
+            self.state.create_undo_snapshot()
+            # Capture history snapshot separately because it belongs to story_context
+            self.state._undo_snapshot["story_context_history"] = [
+                msg.copy() for msg in self.story_context.history
+            ]
 
             bus.emit(Events.CHOICE_MADE, choice_text=choice_text)
 
             # Update the LLM context (history and state)
             self.story_context.add_turn(
-                self.current_node.narrative,
+                self.state.current_node.narrative,
                 choice_text,
-                self.inventory,
-                self.player_stats,
+                self.state.inventory,
+                self.state.player_stats,
             )
 
-            self.last_choice_text = choice_text
-            self.turn_count += 1
+            self.state.last_choice_text = choice_text
+            self.state.turn_count += 1
             await self._generate_next(choice_text=choice_text)
 
     async def _generate_next(self, choice_text: str | None = None) -> None:
@@ -115,20 +174,8 @@ class StoryEngine:
 
         bus.emit(Events.NODE_GENERATING)
 
-        # 1. RAG: Retrieve relevant memories
-        last_narrative = self.current_node.narrative if self.current_node else None
-        if last_narrative:
-            memories = await self.memory.query_async(last_narrative, n=3)
-
-            # NPC Memory
-            if self.current_node and getattr(self.current_node, "npcs_present", None):
-                for npc in self.current_node.npcs_present:
-                    npc_mems = await self.npc_memory.query_async(npc, last_narrative, n=2)
-                    for mem in npc_mems:
-                        if mem not in memories:
-                            memories.append(mem)
-
-            self.story_context.inject_memory(memories)
+        # 1. RAG: Retrieve relevant memories using the manager
+        await self.rag.retrieve_memories(self.state.current_node, self.story_context)
 
         # 2. Summarization check
         if self.story_context.needs_summarization():
@@ -137,8 +184,8 @@ class StoryEngine:
 
         # 3. Speculation Cache check
         cached_node = None
-        if choice_text and self.current_scene_id:
-            cached_node = self.speculation_cache.get_node(self.current_scene_id, choice_text)
+        if choice_text and self.state.current_scene_id:
+            cached_node = self.speculation_cache.get_node(self.state.current_scene_id, choice_text)
 
         def on_token(token: str) -> None:
             bus.emit(Events.TOKEN_STREAMED, token=token)
@@ -161,45 +208,39 @@ class StoryEngine:
 
                 # 4. Save State (KV cache) if available
                 state = await self.broker.save_state_async()
-                if state and self.current_scene_id:
-                    self.speculation_cache.set_state(self.current_scene_id, state)
+                if state and self.state.current_scene_id:
+                    self.speculation_cache.set_state(self.state.current_scene_id, state)
 
-                # 5. Apply updates
-                self._apply_node_updates(node)
-                self.current_node = node
+                # 5. Apply updates via GameState
+                self.state.apply_node_updates(node)
 
                 # 6. First node check (Title)
-                if self.turn_count == 1:
-                    # If first node, generate story title if not present
+                if self.state.turn_count == 1:
                     generated_title = node.title if node.title else "Untitled Adventure"
                     if self.db:
-                        self.story_title = await asyncio.to_thread(
+                        self.state.story_title = await asyncio.to_thread(
                             self.db.create_story_node_and_get_title, generated_title
                         )
                     else:
-                        self.story_title = generated_title
-                    bus.emit(Events.STORY_TITLE_GENERATED, title=self.story_title)
+                        self.state.story_title = generated_title
+                    bus.emit(Events.STORY_TITLE_GENERATED, title=self.state.story_title)
 
-                # 7. Persistence and Indexing
-                new_id = self.current_scene_id or str(uuid.uuid4())
-                # Background indexing
-                await self.memory.add_async(new_id, node.narrative)
-                if getattr(node, "npcs_present", None):
-                    for npc in node.npcs_present:
-                        await self.npc_memory.add_async(npc, new_id, node.narrative)
+                # 7. Persistence and Indexing using RAGManager
+                new_id = self.state.current_scene_id or str(uuid.uuid4())
+                await self.rag.index_node(new_id, node)
 
-                # Database save
-                if self.db and self.story_title:
+                # 8. Database save
+                if self.db and self.state.story_title:
                     choices_text = [choice.text for choice in node.choices]
-                    self.current_scene_id = await self.db.save_scene_async(
+                    self.state.current_scene_id = await self.db.save_scene_async(
                         narrative=node.narrative,
                         available_choices=choices_text,
-                        story_title=self.story_title,
-                        source_scene_id=self.current_scene_id,
+                        story_title=self.state.story_title,
+                        source_scene_id=self.state.current_scene_id,
                         choice_text=choice_text,
                     )
                 else:
-                    self.current_scene_id = new_id
+                    self.state.current_scene_id = new_id
 
                 bus.emit(Events.NODE_COMPLETED, node=node)
 
@@ -210,117 +251,38 @@ class StoryEngine:
             logger.error(f"Story Engine error: {e}", exc_info=True)
             bus.emit(Events.ERROR_OCCURRED, error=str(e))
 
-    def _apply_node_updates(self, node: StoryNode) -> None:
-        """Update local state from node feedback."""
-        # Stats
-        stats_changed = False
-        updates = getattr(node, "stat_updates", {})
-        for stat, change in updates.items():
-            if change != 0:
-                self.player_stats[stat] = self.player_stats.get(stat, 0) + change
-                stats_changed = True
-
-        if stats_changed:
-            bus.emit(Events.STATS_UPDATED, stats=dict(self.player_stats))
-
-        # Inventory
-        inv_changed = False
-        for item in getattr(node, "items_gained", []):
-            if item not in self.inventory:
-                self.inventory.append(item)
-                inv_changed = True
-        for item in getattr(node, "items_lost", []):
-            if item in self.inventory:
-                self.inventory.remove(item)
-                inv_changed = True
-
-        if inv_changed:
-            bus.emit(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
-
-    def _create_undo_snapshot(self) -> None:
-        if not self.story_context:
-            return
-
-        self._undo_snapshot = {
-            "turn_count": self.turn_count,
-            "current_node": self.current_node,
-            "inventory": list(self.inventory),
-            "player_stats": dict(self.player_stats),
-            "story_context_history": [msg.copy() for msg in self.story_context.history],
-            "story_title": self.story_title,
-            "current_scene_id": self.current_scene_id,
-            "last_choice_text": self.last_choice_text,
-        }
-
     def undo(self) -> bool:
         """Revert to the previous turn's state."""
-        if not self._undo_snapshot or not self.story_context:
+        if not self.state._undo_snapshot or not self.story_context:
             return False
 
         with EngineObservedSession("undo"):
-            snap = self._undo_snapshot
-            self.turn_count = snap["turn_count"]
-            self.current_node = snap["current_node"]
-            self.inventory = list(snap["inventory"])
-            self.player_stats = dict(snap["player_stats"])
-            self.story_context.history = snap["story_context_history"]
-            self.story_title = snap["story_title"]
-            self.current_scene_id = snap["current_scene_id"]
-            self.last_choice_text = snap["last_choice_text"]
-
-            self._undo_snapshot = None
-
-            bus.emit(Events.STATS_UPDATED, stats=dict(self.player_stats))
-            bus.emit(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
-            # Trigger UI refresh for node
-            if self.current_node:
-                bus.emit(Events.NODE_COMPLETED, node=self.current_node)
-
-            return True
+            # Restore LLM context history from snapshot before delegating to GameState
+            self.story_context.history = self.state._undo_snapshot["story_context_history"]
+            return self.state.undo()
 
     def get_save_data(self) -> dict[str, Any]:
         """Produce a dictionary of the current state for saving."""
         if not self.story_context:
             return {}
 
-        return {
+        data = {
             "version": 1,
-            "story_title": self.story_title,
-            "turn_count": self.turn_count,
-            "inventory": self.inventory,
-            "player_stats": self.player_stats,
             "starting_prompt": self.starting_prompt,
-            "current_node": self.current_node.model_dump() if self.current_node else None,
             "context_history": self.story_context.history,
-            "current_scene_id": self.current_scene_id,
-            "last_choice_text": self.last_choice_text,
         }
+        data.update(self.state.get_save_data())
+        return data
 
     def load_save_data(self, data: dict[str, Any]) -> None:
         """Hydrate engine state from a save data dictionary."""
-        self.story_title = data.get("story_title")
-        self.turn_count = data.get("turn_count", 1)
-        self.inventory = data.get("inventory", [])
-        self.player_stats = data.get("player_stats", {"health": 100, "gold": 0, "reputation": 0})
-        self.current_scene_id = data.get("current_scene_id")
-        self.last_choice_text = data.get("last_choice_text")
+        # Hydrate state manager
+        self.state.load_save_data(data)
 
-        node_data = data.get("current_node")
-        if node_data:
-            self.current_node = StoryNode(**node_data)
-        else:
-            self.current_node = None
-
+        # Hydrate engine-level LLM context
         self.story_context = StoryContext(
             starting_prompt=data.get("starting_prompt", self.starting_prompt),
             token_budget=self.broker.token_budget,
             token_counter=self.broker.provider.count_tokens,
         )
         self.story_context.history = data.get("context_history", [])
-
-        bus.emit(Events.STATS_UPDATED, stats=dict(self.player_stats))
-        bus.emit(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
-        if self.current_node:
-            bus.emit(Events.NODE_COMPLETED, node=self.current_node)
-
-        bus.emit(Events.STORY_TITLE_GENERATED, title=self.story_title)
