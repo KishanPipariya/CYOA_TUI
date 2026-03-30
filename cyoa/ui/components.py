@@ -182,6 +182,7 @@ HELP_TEXT = """\
 | [b][reverse]  S  [/reverse][/b] | Save Game |
 | [b][reverse]  L  [/reverse][/b] | Load Game |
 | [b][reverse]  R  [/reverse][/b] | Restart Adventure |
+| [b][reverse]  T  [/reverse][/b] | Toggle Typewriter |
 | [b][reverse]  H  [/reverse][/b] | Show this help screen |
 | [b][reverse]SPACE[/reverse][/b] | Skip typewriter narrator |
 | [b][reverse]  Q  [/reverse][/b] | Quit Game |

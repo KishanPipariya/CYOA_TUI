@@ -72,6 +72,7 @@ class CYOAApp(App):
         Binding("l", "load_game", "Load", show=True),
         Binding("q", "request_quit", "Quit", show=True),
         Binding("r", "request_restart", "Restart", show=True),
+        Binding("t", "toggle_typewriter", "Typewriter", show=True),
         Binding("space", "skip_typewriter", "Skip", show=True),
         Binding("1", "choose('1')", "Choice 1", show=False),
         Binding("2", "choose('2')", "Choice 2", show=False),
@@ -82,6 +83,7 @@ class CYOAApp(App):
     # Fix #4: Reactive turn counter displayed in footer
     turn_count: reactive[int] = reactive(1)
     mood: reactive[str] = reactive("default")
+    typewriter_enabled: reactive[bool] = reactive(True)
     _themes_cached_config: dict[str, Any] | None = None
 
     def _load_themes_config(self) -> dict[str, Any]:
@@ -185,9 +187,10 @@ class CYOAApp(App):
         # Undo: snapshot of previous turn state
         self._undo_snapshot: dict[str, Any] | None = None
 
-        # Restore dark mode preference
+        # Restore preferences
         config = utils.load_config()
         self.dark = config.get("dark", True)
+        self.typewriter_enabled = config.get("typewriter", True)
 
         # Apply theme accent color if specified
         if self._accent_color:
@@ -490,9 +493,24 @@ class CYOAApp(App):
         """Skip the typewriter animation on click."""
         self.action_skip_typewriter()
 
+    def action_toggle_typewriter(self) -> None:
+        """Toggle character-by-character animation and persist choice."""
+        self.typewriter_enabled = not self.typewriter_enabled
+        status = "Enabled" if self.typewriter_enabled else "Disabled"
+        self.notify(f"Typewriter Narrator: {status}")
+
+        # If disabling mid-animation, finish instantly
+        if not self.typewriter_enabled:
+            self.action_skip_typewriter()
+
+        # Persist setting
+        config = utils.load_config()
+        config["typewriter"] = self.typewriter_enabled
+        utils.save_config(config)
+
     def _stream_narrative(self, partial: str) -> None:
         """
-        Streaming callback: feeds the typewriter queue instead of updating UI directly.
+        Streaming callback: feeds the typewriter queue or updates UI immediately.
         """
         if self._loading_suffix_shown:
             # First token batch arrived — strip the loading placeholder
@@ -507,9 +525,14 @@ class CYOAApp(App):
             if self._current_story == LOADING_ART:
                 self._current_story = ""
                 self._current_turn_text = ""
-                self._typewriter_queue.put_nowait(partial)
-            else:
-                self._typewriter_queue.put_nowait(partial)
+
+        if not self.typewriter_enabled:
+            self._current_story += partial
+            self._current_turn_text += partial
+            if hasattr(self, "_current_turn_widget"):
+                self._current_turn_widget.update(self._current_turn_text)
+            if self._is_at_bottom():
+                self._scroll_to_bottom(animate=False)
         else:
             self._typewriter_queue.put_nowait(partial)
 
@@ -637,8 +660,12 @@ class CYOAApp(App):
             if self._current_story == LOADING_ART:
                 self._current_story = ""
                 self._current_turn_text = ""
-                
-            self._typewriter_queue.put_nowait(node.narrative)
+
+            if not self.typewriter_enabled:
+                self._current_story += node.narrative
+                self._current_turn_text += node.narrative
+            else:
+                self._typewriter_queue.put_nowait(node.narrative)
         else:
             # Streaming happened. Sync to the finalized narrative.
             self.action_skip_typewriter()
