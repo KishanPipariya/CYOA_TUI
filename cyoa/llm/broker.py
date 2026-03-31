@@ -134,17 +134,17 @@ class StoryContext:
         5. Oldest turns (dropped first)
         """
         # Phase 1: Prune oldest turns from history (always keep initial prompt and latest pair)
-        while len(self.history) > 3:
-            if self.count_total_tokens() <= self.token_budget:
-                break
+        current_tokens = self.count_total_tokens()
+        while len(self.history) > 3 and current_tokens > self.token_budget:
             # history[0] is opening prompt; pop(1) twice removes the oldest Turn pair (assistant + user)
-            self.history.pop(1)
-            self.history.pop(1)
+            dropped_a = self.history.pop(1)
+            dropped_u = self.history.pop(1)
+            # Subtract tokens of dropped messages to avoid O(N^2) recount
+            current_tokens -= self.token_counter(dropped_a.get("role", "") + dropped_a.get("content", ""))
+            current_tokens -= self.token_counter(dropped_u.get("role", "") + dropped_u.get("content", ""))
 
         # Phase 2: Dynamic RAG Scaling (Prune memories if still over budget)
-        while len(self.memories) > 1:
-            if self.count_total_tokens() <= self.token_budget:
-                break
+        while len(self.memories) > 1 and self.count_total_tokens() > self.token_budget:
             # Remove lowest priority memories (keep only the first one if necessary)
             self.memories.pop()
 
@@ -362,43 +362,43 @@ class ModelBroker:
             if not turns_to_compress:
                 return
 
-        pair_count = len(turns_to_compress) // 2
+            pair_count = len(turns_to_compress) // 2
 
-        # New buffers for the update
-        new_scene = context.scene_summary
-        new_chapter = context.chapter_summary
-        new_arc = context.arc_summary
+            # New buffers for the update
+            new_scene = context.scene_summary
+            new_chapter = context.chapter_summary
+            new_arc = context.arc_summary
 
-        # PHASE 1: Update Scene Summary
-        if context._scene_turn_count + pair_count <= 10:
-            # Still within the ~10 turn scene window
-            new_scene = await self._generate_dense_summary(
-                turns_to_compress, context.scene_summary, level="scene"
-            )
-            context._scene_turn_count += pair_count
-        else:
-            # Scene window full — promote existing Scene Summary to Chapter level
-            logger.info("Hierarchical Summarization: Promoting Scene to Chapter.")
-
-            # Incorporate old scene summary into chapter summary
-            new_chapter = await self._generate_dense_summary(
-                [], context.chapter_summary, previous_summary=context.scene_summary, level="chapter"
-            )
-            context._chapter_scene_count += 1
-
-            # Start a brand new Scene Summary with the new turns
-            new_scene = await self._generate_dense_summary(turns_to_compress, level="scene")
-            context._scene_turn_count = pair_count
-
-            # PHASE 2: Check for Chapter -> Arc promotion
-            if context._chapter_scene_count >= 5:
-                logger.info("Hierarchical Summarization: Promoting Chapter to Arc.")
-                new_arc = await self._generate_dense_summary(
-                    [], context.arc_summary, previous_summary=context.chapter_summary, level="arc"
+            # PHASE 1: Update Scene Summary
+            if context._scene_turn_count + pair_count <= 10:
+                # Still within the ~10 turn scene window
+                new_scene = await self._generate_dense_summary(
+                    turns_to_compress, context.scene_summary, level="scene"
                 )
-                # Reset chapter buffer
-                new_chapter = ""
-                context._chapter_scene_count = 0
+                context._scene_turn_count += pair_count
+            else:
+                # Scene window full — promote existing Scene Summary to Chapter level
+                logger.info("Hierarchical Summarization: Promoting Scene to Chapter.")
+
+                # Incorporate old scene summary into chapter summary
+                new_chapter = await self._generate_dense_summary(
+                    [], context.chapter_summary, previous_summary=context.scene_summary, level="chapter"
+                )
+                context._chapter_scene_count += 1
+
+                # Start a brand new Scene Summary with the new turns
+                new_scene = await self._generate_dense_summary(turns_to_compress, level="scene")
+                context._scene_turn_count = pair_count
+
+                # PHASE 2: Check for Chapter -> Arc promotion
+                if context._chapter_scene_count >= 5:
+                    logger.info("Hierarchical Summarization: Promoting Chapter to Arc.")
+                    new_arc = await self._generate_dense_summary(
+                        [], context.arc_summary, previous_summary=context.chapter_summary, level="arc"
+                    )
+                    # Reset chapter buffer
+                    new_chapter = ""
+                    context._chapter_scene_count = 0
 
         # Apply the updates to the context (also triggers pruning)
         with EngineObservedSession("update_summaries"):

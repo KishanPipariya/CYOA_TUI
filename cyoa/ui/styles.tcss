@@ -23,7 +23,7 @@ Screen {
     opacity: 1;
 }
 
-#journal-panel.hidden, #story-map-panel.hidden {
+#journal-panel.panel-collapsed, #story-map-panel.panel-collapsed {
     display: block; /* Override default hidden behavior to allow width animation */
     width: 0;
     padding: 0;

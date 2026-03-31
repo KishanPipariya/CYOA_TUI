@@ -223,19 +223,28 @@ class CYOAGraphDB:
 
         return await asyncio.to_thread(_write)
 
-    def get_scene_history_path(self, current_scene_id: str) -> dict[str, Any] | None:
+    def get_scene_history_path(
+        self, current_scene_id: str, max_depth: int = 100
+    ) -> dict[str, Any] | None:
         """
         Retrieves the path of scenes that led to the current scene.
+
+        Args:
+            current_scene_id: The ID of the scene to trace back from.
+            max_depth: Maximum number of hops to traverse (limits wire transfer
+                       when the caller only needs up to a certain turn index).
         """
         if not self.is_online:
             return None
 
         def _work() -> dict[str, Any] | None:
-            query = """
-            MATCH path = (start:Scene)-[:LEADS_TO*]->(current:Scene {id: $current_id})
-            WHERE NOT ()-[:LEADS_TO]->(start)
-            RETURN nodes(path) AS scenes, relationships(path) AS choices
-            """
+            # Use a parameterised variable-length path so Cypher does the
+            # traversal in one round-trip instead of one query per hop.
+            query = (
+                "MATCH path = (start:Scene)-[:LEADS_TO*.." + str(max_depth) + "]->(current:Scene {id: $current_id})\n"
+                "WHERE NOT ()-[:LEADS_TO]->(start)\n"
+                "RETURN nodes(path) AS scenes, relationships(path) AS choices"
+            )
             with self.driver.session() as session:
                 result = session.run(query, current_id=current_scene_id)
                 record = result.single()
@@ -279,54 +288,34 @@ class CYOAGraphDB:
             return []
 
         def _work() -> list[dict]:
-            # Find the root scene (no incoming LEADS_TO within this story)
-            root_query = """
-            MATCH (story:Story {title: $story_title})<-[:BELONGS_TO]-(scene:Scene)
-            WHERE NOT ()-[:LEADS_TO]->(scene)
-            RETURN scene.id AS id, scene.narrative AS narrative
-            LIMIT 1
+            # Single Cypher path query — one round-trip instead of N+1.
+            # The OPTIONAL MATCH on the outgoing edge lets us capture
+            # choice_taken for every node including the last (leaf) one.
+            query = """
+            MATCH (story:Story {title: $story_title})<-[:BELONGS_TO]-(root:Scene)
+            WHERE NOT ()-[:LEADS_TO]->(root)
+            MATCH path = (root)-[:LEADS_TO*0..]->(scene:Scene)
+            OPTIONAL MATCH (scene)-[edge:LEADS_TO]->(next:Scene)
+            RETURN scene.id AS id,
+                   scene.narrative AS narrative,
+                   edge.action_text AS choice_taken
+            ORDER BY length(path)
             """
-            with self.driver.session() as session:
-                result = session.run(root_query, story_title=story_title)
-                root = result.single()
-                if not root:
-                    return []
-
-                ordered = []
-                current_id = root["id"]
-                current_narrative = root["narrative"]
-
-                # Walk forward along LEADS_TO edges
-                while current_id:
-                    edge_query = """
-                    MATCH (s:Scene {id: $scene_id})-[r:LEADS_TO]->(next:Scene)
-                    RETURN r.action_text AS choice, next.id AS next_id,
-                           next.narrative AS next_narrative
-                    LIMIT 1
-                    """
-                    edge_result = session.run(edge_query, scene_id=current_id)
-                    edge_record = edge_result.single()
-
-                    if edge_record:
-                        ordered.append(
+            with DBObservedSession("neo4j", "get_all_story_scenes"):
+                with self.driver.session() as session:
+                    try:
+                        result = session.run(query, story_title=story_title)
+                        return [
                             {
-                                "id": current_id,
-                                "narrative": current_narrative,
-                                "choice_taken": edge_record["choice"],
+                                "id": record["id"],
+                                "narrative": record["narrative"],
+                                "choice_taken": record["choice_taken"],
                             }
-                        )
-                        current_id = edge_record["next_id"]
-                        current_narrative = edge_record["next_narrative"]
-                    else:
-                        ordered.append(
-                            {
-                                "id": current_id,
-                                "narrative": current_narrative,
-                                "choice_taken": None,
-                            }
-                        )
-                        break
-                return ordered
+                            for record in result
+                        ]
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("get_all_story_scenes query failed: %s", e)
+                        return []
 
         try:
             return self.cb.call(_work)

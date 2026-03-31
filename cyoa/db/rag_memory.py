@@ -88,6 +88,16 @@ class NarrativeMemory:
             self._available = False
             return False
 
+    def close(self) -> None:
+        """Release ChromaDB resources. Safe to call even if never initialised."""
+        try:
+            if self._collection is not None and self._client is not None:
+                self._client.delete_collection(self._collection.name)
+        except Exception:  # noqa: BLE001
+            pass
+        self._collection = None
+        self._client = None
+
     async def add_async(self, scene_id: str, narrative: str) -> None:
         """Embed and store a scene narrative asynchronously."""
         # Update fallback buffer regardless of Chroma availability
@@ -203,6 +213,20 @@ class NPCMemory:
             if self._client is None:
                 self._available = False
             return False
+            
+    def close(self) -> None:
+        """Release all ChromaDB collections. Safe to call even if never initialised."""
+        try:
+            if self._client is not None:
+                for safe_name, coll in self._collections.items():
+                    try:
+                        self._client.delete_collection(coll.name)
+                    except Exception:
+                        pass
+        except Exception:  # noqa: BLE001
+            pass
+        self._collections.clear()
+        self._client = None
 
     async def add_async(self, npc_name: str, scene_id: str, narrative: str) -> None:
         # Update fallback buffer for this NPC

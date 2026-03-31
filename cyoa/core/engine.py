@@ -170,6 +170,11 @@ class StoryEngine:
             self.state.turn_count += 1
             await self._generate_next(choice_text=choice_text)
 
+    async def retry(self) -> None:
+        """Re-run generation for the current context without advancing the turn."""
+        with EngineObservedSession("retry"):
+            await self._generate_next(choice_text=self.state.last_choice_text)
+
     async def _generate_next(self, choice_text: str | None = None) -> None:
         """Orchestrate the generation of the next story node, including RAG and DB saving."""
         if not self.story_context:

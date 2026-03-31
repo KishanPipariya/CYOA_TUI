@@ -11,6 +11,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.reactive import reactive
+from textual.events import Click
 from textual.theme import Theme
 from textual.widgets import (
     Button,
@@ -234,10 +235,10 @@ class CYOAApp(App):
                     yield StatusDisplay(id="status-display")
                 with Container(id="choices-container"):
                     pass
-            with Container(id="journal-panel", classes="hidden"):
+            with Container(id="journal-panel", classes="panel-collapsed"):
                 yield Label("In-Game Journal", id="journal-title")
                 yield ListView(id="journal-list")
-            with Container(id="story-map-panel", classes="hidden"):
+            with Container(id="story-map-panel", classes="panel-collapsed"):
                 yield Label("Story Map", id="story-map-title")
                 yield Tree("Story", id="story-map-tree")
         yield Footer()
@@ -395,8 +396,20 @@ class CYOAApp(App):
         if not self.engine or not self.engine.story_context or not self.generator:
             return
 
-        # Give the UI some breathing room and wait to see if the user makes a quick choice
-        await asyncio.sleep(2.0)
+        # Emit status message to inform user of background activity
+        bus.emit(Events.STATUS_MESSAGE, message="⚡ Weaving possible futures...")
+
+        # P6 Fix: More aggressive/intelligent delay
+        # Skip long sleep if the generator is idle
+        is_locked = False
+        lock = getattr(self.generator, "_lock", None)
+        if hasattr(lock, "locked"):
+            is_locked = lock.locked()
+
+        if is_locked:
+            await asyncio.sleep(2.0)
+        else:
+            await asyncio.sleep(0.5)
 
         # Optimization: Limit speculation to only 1 "most likely" choice (the first one)
         # to prevent resource starvation on local LLMs.
@@ -509,9 +522,15 @@ class CYOAApp(App):
         except Exception:
             pass
 
-    def on_click(self) -> None:
-        """Skip the typewriter animation on click."""
-        self.action_skip_typewriter()
+    def on_click(self, event: Click) -> None:
+        """Typewriter skip shortcut on clicking the story area."""
+        try:
+            # U1 Fix: Only skip if clicking within the story container
+            story = self.query_one("#story-container")
+            if story.is_ancestor_of(event.control):
+                self.action_skip_typewriter()
+        except (Exception, KeyError):
+            pass
 
     def action_toggle_typewriter(self) -> None:
         """Toggle character-by-character animation and persist choice."""
@@ -523,7 +542,7 @@ class CYOAApp(App):
         if not self.typewriter_enabled:
             self.action_skip_typewriter()
 
-        # Persist setting
+        # A6 Fix: Preserve other config keys
         config = utils.load_config()
         config["typewriter"] = self.typewriter_enabled
         utils.save_config(config)
@@ -704,10 +723,8 @@ class CYOAApp(App):
                 Button("🔄 Retry Generation", id="btn-retry", variant="warning")
             )
             for i, choice in enumerate(node.choices):
-                btn_id = f"choice-t{self.turn_count}-{i}"
-                # Defensive: ensure ID is unique if remounting on the same turn
-                for old_btn in self.query(f"#{btn_id}"):
-                    old_btn.id = f"old-{btn_id}-{uuid4().hex[:4]}"
+                # Unique ID per mount to avoid collisions if previous buttons haven't fully unmounted
+                btn_id = f"choice-t{self.turn_count}-{uuid4().hex[:6]}-{i}"
                 btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="default")
                 choices_container.mount(btn)
         elif node.is_ending:
@@ -715,10 +732,8 @@ class CYOAApp(App):
             choices_container.mount(end_btn)
         else:
             for i, choice in enumerate(node.choices):
-                btn_id = f"choice-t{self.turn_count}-{i}"
-                # Defensive: ensure ID is unique if remounting on the same turn
-                for old_btn in self.query(f"#{btn_id}"):
-                    old_btn.id = f"old-{btn_id}-{uuid4().hex[:4]}"
+                # Unique ID per mount to avoid collisions if previous buttons haven't fully unmounted
+                btn_id = f"choice-t{self.turn_count}-{uuid4().hex[:6]}-{i}"
                 btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="primary")
                 choices_container.mount(btn)
 
@@ -758,7 +773,8 @@ class CYOAApp(App):
             narrative_preview += "…"
         journal_entry = f"Turn {self.engine.turn_count}: {choice_text} → {narrative_preview}"
         journal_list.append(ListItem(Label(journal_entry)))
-        journal_list.scroll_end(animate=False)
+        # U2 Fix: Scroll after refresh to ensure layout size is updated
+        self.call_after_refresh(lambda: journal_list.scroll_end(animate=False))
 
         # 3. Cancel speculations and let the engine handle the rest
         self.workers.cancel_group(self, "speculation")
@@ -830,6 +846,9 @@ class CYOAApp(App):
         if not self.engine:
             return
 
+        # U4 Fix: Flush typewriter BEFORE DOM manipulation
+        self.action_skip_typewriter()
+
         # Engine handles core state restoration
         if not self.engine.undo():
             self.notify("Nothing to undo.", severity="warning", timeout=2)
@@ -858,6 +877,12 @@ class CYOAApp(App):
             if hasattr(self, "_current_turn_widget"):
                 self._current_turn_widget.update(self._current_turn_text)
 
+        # U5 Fix: Re-mount choice buttons for the restored node
+        choices_container = self.query_one("#choices-container", Container)
+        choices_container.remove_children()
+        if self.engine.current_node:
+            self._mount_choice_buttons(self.engine.current_node, choices_container, is_error=False)
+
         self.query_one("#loading").add_class("hidden")
         self._scroll_to_bottom()
 
@@ -866,6 +891,9 @@ class CYOAApp(App):
         children = list(journal_list.children)
         if children:
             children[-1].remove()
+
+        # U6 Fix: Update story map to reflect old position
+        self.update_story_map()
 
         self.notify("↩ Undid last choice.", severity="information", timeout=2)
 
@@ -934,6 +962,9 @@ class CYOAApp(App):
         if not self.engine:
             return
 
+        # A8 Fix: Cancel any background workers before hydrating new state
+        self.workers.cancel_all()
+
         self._current_story = data.get("current_story_text", LOADING_ART)
         self._current_turn_text = self._current_story
         self._loading_suffix_shown = False
@@ -950,7 +981,15 @@ class CYOAApp(App):
         self._current_turn_widget = new_turn
         
         self._scroll_to_bottom()
-        self.query_one("#choices-container").remove_children()
+        
+        # U8 Fix: If loaded node is empty (error case), provide a way out
+        choices_container = self.query_one("#choices-container")
+        choices_container.remove_children()
+        if self.engine.current_node:
+            self._mount_choice_buttons(self.engine.current_node, choices_container, False)
+        else:
+            choices_container.mount(Button("✦ Start a New Adventure", id="btn-new-adventure", variant="success"))
+
         self.query_one("#journal-list", ListView).clear()
 
         self.notify(
@@ -962,17 +1001,23 @@ class CYOAApp(App):
     # Persist dark mode preference when toggled
     def action_toggle_dark(self) -> None:
         self.dark = not self.dark
-        utils.save_config({"dark": self.dark})
+        # A6 Fix: Preserve other config keys
+        config = utils.load_config()
+        config["dark"] = self.dark
+        utils.save_config(config)
 
     def action_toggle_journal(self) -> None:
-        """Toggle the visibility of the side journal panel."""
-        panel = self.query_one("#journal-panel")
-        panel.toggle_class("hidden")
+        """Slide the journal panel in/out."""
+        panel = self.query_one("#journal-panel", Container)
+        panel.toggle_class("panel-collapsed")
+        # Ensure scroll to end if opening
+        if not panel.has_class("panel-collapsed"):
+            self.query_one("#journal-list", ListView).scroll_end(animate=False)
 
     def action_toggle_story_map(self) -> None:
         """Toggle the visibility of the story map panel."""
         panel = self.query_one("#story-map-panel")
-        panel.toggle_class("hidden")
+        panel.toggle_class("panel-collapsed")
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-new-adventure":
@@ -982,7 +1027,8 @@ class CYOAApp(App):
         if event.button.id == "btn-retry":
             self.show_loading()
             if self.engine:
-                await self.engine._generate_next()
+                # A5 Fix: Call public engine.retry() instead of private _generate_next()
+                await self.engine.retry()
             return
 
         button_id = event.button.id
@@ -996,9 +1042,11 @@ class CYOAApp(App):
     async def action_choose(self, number: str) -> None:
         """Select a choice by its 1-based index."""
         idx = int(number) - 1
-        query = self.query(f"#choice-t{self.turn_count}-{idx}")
-        if query:
-            await self._trigger_choice(idx)
+        prefix = f"choice-t{self.turn_count}-"
+        for btn in self.query("Button"):
+            if btn.id and btn.id.startswith(prefix) and btn.id.endswith(f"-{idx}"):
+                await self._trigger_choice(idx)
+                return
 
     @work(exclusive=True)
     async def action_branch_past(self) -> None:

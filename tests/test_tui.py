@@ -118,19 +118,19 @@ async def test_stats_display_reflects_player_stats(mock_app_dependencies):
         assert status_display.has_class("health-high")
 
         # Update stats to mid-health
-        app.health = 50
+        app.query_one("StatusDisplay").health = 50
         await pilot.pause(0.1) # Wait for reactive update
         assert "50%" in str(stats_label.render())
         assert status_display.has_class("health-mid")
 
         # Update stats to low-health
-        app.health = 20
+        app.query_one("StatusDisplay").health = 20
         await pilot.pause(0.1)
         assert "20%" in str(stats_label.render())
         assert status_display.has_class("health-low")
 
         # Update stats to dead
-        app.health = 0
+        app.query_one("StatusDisplay").health = 0
         await pilot.pause(0.1)
         # Use .plain to get the text without markup/formatting
         rendered_text = stats_label.render().plain
@@ -172,7 +172,7 @@ async def test_inventory_updates_on_item_gain_and_loss(mock_app_dependencies):
         app.turn_count = 99
         app.display_node(loss_node)
 
-        app.inventory = []
+        app.query_one("StatusDisplay").inventory = []
         await pilot.pause(0.1)
         inv_label = app.query_one("#inventory-label", Label)
         assert "Health Potion" not in inv_label.render().plain
@@ -189,16 +189,16 @@ async def test_ui_panels_toggle(mock_app_dependencies):
         map_panel = app.query_one("#story-map-panel", Container)
 
         # Both panels should be hidden by default
-        assert journal_panel.has_class("hidden")
-        assert map_panel.has_class("hidden")
+        assert journal_panel.has_class("panel-collapsed")
+        assert map_panel.has_class("panel-collapsed")
 
         # Press 'j' to toggle Journal
         await pilot.press("j")
-        assert not journal_panel.has_class("hidden")
+        assert not journal_panel.has_class("panel-collapsed")
 
         # Press 'm' to toggle Story Map
         await pilot.press("m")
-        assert not map_panel.has_class("hidden")
+        assert not map_panel.has_class("panel-collapsed")
 
         # Test dark mode toggle (starts as whatever config is, just verify toggle changes it)
         initial_dark = app.dark

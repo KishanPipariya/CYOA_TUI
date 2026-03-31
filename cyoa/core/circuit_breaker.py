@@ -28,7 +28,15 @@ class CircuitBreaker(Generic[T]):
         self._async_lock: asyncio.Lock | None = None
 
     def _get_async_lock(self) -> asyncio.Lock:
-        if self._async_lock is None:
+        """Return (or create) the async lock, always bound to the *current* running loop.
+
+        Creating asyncio.Lock() lazily at first use from within async_call guarantees
+        the lock is always bound to the loop that owns the calling coroutine, avoiding
+        the binding mismatch that occurs when the lock is created in a thread context.
+        """
+        loop = asyncio.get_event_loop()
+        # If the cached lock belongs to a different (or closed) loop, recreate it.
+        if self._async_lock is None or self._async_lock._loop is not loop:  # type: ignore[attr-defined]
             self._async_lock = asyncio.Lock()
         return self._async_lock
 

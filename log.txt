@@ -1,0 +1,243 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/kishan/CYOA_TUI
+configfile: pyproject.toml
+plugins: anyio-4.12.1, timeout-2.4.0, asyncio-1.3.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 1 item
+
+tests/test_tui.py ╭──────────── Traceback (most recent call last) ────────────╮
+│ /Users/kishan/CYOA_TUI/.venv/lib/python3.13/site-packages │
+│ /textual/worker.py:370 in _run                            │
+│                                                           │
+│   367 │   │   │   self.state = WorkerState.RUNNING        │
+│   368 │   │   │   app.log.worker(self)                    │
+│   369 │   │   │   try:                                    │
+│ ❱ 370 │   │   │   │   self._result = await self.run()     │
+│   371 │   │   │   except asyncio.CancelledError as error: │
+│   372 │   │   │   │   self.state = WorkerState.CANCELLED  │
+│   373 │   │   │   │   self._error = error                 │
+│                                                           │
+│ ╭─────────────────────── locals ────────────────────────╮ │
+│ │           app = CYOAApp(                              │ │
+│ │                 │   title='CYOAApp',                  │ │
+│ │                 │   classes={'-dark-mode'},           │ │
+│ │                 │   pseudo_classes={                  │ │
+│ │                 │   │   'light',                      │ │
+│ │                 │   │   'focus'                       │ │
+│ │                 │   }                                 │ │
+│ │                 )                                     │ │
+│ │         error = AttributeError("'_thread.RLock'       │ │
+│ │                 object has no attribute 'locked'")    │ │
+│ │          self = <Worker                               │ │
+│ │                 │   ERROR                             │ │
+│ │                 │   name='speculate_all_choices'      │ │
+│ │                 │   group='speculation'               │ │
+│ │                 │                                     │ │
+│ │                 description="speculate_all_choices(S… │ │
+│ │                 awaken in a test dungeon.',           │ │
+│ │                 title"+192                            │ │
+│ │                 >                                     │ │
+│ │ worker_failed = WorkerFailed('Worker raised           │ │
+│ │                 exception:                            │ │
+│ │                 AttributeError("\'_thread.RLock\'     │ │
+│ │                 object has no attribute               │ │
+│ │                 \'locked\'")')                        │ │
+│ ╰───────────────────────────────────────────────────────╯ │
+│                                                           │
+│ /Users/kishan/CYOA_TUI/.venv/lib/python3.13/site-packages │
+│ /textual/worker.py:354 in run                             │
+│                                                           │
+│   351 │   │   Returns:                                    │
+│   352 │   │   │   Return value of the work.               │
+│   353 │   │   """                                         │
+│ ❱ 354 │   │   return await (                              │
+│   355 │   │   │   self._run_threaded() if self._thread_wo │
+│   356 │   │   )                                           │
+│   357                                                     │
+│                                                           │
+│ ╭─────────────────────── locals ────────────────────────╮ │
+│ │ self = <Worker                                        │ │
+│ │        │   ERROR                                      │ │
+│ │        │   name='speculate_all_choices'               │ │
+│ │        │   group='speculation'                        │ │
+│ │        │                                              │ │
+│ │        description="speculate_all_choices(StoryNode(… │ │
+│ │        awaken in a test dungeon.', title"+192         │ │
+│ │        >                                              │ │
+│ ╰───────────────────────────────────────────────────────╯ │
+│                                                           │
+│ /Users/kishan/CYOA_TUI/.venv/lib/python3.13/site-packages │
+│ /textual/worker.py:339 in _run_async                      │
+│                                                           │
+│   336 │   │   │   or hasattr(self._work, "func")          │
+│   337 │   │   │   and inspect.iscoroutinefunction(self._w │
+│   338 │   │   ):                                          │
+│ ❱ 339 │   │   │   return await self._work()               │
+│   340 │   │   elif inspect.isawaitable(self._work):       │
+│   341 │   │   │   return await self._work                 │
+│   342 │   │   elif callable(self._work):                  │
+│                                                           │
+│ ╭─────────────────────── locals ────────────────────────╮ │
+│ │ self = <Worker                                        │ │
+│ │        │   ERROR                                      │ │
+│ │        │   name='speculate_all_choices'               │ │
+│ │        │   group='speculation'                        │ │
+│ │        │                                              │ │
+│ │        description="speculate_all_choices(StoryNode(… │ │
+│ │        awaken in a test dungeon.', title"+192         │ │
+│ │        >                                              │ │
+│ ╰───────────────────────────────────────────────────────╯ │
+│                                                           │
+│ /Users/kishan/CYOA_TUI/cyoa/ui/app.py:405 in              │
+│ speculate_all_choices                                     │
+│                                                           │
+│    402 │   │   # P6 Fix: More aggressive/intelligent dela │
+│    403 │   │   # Skip long sleep if the generator is idle │
+│    404 │   │   print(f"DEBUG: generator type: {type(self. │
+│ ❱  405 │   │   if self.generator._lock.locked():          │
+│    406 │   │   │   await asyncio.sleep(2.0)               │
+│    407 │   │   else:                                      │
+│    408 │   │   │   await asyncio.sleep(0.5)               │
+│                                                           │
+│ ╭─────────────────────── locals ────────────────────────╮ │
+│ │ node = StoryNode(                                     │ │
+│ │        │   narrative='You awaken in a test dungeon.', │ │
+│ │        │   title='Test Adventure',                    │ │
+│ │        │   items_gained=['Broken Sword'],             │ │
+│ │        │   items_lost=[],                             │ │
+│ │        │   npcs_present=[],                           │ │
+│ │        │   stat_updates={},                           │ │
+│ │        │   choices=[                                  │ │
+│ │        │   │   Choice(text='Go North'),               │ │
+│ │        │   │   Choice(text='Go South')                │ │
+│ │        │   ],                                         │ │
+│ │        │   is_ending=False,                           │ │
+│ │        │   mood='default'                             │ │
+│ │        )                                              │ │
+│ │ self = CYOAApp(                                       │ │
+│ │        │   title='CYOAApp',                           │ │
+│ │        │   classes={'-dark-mode'},                    │ │
+│ │        │   pseudo_classes={'light', 'focus'}          │ │
+│ │        )                                              │ │
+│ ╰───────────────────────────────────────────────────────╯ │
+╰───────────────────────────────────────────────────────────╯
+AttributeError: '_thread.RLock' object has no attribute 
+'locked'
+DEBUG: generator type: <class 'unittest.mock.MagicMock'>, lock type: <class '_thread.RLock'>
+F
+
+=================================== FAILURES ===================================
+______________________ test_app_startup_and_loading_state ______________________
+
+mock_app_dependencies = None
+
+    @pytest.mark.asyncio
+    async def test_app_startup_and_loading_state(mock_app_dependencies):
+        """Test that the app starts up, shows loading art, and renders the initial generated scene."""
+        app = CYOAApp(model_path="dummy_path.gguf")
+    
+>       async with app.run_test() as pilot:
+                   ^^^^^^^^^^^^^^
+
+tests/test_tui.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../.local/share/uv/python/cpython-3.13.9-macos-aarch64-none/lib/python3.13/contextlib.py:221: in __aexit__
+    await anext(self.gen)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = CYOAApp(title='CYOAApp', classes={'-dark-mode'}, pseudo_classes={'light', 'focus'})
+
+    @asynccontextmanager
+    async def run_test(
+        self,
+        *,
+        headless: bool = True,
+        size: tuple[int, int] | None = (80, 24),
+        tooltips: bool = False,
+        notifications: bool = False,
+        message_hook: Callable[[Message], None] | None = None,
+    ) -> AsyncGenerator[Pilot[ReturnType], None]:
+        """An asynchronous context manager for testing apps.
+    
+        !!! tip
+    
+            See the guide for [testing](/guide/testing) Textual apps.
+    
+        Use this to run your app in "headless" mode (no output) and drive the app via a [Pilot][textual.pilot.Pilot] object.
+    
+        Example:
+    
+            ```python
+            async with app.run_test() as pilot:
+                await pilot.click("#Button.ok")
+                assert ...
+            ```
+    
+        Args:
+            headless: Run in headless mode (no output or input).
+            size: Force terminal size to `(WIDTH, HEIGHT)`,
+                or None to auto-detect.
+            tooltips: Enable tooltips when testing.
+            notifications: Enable notifications when testing.
+            message_hook: An optional callback that will be called each time any message arrives at any
+                message pump in the app.
+        """
+        from textual.pilot import Pilot
+    
+        app = self
+        app._disable_tooltips = not tooltips
+        app._disable_notifications = not notifications
+        app_ready_event = asyncio.Event()
+    
+        def on_app_ready() -> None:
+            """Called when app is ready to process events."""
+            app_ready_event.set()
+    
+        async def run_app(app: App[ReturnType]) -> None:
+            """Run the apps message loop.
+    
+            Args:
+                app: App to run.
+            """
+    
+            with app._context():
+                try:
+                    if message_hook is not None:
+                        message_hook_context_var.set(message_hook)
+                    app._loop = asyncio.get_running_loop()
+                    app._thread_id = threading.get_ident()
+                    await app._process_messages(
+                        ready_callback=on_app_ready,
+                        headless=headless,
+                        terminal_size=size,
+                    )
+                finally:
+                    app_ready_event.set()
+    
+        # Launch the app in the "background"
+    
+        self._task = app_task = create_task(run_app(app), name=f"run_test {app}")
+    
+        # Wait until the app has performed all startup routines.
+        await app_ready_event.wait()
+        with app._context():
+            # Context manager returns pilot object to manipulate the app
+            try:
+                pilot = Pilot(app)
+                await pilot._wait_for_screen()
+                yield pilot
+            finally:
+                await asyncio.sleep(0)
+                # Shutdown the app cleanly
+                await app._shutdown()
+                await app_task
+                # Re-raise the exception which caused panic so test frameworks are aware
+                if self._exception:
+>                   raise self._exception
+E                   textual.worker.WorkerFailed: Worker raised exception: AttributeError("'_thread.RLock' object has no attribute 'locked'")
+
+.venv/lib/python3.13/site-packages/textual/app.py:2145: WorkerFailed
+=========================== short test summary info ============================
+FAILED tests/test_tui.py::test_app_startup_and_loading_state - textual.worker...
+============================== 1 failed in 2.34s ===============================

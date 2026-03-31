@@ -78,7 +78,10 @@ class BranchScreen(ModalScreen[int]):
     def on_mount(self) -> None:
         list_view = self.query_one("#branch-list", ListView)
         for i, scene in enumerate(self.scenes):
-            preview = scene["narrative"][:100].replace("\n", " ") + "..."
+            # U7 Fix: Use a longer preview and snap to word boundaries
+            raw = scene["narrative"].replace("\n", " ")
+            preview = (raw[:180].rsplit(" ", 1)[0] + "…") if len(raw) > 180 else raw
+            
             choice_text = self.choices[i] if i < len(self.choices) else "Current Scene"
             label_text = f"Turn {i + 1}: {preview}\n[i]Choice made: {choice_text}[/i]"
             item = SceneListItem(Label(label_text, classes="scene-preview"), scene_index=i)
@@ -106,6 +109,8 @@ class ThemeSpinner(Static):
         self.set_interval(0.1, self.tick)
 
     def tick(self) -> None:
+        if "hidden" in self.classes:
+            return
         self._frame_idx = (self._frame_idx + 1) % len(self.frames)
         self.update(escape(self.frames[self._frame_idx]))
 

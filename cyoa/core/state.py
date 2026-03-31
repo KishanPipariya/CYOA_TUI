@@ -1,5 +1,5 @@
 import logging
-from typing import Any
+from typing import Any, ClassVar
 
 from cyoa.core.events import Events, bus
 from cyoa.core.models import StoryNode
@@ -13,13 +13,17 @@ class GameState:
     Separates state mutations and snapshot management from the orchestration core.
     """
 
+    # Single source of truth for default player stats. Add a new stat here and
+    # it propagates to __init__, reset(), and any code that copies _DEFAULT_STATS.
+    _DEFAULT_STATS: ClassVar[dict[str, int]] = {"health": 100, "gold": 0, "reputation": 0}
+
     def __init__(
         self,
         inventory: list[str] | None = None,
         player_stats: dict[str, int] | None = None,
     ) -> None:
         self.inventory: list[str] = inventory or []
-        self.player_stats: dict[str, int] = player_stats or {"health": 100, "gold": 0, "reputation": 0}
+        self.player_stats: dict[str, int] = dict(player_stats) if player_stats else dict(self._DEFAULT_STATS)
         self.turn_count: int = 1
         self.current_node: StoryNode | None = None
         self.story_title: str | None = None
@@ -32,7 +36,7 @@ class GameState:
     def reset(self) -> None:
         """Reset the game state to its initial state."""
         self.inventory = []
-        self.player_stats = {"health": 100, "gold": 0, "reputation": 0}
+        self.player_stats = dict(self._DEFAULT_STATS)
         self.turn_count = 1
         self.current_node = None
         self.story_title = None

@@ -27,14 +27,15 @@ class EventBus:
 
     def emit(self, event_name: str, **kwargs: Any) -> None:
         """Broadcast an event, calling all registered callbacks with kwargs."""
-        if event_name in self._subscribers:
-            for callback in self._subscribers[event_name]:
-                try:
-                    callback(**kwargs)
-                except Exception as e:  # noqa: BLE001
-                    logger.error(
-                        f"Error executing callback {callback.__name__} for event {event_name}: {e}"
-                    )
+        # Snapshot the list so callbacks that unsubscribe themselves during
+        # emit cannot cause RuntimeError or silently skip other callbacks.
+        for callback in list(self._subscribers.get(event_name, [])):
+            try:
+                callback(**kwargs)
+            except Exception as e:  # noqa: BLE001
+                logger.error(
+                    f"Error executing callback {callback.__name__} for event {event_name}: {e}"
+                )
 
     def clear(self) -> None:
         """Clear all subscribers (mainly useful for isolating test environments)."""

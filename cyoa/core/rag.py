@@ -62,7 +62,11 @@ class RAGManager:
                 await self.npc_memory.add_async(npc, scene_id, node.narrative)
 
     async def reset(self) -> None:
-        """Clear all current session memories."""
+        """Clear and close all current session memories to prevent leaks."""
+        if hasattr(self.memory, "close"):
+            self.memory.close()
+        if hasattr(self.npc_memory, "close"):
+            self.npc_memory.close()
         self.memory = NarrativeMemory()
         self.npc_memory = NPCMemory()
 
