@@ -15,8 +15,8 @@ class GameState:
 
     def __init__(
         self,
-        inventory: list[str] = None,
-        player_stats: dict[str, int] = None,
+        inventory: list[str] | None = None,
+        player_stats: dict[str, int] | None = None,
     ) -> None:
         self.inventory: list[str] = inventory or []
         self.player_stats: dict[str, int] = player_stats or {"health": 100, "gold": 0, "reputation": 0}
@@ -44,8 +44,7 @@ class GameState:
         """Update local state from node feedback (stats, inventory)."""
         # 1. Update Stats
         stats_changed = False
-        updates = getattr(node, "stat_updates", {})
-        for stat, change in updates.items():
+        for stat, change in node.stat_updates.items():
             if change != 0:
                 self.player_stats[stat] = self.player_stats.get(stat, 0) + change
                 stats_changed = True
@@ -55,11 +54,11 @@ class GameState:
 
         # 2. Update Inventory
         inv_changed = False
-        for item in getattr(node, "items_gained", []):
+        for item in node.items_gained:
             if item not in self.inventory:
                 self.inventory.append(item)
                 inv_changed = True
-        for item in getattr(node, "items_lost", []):
+        for item in node.items_lost:
             if item in self.inventory:
                 self.inventory.remove(item)
                 inv_changed = True
@@ -70,9 +69,9 @@ class GameState:
         # 3. Advance state
         self.current_node = node
 
-    def create_undo_snapshot(self) -> None:
+    def create_undo_snapshot(self, extra_data: dict[str, Any] | None = None) -> None:
         """Capture the current state to allow for a future 'undo' operation."""
-        self._undo_snapshot = {
+        snapshot = {
             "turn_count": self.turn_count,
             "current_node": self.current_node,
             "inventory": list(self.inventory),
@@ -81,6 +80,9 @@ class GameState:
             "current_scene_id": self.current_scene_id,
             "last_choice_text": self.last_choice_text,
         }
+        if extra_data:
+            snapshot.update(extra_data)
+        self._undo_snapshot = snapshot
 
     def undo(self) -> bool:
         """Revert the state to the previous snapshot."""

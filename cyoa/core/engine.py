@@ -151,12 +151,10 @@ class StoryEngine:
             if session.span:
                 session.span.set_attribute("choice.text", choice_text)
 
-            # Snapshot for undo BEFORE making changes
-            self.state.create_undo_snapshot()
-            # Capture history snapshot separately because it belongs to story_context
-            self.state._undo_snapshot["story_context_history"] = [
-                msg.copy() for msg in self.story_context.history
-            ]
+            # Snapshot for undo BEFORE making changes, including history because it belongs to story_context
+            self.state.create_undo_snapshot({
+                "story_context_history": [msg.copy() for msg in self.story_context.history]
+            })
 
             bus.emit(Events.CHOICE_MADE, choice_text=choice_text)
 
