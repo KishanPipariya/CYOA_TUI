@@ -201,8 +201,8 @@ class StoryEngine:
         try:
             with EngineObservedSession("process_turn") as session:
                 if cached_node:
-                    # Simulated minimal stream to maintain UI feel
-                    bus.emit(Events.TOKEN_STREAMED, token="*(Recalling future memories...)* ")
+                    # Indicate cache hit via status message instead of polluting the narrative stream
+                    bus.emit(Events.STATUS_MESSAGE, message="✨ Recalling future memories...")
                     await asyncio.sleep(0.1)
                     node = cached_node
                     if session.span:

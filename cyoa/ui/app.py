@@ -882,7 +882,14 @@ class CYOAApp(App):
         save_path = os.path.join(constants.SAVES_DIR, f"{safe_title}_turn{self.engine.turn_count}.json")
 
         save_data = self.engine.get_save_data()
-        save_data["current_story_text"] = self._current_story
+        
+        # UI-specific cleanup: strip transient loading indicators before persistence
+        story_text = self._current_story
+        suffix = "\n\n*(The ancient texts are shifting...)*"
+        if story_text.endswith(suffix):
+            story_text = story_text[: -len(suffix)]
+        
+        save_data["current_story_text"] = story_text
 
         try:
             with open(save_path, "w", encoding="utf-8") as f:
