@@ -85,12 +85,6 @@ class CYOAApp(App):
     mood: reactive[str] = reactive("default")
     typewriter_enabled: reactive[bool] = reactive(True)
 
-    # Reactive Game State
-    health: reactive[int] = reactive(100)
-    gold: reactive[int] = reactive(0)
-    reputation: reactive[int] = reactive(0)
-    inventory: reactive[list[str]] = reactive([])
-
     _themes_cached_config: dict[str, Any] | None = None
 
     def _load_themes_config(self) -> dict[str, Any]:
@@ -368,12 +362,19 @@ class CYOAApp(App):
         self.update_story_map()
 
     def _handle_stats_updated(self, stats: dict[str, int]) -> None:
-        self.health = stats.get("health", 100)
-        self.gold = stats.get("gold", 0)
-        self.reputation = stats.get("reputation", 0)
+        try:
+            status = self.query_one(StatusDisplay)
+            status.health = stats.get("health", 100)
+            status.gold = stats.get("gold", 0)
+            status.reputation = stats.get("reputation", 0)
+        except Exception:
+            pass
 
     def _handle_inventory_updated(self, inventory: list[str]) -> None:
-        self.inventory = list(inventory)
+        try:
+            self.query_one(StatusDisplay).inventory = list(inventory)
+        except Exception:
+            pass
 
     def _handle_title_generated(self, title: str) -> None:
         self.notify(f"New Chapter: {title}", severity="information", timeout=5)
@@ -587,30 +588,6 @@ class CYOAApp(App):
             self._scroll_to_bottom()
 
 
-    def watch_health(self, health: int) -> None:
-        try:
-            self.query_one(StatusDisplay).health = health
-        except Exception:
-            pass
-
-    def watch_gold(self, gold: int) -> None:
-        try:
-            self.query_one(StatusDisplay).gold = gold
-        except Exception:
-            pass
-
-    def watch_reputation(self, reputation: int) -> None:
-        try:
-            self.query_one(StatusDisplay).reputation = reputation
-        except Exception:
-            pass
-
-    def watch_inventory(self, inventory: list[str]) -> None:
-        try:
-            self.query_one(StatusDisplay).inventory = inventory
-        except Exception:
-            pass
-
     def _is_at_bottom(self) -> bool:
         """Return True if the story container is near its bottom edge.
 
@@ -695,12 +672,16 @@ class CYOAApp(App):
         # memory.add() moved to worker thread (generate_next_step)
         # so chromadb embedding does not block the UI event loop here.
 
-        # Synchronize reactive stats
+        # Update UI stats from engine state
         if self.engine:
-            self.health = self.engine.player_stats.get("health", 100)
-            self.gold = self.engine.player_stats.get("gold", 0)
-            self.reputation = self.engine.player_stats.get("reputation", 0)
-            self.inventory = list(self.engine.inventory)
+            try:
+                status = self.query_one(StatusDisplay)
+                status.health = self.engine.player_stats.get("health", 100)
+                status.gold = self.engine.player_stats.get("gold", 0)
+                status.reputation = self.engine.player_stats.get("reputation", 0)
+                status.inventory = list(self.engine.inventory)
+            except Exception:
+                pass
 
         choices_container = self.query_one("#choices-container", Container)
         # Clear any leftover stale buttons (e.g. the disabled selected-choice button)
@@ -803,10 +784,14 @@ class CYOAApp(App):
         self.query_one("#choices-container").remove_children()
         self.query_one("#journal-list", ListView).clear()
 
-        self.health = 100
-        self.gold = 0
-        self.reputation = 0
-        self.inventory = []
+        try:
+            status = self.query_one(StatusDisplay)
+            status.health = 100
+            status.gold = 0
+            status.reputation = 0
+            status.inventory = []
+        except Exception:
+            pass
         await self.engine.restart()
 
     # UX: Confirmation before restart
