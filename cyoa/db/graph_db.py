@@ -34,21 +34,39 @@ class CYOAGraphDB:
             self.driver = GraphDatabase.driver(
                 uri_str, auth=(str(user), str(password)), connection_timeout=2.0
             )
-            # Verify connectivity immediately to fail fast.
-            self.driver.verify_connectivity()
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                f"Failed to create Neo4j driver. Graph persistence disabled. Error: {e}"
+            )
+            self.driver = None
+
+    async def verify_connectivity_async(self) -> bool:
+        """
+        Verify connectivity to Neo4j asynchronously.
+        Returns True if successful, False otherwise.
+        """
+        if not self.driver:
+            return False
+
+        import asyncio
+        try:
+            await asyncio.to_thread(self.driver.verify_connectivity)
             logger.info("Successfully connected to Neo4j.")
+            return True
         except AuthError:
             logger.error(
                 "Failed to connect to Neo4j: Authentication failed. Check username and password."
             )
             self.driver = None
             self.cb._on_failure(Exception("Authentication failed"))
+            return False
         except (ServiceUnavailable, Exception) as e:  # noqa: BLE001
             logger.warning(
                 f"Graph DB is offline. Proceeding without graph persistence. Error: {e}"
             )
             self.cb._on_failure(e)
             self.driver = None
+            return False
 
     @property
     def is_online(self) -> bool:

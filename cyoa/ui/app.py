@@ -309,12 +309,15 @@ class CYOAApp(App):
                 )
 
             # 2. Check for Graceful Degradation (Graph / RAG)
-            if self.engine.db and not self.engine.db.is_online:
-                self.notify(
-                    "Graph DB not found. Proceeding with ephemeral memory only.",
-                    severity="warning",
-                    timeout=5
-                )
+            if self.engine.db:
+                # A. Verify Graph DB connectivity asynchronously (non-blocking)
+                is_online = await self.engine.db.verify_connectivity_async()
+                if not is_online:
+                    self.notify(
+                        "Graph DB not found. Proceeding with ephemeral memory only.",
+                        severity="warning",
+                        timeout=5
+                    )
 
             # Check Chroma availability without forcing model download if it's lazy
             if not self.engine.memory.is_online:

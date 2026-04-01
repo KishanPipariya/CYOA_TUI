@@ -66,6 +66,7 @@ def mock_app_dependencies():
     ):
         # Configure the mock DB to not fail async DB operations
         db_instance = mock_db.return_value
+        db_instance.verify_connectivity_async = AsyncMock(return_value=True)
         db_instance.create_story_node_and_get_title.return_value = "Test Adventure"
         db_instance.get_story_tree.return_value = None  # Just empty for story map test initially
 
