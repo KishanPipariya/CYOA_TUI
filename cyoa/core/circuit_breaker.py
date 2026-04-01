@@ -1,9 +1,10 @@
-import time
-import logging
 import asyncio
+import logging
 import threading
+import time
+from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import Callable, Any, TypeVar, Generic, Coroutine, Union, Awaitable
+from typing import Any, Generic, TypeVar
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ class CircuitBreaker(Generic[T]):
         """
         async_lock = self._get_async_lock()
         async with async_lock:
-            with self._lock: 
+            with self._lock:
                 self._check_state()
                 if self.state == CircuitState.OPEN:
                     raise CircuitBreakerOpenError(f"Circuit breaker '{self.name}' is OPEN.")

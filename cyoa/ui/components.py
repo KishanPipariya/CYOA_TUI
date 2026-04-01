@@ -5,7 +5,7 @@ from textual.containers import Container, Horizontal
 from textual.markup import escape
 from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, ListItem, ListView, Markdown, Static, ProgressBar
+from textual.widgets import Button, Label, ListItem, ListView, Markdown, ProgressBar, Static
 
 __all__ = [
     "BranchScreen",
@@ -81,7 +81,7 @@ class BranchScreen(ModalScreen[int]):
             # U7 Fix: Use a longer preview and snap to word boundaries
             raw = scene["narrative"].replace("\n", " ")
             preview = (raw[:180].rsplit(" ", 1)[0] + "…") if len(raw) > 180 else raw
-            
+
             choice_text = self.choices[i] if i < len(self.choices) else "Current Scene"
             label_text = f"Turn {i + 1}: {preview}\n[i]Choice made: {choice_text}[/i]"
             item = SceneListItem(Label(label_text, classes="scene-preview"), scene_index=i)

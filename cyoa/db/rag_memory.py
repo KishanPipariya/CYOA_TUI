@@ -213,7 +213,7 @@ class NPCMemory:
             if self._client is None:
                 self._available = False
             return False
-            
+
     def close(self) -> None:
         """Release all ChromaDB collections. Safe to call even if never initialised."""
         try:

@@ -318,7 +318,7 @@ class ModelBroker:
         # _lock so that fire-and-forget summarization tasks don't compete
         # with (or deadlock against) the main generation path.
         self._summary_lock = asyncio.Lock()
-    
+
 
     def _create_provider_from_env(
         self, model_path: str | None = None, n_ctx: int | None = None
@@ -470,7 +470,7 @@ class ModelBroker:
                 temperature=0.3,
                 max_tokens=self._summary_max_tokens,
             )
-        # Note: We don't wrap _generate_dense_summary with self._lock because 
+        # Note: We don't wrap _generate_dense_summary with self._lock because
         # it is called from update_story_summaries_async which already holds it.
         except Exception as exc:
             logger.warning("Hierarchical summary update failed for %s: %s", level, exc)
@@ -672,7 +672,13 @@ class ModelBroker:
         Consume the streaming response and call back for narrative updates.
         """
         buffer = ""
-        last_sent_narrative_len = 0
+        
+        # O(N) Streaming parser state machine to extract the "narrative" field
+        # avoiding the O(N^2) overhead of parsing the full buffer on every token.
+        state = "SEARCH_KEY"
+        key_target = '"narrative"'
+        key_idx = 0
+        escape = False
 
         async for token in self.provider.stream_json(
             messages=messages,
@@ -680,25 +686,55 @@ class ModelBroker:
             temperature=self._temperature,
             max_tokens=self._max_tokens,
         ):
-
             buffer += token
-
-            try:
-                # We use partial_mode="trailing-strings" so jiter doesn't truncate
-                # the string we're currently receiving.
-                parsed = jiter.from_json(buffer.encode(), partial_mode="trailing-strings")
-
-                if isinstance(parsed, dict) and "narrative" in parsed:
-                    current_narrative = parsed["narrative"]
-                    if isinstance(current_narrative, str):
-                        # Only send the *new* part of the narrative to the UI.
-                        new_content = current_narrative[last_sent_narrative_len:]
-                        if new_content:
-                            on_token_chunk(new_content)
-                            last_sent_narrative_len = len(current_narrative)
-            except (ValueError, AttributeError):
-                # JSON not yet parseable at all, or "narrative" key not yet fully present.
-                continue
+            
+            chunk_to_yield = ""
+            for char in token:
+                if state == "SEARCH_KEY":
+                    if char == key_target[key_idx]:
+                        key_idx += 1
+                        if key_idx == len(key_target):
+                            state = "SEARCH_COLON"
+                    else:
+                        if char == key_target[0]:
+                            key_idx = 1
+                        else:
+                            key_idx = 0
+                
+                elif state == "SEARCH_COLON":
+                    if char == ':':
+                        state = "SEARCH_QUOTE"
+                    elif not char.isspace():
+                        # False alarm, go back to searching
+                        state = "SEARCH_KEY"
+                        key_idx = 0
+                        
+                elif state == "SEARCH_QUOTE":
+                    if char == '"':
+                        state = "IN_STRING"
+                        escape = False
+                    elif not char.isspace():
+                        state = "SEARCH_KEY"
+                        key_idx = 0
+                        
+                elif state == "IN_STRING":
+                    if escape:
+                        if char == 'n': chunk_to_yield += '\n'
+                        elif char == 'r': chunk_to_yield += '\r'
+                        elif char == 't': chunk_to_yield += '\t'
+                        elif char == '"': chunk_to_yield += '"'
+                        elif char == '\\': chunk_to_yield += '\\'
+                        else: chunk_to_yield += char
+                        escape = False
+                    elif char == '\\':
+                        escape = True
+                    elif char == '"':
+                        state = "DONE"
+                    else:
+                        chunk_to_yield += char
+                        
+            if chunk_to_yield:
+                on_token_chunk(chunk_to_yield)
 
         return buffer
 

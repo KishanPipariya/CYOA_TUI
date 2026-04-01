@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from textual.containers import Container
-from textual.widgets import Button, Label, ListView, Markdown
+from textual.widgets import Button, Label, ListView
 
 from cyoa.core.models import Choice, StoryNode
 from cyoa.ui.app import CYOAApp

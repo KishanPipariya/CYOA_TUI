@@ -1,5 +1,6 @@
 from textual.app import App
 
+
 class DummyApp(App):
     CSS_PATH = "cyoa/ui/styles.tcss"
 

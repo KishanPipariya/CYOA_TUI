@@ -3,15 +3,15 @@ import json
 import os
 from collections.abc import Callable
 from pathlib import Path
-from uuid import uuid4
 from typing import Any, ClassVar
+from uuid import uuid4
 
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
-from textual.reactive import reactive
 from textual.events import Click
+from textual.reactive import reactive
 from textual.theme import Theme
 from textual.widgets import (
     Button,
@@ -32,7 +32,7 @@ from cyoa.core.models import StoryNode
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.llm.broker import ModelBroker
 from cyoa.ui.ascii_art import SCENE_ART
-from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, ThemeSpinner, StatusDisplay
+from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, StatusDisplay, ThemeSpinner
 
 __all__ = ["CYOAApp"]
 
@@ -307,7 +307,7 @@ class CYOAApp(App):
                     starting_prompt=self.starting_prompt,
                     db=CYOAGraphDB(),
                 )
-            
+
             # 2. Check for Graceful Degradation (Graph / RAG)
             if self.engine.db and not self.engine.db.is_online:
                 self.notify(
@@ -415,7 +415,7 @@ class CYOAApp(App):
         # to prevent resource starvation on local LLMs.
         if not node.choices:
             return
-            
+
         choice = node.choices[0]
         if self.engine.speculation_cache.get_node(self.engine.current_scene_id or "", choice.text):
             return
@@ -674,7 +674,7 @@ class CYOAApp(App):
                 self._current_story = prefix + node.narrative
             else:
                 self._current_story = node.narrative
-                
+
             self._current_turn_text = node.narrative
 
         if is_error and "⚠️" not in node.narrative:
@@ -757,7 +757,7 @@ class CYOAApp(App):
         container = self.query_one("#story-container")
         choice_md = Markdown(f"**You chose:** {choice_text}", classes="player-choice")
         container.mount(choice_md, before="#scene-art")
-        
+
         new_turn = Markdown("", classes="story-turn")
         container.mount(new_turn, before="#scene-art")
         self._current_turn_widget = new_turn
@@ -787,14 +787,14 @@ class CYOAApp(App):
 
         self._current_story = LOADING_ART
         self._current_turn_text = LOADING_ART
-        
+
         container = self.query_one("#story-container")
         await container.query(Markdown).remove()
-            
+
         new_turn = Markdown(LOADING_ART, classes="story-turn", id="initial-turn")
         await container.mount(new_turn, before="#scene-art")
         self._current_turn_widget = new_turn
-        
+
         self.query_one("#scene-art", Static).update("")
         self.query_one("#scene-art", Static).add_class("hidden")
         self.query_one("#choices-container").remove_children()
@@ -862,10 +862,10 @@ class CYOAApp(App):
 
         # UI-specific restoration
         container = self.query_one("#story-container")
-        
+
         turns = list(container.query(".story-turn"))
         choices = list(container.query(".player-choice"))
-        
+
         if len(turns) > 1:
             turns[-1].remove()
             if choices:
@@ -910,13 +910,13 @@ class CYOAApp(App):
         save_path = os.path.join(constants.SAVES_DIR, f"{safe_title}_turn{self.engine.turn_count}.json")
 
         save_data = self.engine.get_save_data()
-        
+
         # UI-specific cleanup: strip transient loading indicators before persistence
         story_text = self._current_story
         suffix = "\n\n*(The ancient texts are shifting...)*"
         if story_text.endswith(suffix):
             story_text = story_text[: -len(suffix)]
-        
+
         save_data["current_story_text"] = story_text
 
         try:
@@ -975,13 +975,13 @@ class CYOAApp(App):
         container = self.query_one("#story-container")
         for md in container.query(Markdown):
             md.remove()
-        
+
         new_turn = Markdown(self._current_turn_text, classes="story-turn")
         container.mount(new_turn, before="#scene-art")
         self._current_turn_widget = new_turn
-        
+
         self._scroll_to_bottom()
-        
+
         # U8 Fix: If loaded node is empty (error case), provide a way out
         choices_container = self.query_one("#choices-container")
         choices_container.remove_children()
@@ -1075,16 +1075,16 @@ class CYOAApp(App):
 
         fracture_msg = f"\n\n***\n\n**[Time fractures... you return to Turn {idx + 1}]**"
         self._current_story += fracture_msg
-        
+
         container = self.query_one("#story-container")
         frac_md = Markdown(f"**[Time fractures... you return to Turn {idx + 1}]**", classes="player-choice")
         container.mount(frac_md, before="#scene-art")
-        
+
         new_turn = Markdown("", classes="story-turn")
         container.mount(new_turn, before="#scene-art")
         self._current_turn_widget = new_turn
         self._current_turn_text = ""
-        
+
         self._scroll_to_bottom()
 
         # 2. Journal Sync
