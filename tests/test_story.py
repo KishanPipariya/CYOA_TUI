@@ -691,7 +691,7 @@ class TestStreamingCallback:
 class TestThemeSpinner:
     def test_spinner_cycles_frames(self):
         """ThemeSpinner should update its frame index on each tick."""
-        from cyoa.ui.app import ThemeSpinner
+        from cyoa.ui.components import ThemeSpinner
 
         frames = ["[A]", "[B]", "[C]"]
         spinner = ThemeSpinner(frames=frames)
@@ -765,6 +765,7 @@ class TestBranchingLogic:
             mock_db.create_story_node_and_get_title.return_value = "Test Story"
             mock_db.get_story_tree.return_value = None
             mock_db.save_scene_async = AsyncMock(return_value="sid")
+            mock_db.verify_connectivity_async = AsyncMock(return_value=True) # Redundant but safe
 
             app = CYOAApp(model_path="dummy")
             async with app.run_test() as pilot:
@@ -839,6 +840,7 @@ class TestBranchingLogic:
             mock_db.create_story_node_and_get_title.return_value = "Test Story"
             mock_db.get_story_tree.return_value = None
             mock_db.save_scene_async = AsyncMock(return_value="sid")
+            mock_db.verify_connectivity_async = AsyncMock(return_value=True) # Redundant but safe
 
             app = CYOAApp(model_path="dummy")
             async with app.run_test() as pilot:
@@ -936,6 +938,7 @@ class TestProceduralItemSystem:
             mock_db.create_story_node_and_get_title.return_value = "Test Story"
             mock_db.get_story_tree.return_value = None
             mock_db.save_scene_async = AsyncMock(return_value="sid")
+            mock_db.verify_connectivity_async = AsyncMock(return_value=True) # Redundant but safe
 
             app = CYOAApp(model_path="dummy")
             async with app.run_test() as pilot:

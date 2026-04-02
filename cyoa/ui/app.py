@@ -1,11 +1,7 @@
 import asyncio
-import json
 import logging
-import os
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any, ClassVar
-from uuid import uuid4
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -13,13 +9,11 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.events import Click
 from textual.reactive import reactive
-from textual.theme import Theme
 from textual.widgets import (
     Button,
     Footer,
     Header,
     Label,
-    ListItem,
     ListView,
     Markdown,
     Static,
@@ -32,32 +26,30 @@ from cyoa.core.events import Events, bus
 from cyoa.core.models import StoryNode
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.llm.broker import ModelBroker
-from cyoa.ui.ascii_art import SCENE_ART
-from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, StatusDisplay, ThemeSpinner
+from cyoa.ui.components import StatusDisplay, ThemeSpinner
+from cyoa.ui.mixins import (
+    EventsMixin,
+    NavigationMixin,
+    PersistenceMixin,
+    RenderingMixin,
+    ThemeMixin,
+    TypewriterMixin,
+)
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["CYOAApp"]
 
 
-def _detect_scene_art(narrative: str) -> str | None:
-    """Return ASCII art matching keywords found in the narrative, or None."""
-    lower = narrative.lower()
-    for scene_key, keywords in constants.SCENE_KEYWORDS.items():
-        if any(kw in lower for kw in keywords):
-            return SCENE_ART.get(scene_key)
-    return None
-
-
-# Load the ASCII art for the initial screen
-try:
-    with open("loading_art.md", encoding="utf-8") as f:
-        LOADING_ART = f.read()
-except FileNotFoundError:
-    LOADING_ART = "# Welcome to the Adventure\n\n*Loading the AI model... Please wait.*"
-
-
-class CYOAApp(App):
+class CYOAApp(
+    ThemeMixin,
+    TypewriterMixin,
+    PersistenceMixin,
+    EventsMixin,
+    NavigationMixin,
+    RenderingMixin,
+    App,
+):
     """A Choose-Your-Adventure Textual App."""
 
     # Fix #8: CSS loaded from external file
@@ -91,78 +83,6 @@ class CYOAApp(App):
     typewriter_enabled: reactive[bool] = reactive(True)
     typewriter_speed: reactive[str] = reactive("normal")
 
-    _themes_cached_config: dict[str, Any] | None = None
-
-    def _load_themes_config(self) -> dict[str, Any]:
-        """Load the mood-to-theme mapping from themes.json with rudimentary caching."""
-        if self._themes_cached_config is not None:
-            return self._themes_cached_config
-
-        themes_path = Path(__file__).parent.parent.parent / "themes" / "themes.json"
-        if themes_path.exists():
-            try:
-                with open(themes_path, encoding="utf-8") as f:
-                    data = json.load(f)
-                    if isinstance(data, dict):
-                        self._themes_cached_config = data
-                        return data
-            except Exception as e:
-                logger.debug("Failed to load themes.json: %s", e)
-        return {}
-
-    def watch_mood(self, old_mood: str, new_mood: str) -> None:
-        """Update the main container class and application theme when the mood changes."""
-        try:
-            container = self.query_one("#main-container")
-            container.remove_class(f"mood-{old_mood}")
-            container.add_class(f"mood-{new_mood}")
-
-            # Look up atmospheric theme in themes.json
-            themes_config = self._load_themes_config()
-            # Try specific mood, then default, then return empty if none found
-            mood_config = themes_config.get(new_mood, themes_config.get("default", {}))
-
-            if mood_config:
-                # 1. Update Spinner frames
-                try:
-                    spinner = self.query_one("#loading", ThemeSpinner)
-                    if "spinner_frames" in mood_config:
-                        spinner.frames = mood_config["spinner_frames"]
-                        spinner._frame_idx = 0
-                except Exception as e:
-                    logger.debug("Failed to update spinner frames for mood %s: %s", new_mood, e)
-
-                # 2. Update App Theme (accent color)
-                accent = mood_config.get("accent_color")
-                if accent:
-                    from textual.theme import BUILTIN_THEMES
-
-                    base_theme_name = "textual-dark" if self.dark else "textual-light"
-                    base_theme = BUILTIN_THEMES.get(base_theme_name)
-                    if base_theme:
-                        theme_name = f"mood-{new_mood}"
-                        # Re-register theme with new accent
-                        self.register_theme(
-                            Theme(
-                                name=theme_name,
-                                primary=base_theme.primary,
-                                secondary=base_theme.secondary,
-                                warning=base_theme.warning,
-                                error=base_theme.error,
-                                success=base_theme.success,
-                                accent=accent,
-                                foreground=base_theme.foreground,
-                                background=base_theme.background,
-                                surface=base_theme.surface,
-                                panel=base_theme.panel,
-                                boost=base_theme.boost,
-                                dark=base_theme.dark,
-                            )
-                        )
-                        self.theme = theme_name
-        except Exception as e:
-            logger.debug("Mood watch update failed from %s to %s: %s", old_mood, new_mood, e)
-
     def __init__(
         self,
         model_path: str,
@@ -179,21 +99,15 @@ class CYOAApp(App):
 
         self.generator: ModelBroker | None = None
         self.engine: StoryEngine | None = None
-        self._current_story: str = LOADING_ART
-        self._current_turn_text: str = LOADING_ART
+        self._current_story: str = constants.LOADING_ART
+        self._current_turn_text: str = constants.LOADING_ART
         self._loading_suffix_shown: bool = False
         self._unsubscribers: list[Callable[[], None]] = []
 
         # Typewriter Narrator state
-
-        # Typewriter Narrator state
         self._typewriter_queue: asyncio.Queue[str] = asyncio.Queue()
-        self._typewriter_target: str = ""  # The full text we WANT to display
         self._typewriter_active_chunk: list[str] = []
         self._is_typing: bool = False
-
-        # Undo: snapshot of previous turn state
-        self._undo_snapshot: dict[str, Any] | None = None
 
         # Restore preferences
         config = utils.load_config()
@@ -203,37 +117,14 @@ class CYOAApp(App):
 
         # Apply theme accent color if specified
         if self._accent_color:
-            from textual.theme import BUILTIN_THEMES
-
-            base_theme_name = "textual-dark" if self.dark else "textual-light"
-            base_theme = BUILTIN_THEMES.get(base_theme_name)
-            if base_theme:
-                # Theme requires at least `primary` to be specified
-                self.register_theme(
-                    Theme(
-                        name="cyoa-custom",
-                        primary=base_theme.primary,
-                        secondary=base_theme.secondary,
-                        warning=base_theme.warning,
-                        error=base_theme.error,
-                        success=base_theme.success,
-                        accent=self._accent_color,
-                        foreground=base_theme.foreground,
-                        background=base_theme.background,
-                        surface=base_theme.surface,
-                        panel=base_theme.panel,
-                        boost=base_theme.boost,
-                        dark=base_theme.dark,
-                    )
-                )
-                self.theme = "cyoa-custom"
+            self._apply_custom_accent(self._accent_color)
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal():
             with Container(id="main-container"):
                 with VerticalScroll(id="story-container"):
-                    yield Markdown(LOADING_ART, classes="story-turn", id="initial-turn")
+                    yield Markdown(constants.LOADING_ART, classes="story-turn", id="initial-turn")
                     yield Static("", id="scene-art")
                 # Dedicated status bar between story and choices
                 with Container(id="status-bar"):
@@ -341,63 +232,8 @@ class CYOAApp(App):
             raise
 
     # ------------------------------------------------------------------
-    # Event Handlers
+    # Speculation
     # ------------------------------------------------------------------
-
-    def _handle_engine_started(self) -> None:
-        self.turn_count = 1
-        self.mood = "default"
-        self.query_one("#journal-list", ListView).clear()
-
-    def _handle_engine_restarted(self) -> None:
-        self.notify("Adventure Reset.", severity="information", timeout=2)
-
-    def _handle_choice_made(self, choice_text: str) -> None:
-        self.action_skip_typewriter()
-        # We don't append to _current_story here because it's handled in `_trigger_choice` for instant feedback
-        # or maybe we should let the engine handle it?
-        # For now, let's keep the UI responsive logic in `_trigger_choice`.
-        pass
-
-    def _handle_node_generating(self) -> None:
-        self.show_loading()
-
-    def _handle_token_streamed(self, token: str) -> None:
-        self._stream_narrative(token)
-
-    def _handle_node_completed(self, node: StoryNode) -> None:
-        if self.engine:
-            self.turn_count = self.engine.turn_count
-        self.display_node(node)
-        self.update_story_map()
-
-    def _handle_stats_updated(self, stats: dict[str, int]) -> None:
-        try:
-            status = self.query_one(StatusDisplay)
-            status.health = stats.get("health", 100)
-            status.gold = stats.get("gold", 0)
-            status.reputation = stats.get("reputation", 0)
-        except Exception as e:
-            logger.debug("Failed to update status display stats: %s", e)
-
-    def _handle_inventory_updated(self, inventory: list[str]) -> None:
-        try:
-            self.query_one(StatusDisplay).inventory = list(inventory)
-        except Exception as e:
-            logger.debug("Failed to update status display inventory: %s", e)
-
-    def _handle_title_generated(self, title: str) -> None:
-        self.notify(f"New Chapter: {title}", severity="information", timeout=5)
-
-    def _handle_ending_reached(self, node: StoryNode) -> None:
-        self.notify("The Story Ends.", severity="success", timeout=10)
-
-    def _handle_error(self, error: str) -> None:
-        self.notify(f"Error: {error}", severity="error", timeout=5)
-        self.query_one("#loading").add_class("hidden")
-
-    def _handle_status_message(self, message: str) -> None:
-        self.notify(message, severity="information", timeout=4)
 
     @work(group="speculation", exclusive=True)
     async def speculate_all_choices(self, node: StoryNode) -> None:
@@ -449,90 +285,6 @@ class CYOAApp(App):
         except Exception as e:
             logger.debug("Speculative generation failed: %s", e)
 
-    @work(group="typewriter", exclusive=True)
-    async def _typewriter_worker(self) -> None:
-        """Background worker that smoothly reveals narrative text from the queue."""
-        last_refresh = 0.0
-        # Throttle Markdown re-renders to ~30fps max to avoid UI lag on long stories
-        REFRESH_LIMIT = 0.033
-
-        while True:
-            # wait for text chunks
-            chunk = await self._typewriter_queue.get()
-            self._is_typing = True
-            self._typewriter_active_chunk = list(chunk)
-
-            while self._typewriter_active_chunk:
-                self._handle_typewriter_batch()
-
-                # Throttled UI update
-                now = asyncio.get_event_loop().time()
-                if now - last_refresh >= REFRESH_LIMIT or not self._typewriter_active_chunk:
-                    if hasattr(self, "_current_turn_widget"):
-                        self._current_turn_widget.update(self._current_turn_text)
-                    if self._is_at_bottom():
-                        self._scroll_to_bottom(animate=False)
-                    last_refresh = now
-
-                if self._typewriter_active_chunk:
-                    delay = constants.TYPEWRITER_SPEEDS.get(self.typewriter_speed, 0.02)
-                    if delay > 0:
-                        await asyncio.sleep(delay)
-
-            if self._typewriter_queue.empty():
-                self._is_typing = False
-
-    def _handle_typewriter_batch(self) -> None:
-        """Process a batch of characters from the active chunk, handling catchup."""
-        q_size = self._typewriter_queue.qsize()
-        batch_size = 1
-        if q_size > constants.TYPEWRITER_CATCHUP_THRESHOLD:
-            # Extreme catchup: grab everything and exit loops
-            to_add = "".join(self._typewriter_active_chunk)
-            self._current_story += to_add
-            self._current_turn_text += to_add
-            self._typewriter_active_chunk.clear()
-            while not self._typewriter_queue.empty():
-                to_add = self._typewriter_queue.get_nowait()
-                self._current_story += to_add
-                self._current_turn_text += to_add
-        elif q_size > 10:
-            batch_size = constants.TYPEWRITER_MAX_BATCH
-
-        if self._typewriter_active_chunk:
-            to_add = "".join(self._typewriter_active_chunk[:batch_size])
-            self._typewriter_active_chunk = self._typewriter_active_chunk[batch_size:]
-            self._current_story += to_add
-            self._current_turn_text += to_add
-
-    def action_skip_typewriter(self) -> None:
-        """Instantly reveal all pending text in the typewriter queue."""
-        if not self._is_typing and self._typewriter_queue.empty():
-            return
-
-        # Flush active chunk
-        if self._typewriter_active_chunk:
-            to_add = "".join(self._typewriter_active_chunk)
-            self._current_story += to_add
-            self._current_turn_text += to_add
-            self._typewriter_active_chunk.clear()
-
-        # Flush queue
-        while not self._typewriter_queue.empty():
-            try:
-                to_add = self._typewriter_queue.get_nowait()
-                self._current_story += to_add
-                self._current_turn_text += to_add
-            except asyncio.QueueEmpty:
-                break
-        self._is_typing = False
-        try:
-            if hasattr(self, "_current_turn_widget"):
-                self._current_turn_widget.update(self._current_turn_text)
-            self._scroll_to_bottom()
-        except Exception as e:
-            logger.debug("Failed to update UI after skipping typewriter: %s", e)
-
     def on_click(self, event: Click) -> None:
         """Typewriter skip shortcut on clicking the story area."""
         try:
@@ -543,516 +295,16 @@ class CYOAApp(App):
         except (Exception, KeyError) as e:
             logger.debug("Click handler failed: %s", e)
 
-    def action_toggle_typewriter(self) -> None:
-        """Toggle character-by-character animation and persist choice."""
-        self.typewriter_enabled = not self.typewriter_enabled
-        status = "Enabled" if self.typewriter_enabled else "Disabled"
-        self.notify(f"Typewriter Narrator: {status}")
-
-        # If disabling mid-animation, finish instantly
-        if not self.typewriter_enabled:
-            self.action_skip_typewriter()
-
-        # A6 Fix: Preserve other config keys
-        config = utils.load_config()
-        config["typewriter"] = self.typewriter_enabled
-        utils.save_config(config)
-
-    def action_cycle_typewriter_speed(self) -> None:
-        """Cycle through narrator speeds (slow, normal, fast, instant)."""
-        speeds = list(constants.TYPEWRITER_SPEEDS.keys())
-        current_idx = speeds.index(self.typewriter_speed)
-        new_speed = speeds[(current_idx + 1) % len(speeds)]
-        self.typewriter_speed = new_speed
-        self.notify(f"Typewriter Speed: {new_speed.capitalize()}")
-
-        config = utils.load_config()
-        config["typewriter_speed"] = self.typewriter_speed
-        utils.save_config(config)
-
-    def _stream_narrative(self, partial: str) -> None:
-        """
-        Streaming callback: feeds the typewriter queue or updates UI immediately.
-        """
-        if self._loading_suffix_shown:
-            # First token batch arrived — strip the loading placeholder
-            suffix = "\n\n*(The ancient texts are shifting...)*"
-            if self._current_story.endswith(suffix):
-                self._current_story = self._current_story[: -len(suffix)]
-            if self._current_turn_text.endswith(suffix):
-                self._current_turn_text = self._current_turn_text[: -len(suffix)]
-            self._loading_suffix_shown = False
-            self.query_one("#loading").add_class("hidden")
-
-            if self._current_story == LOADING_ART:
-                self._current_story = ""
-                self._current_turn_text = ""
-
-        if not self.typewriter_enabled:
-            self._current_story += partial
-            self._current_turn_text += partial
-            if hasattr(self, "_current_turn_widget"):
-                self._current_turn_widget.update(self._current_turn_text)
-            if self._is_at_bottom():
-                self._scroll_to_bottom(animate=False)
-        else:
-            self._typewriter_queue.put_nowait(partial)
-
-    def show_loading(self, selected_label: str | None = None) -> None:
-        """Clear choice buttons, show spinner, append 'shifting' text.
-
-        If selected_label is given, all other buttons are removed and the
-        selected one is kept visible but disabled so the player sees which
-        choice was picked.
-        """
-        choices_container = self.query_one("#choices-container")
-        if selected_label is not None:
-            # Keep only the selected button, disable and dim it
-            for btn in list(choices_container.query(Button)):
-                if str(btn.label) != selected_label:
-                    btn.remove()
-                else:
-                    btn.disabled = True
-                    btn.variant = "default"
-        else:
-            choices_container.remove_children()
-        self.query_one("#loading").remove_class("hidden")
-
-        if not self._loading_suffix_shown:
-            # Perf #2: append suffix and set flag — avoids str.replace later
-            suffix = "\n\n*(The ancient texts are shifting...)*"
-            self._current_story += suffix
-            self._current_turn_text += suffix
-            self._loading_suffix_shown = True
-            if hasattr(self, "_current_turn_widget"):
-                self._current_turn_widget.update(self._current_turn_text)
-            # Force scroll on new turn so player sees their choice immediately
-            self._scroll_to_bottom()
-
-
-    def _is_at_bottom(self) -> bool:
-        """Return True if the story container is near its bottom edge.
-
-        This allows 'smart' scrolling: following the narrative only if the user
-        was already at the bottom of the story.
-        """
-        try:
-            container = self.query_one("#story-container")
-            # A more lenient threshold (8.0) accounts for layout offsets,
-            # varied line heights, and padding, making the scroll more "sticky".
-            return container.scroll_y >= container.max_scroll_y - 8
-        except Exception as e:
-            logger.debug("Failed to check if at bottom: %s", e)
-            return True
-
-    def _scroll_to_bottom(self, animate: bool = True) -> None:
-        """Scroll the story container to the end after the next refresh."""
-        try:
-            container = self.query_one("#story-container")
-            self.call_after_refresh(lambda: container.scroll_end(animate=animate))
-        except Exception as e:
-            logger.debug("Failed to scroll to bottom: %s", e)
-
-    def display_node(self, node: StoryNode) -> None:
-        """Render a newly generated StoryNode to the UI (after streaming completes)."""
-        self.query_one("#loading").add_class("hidden")
-        self.mood = getattr(node, "mood", "default")
-
-        is_error = node.narrative.startswith(constants.ERROR_NARRATIVE_PREFIX)
-
-        # Detect and update the separate ASCII art widget
-        art = _detect_scene_art(node.narrative) if not is_error else None
-        art_widget = self.query_one("#scene-art", Static)
-        if art:
-            art_widget.update(art)
-            art_widget.remove_class("hidden")
-        else:
-            art_widget.update("")
-            art_widget.add_class("hidden")
-
-        # Fallback/Cache hit: nothing happened in _stream_narrative
-        if self._loading_suffix_shown:
-            self._loading_suffix_shown = False
-            suffix = "\n\n*(The ancient texts are shifting...)*"
-            if self._current_story.endswith(suffix):
-                self._current_story = self._current_story[: -len(suffix)]
-            if self._current_turn_text.endswith(suffix):
-                self._current_turn_text = self._current_turn_text[: -len(suffix)]
-
-            if self._current_story == LOADING_ART:
-                self._current_story = ""
-                self._current_turn_text = ""
-
-            if not self.typewriter_enabled:
-                self._current_story += node.narrative
-                self._current_turn_text += node.narrative
-            else:
-                self._typewriter_queue.put_nowait(node.narrative)
-        else:
-            # Streaming happened. Sync to the finalized narrative.
-            self.action_skip_typewriter()
-
-            last_sep = self._current_story.rfind("\n\n---\n\n")
-            if last_sep != -1:
-                prefix = self._current_story[: last_sep + len("\n\n---\n\n")]
-                self._current_story = prefix + node.narrative
-            else:
-                self._current_story = node.narrative
-
-            self._current_turn_text = node.narrative
-
-        if is_error and "⚠️" not in node.narrative:
-            error_msg = "\n\n> ⚠️ **An error occurred.** The story engine could not generate a valid response."
-            self._current_story += error_msg
-            self._current_turn_text += error_msg
-
-        try:
-            if hasattr(self, "_current_turn_widget"):
-                self._current_turn_widget.update(self._current_turn_text)
-        except Exception as e:
-            logger.debug("Failed to update current turn widget: %s", e)
-
-        # memory.add() moved to worker thread (generate_next_step)
-        # so chromadb embedding does not block the UI event loop here.
-
-        # Update UI stats from engine state
-        if self.engine:
-            try:
-                status = self.query_one(StatusDisplay)
-                status.health = self.engine.player_stats.get("health", 100)
-                status.gold = self.engine.player_stats.get("gold", 0)
-                status.reputation = self.engine.player_stats.get("reputation", 0)
-                status.inventory = list(self.engine.inventory)
-            except Exception as e:
-                logger.debug("Failed to update status display from engine: %s", e)
-
-        choices_container = self.query_one("#choices-container", Container)
-        # Clear any leftover stale buttons (e.g. the disabled selected-choice button)
-        choices_container.remove_children()
-        self._mount_choice_buttons(node, choices_container, is_error)
-
-        # Trigger background speculation for the current node's choices
-        self.speculate_all_choices(node)
-
-        # Ensure the view is at the bottom after narrative and choices are fully rendered
-        self._scroll_to_bottom()
-
-    def _mount_choice_buttons(
-        self, node: StoryNode, choices_container: Container, is_error: bool
-    ) -> None:
-        """Mount choice buttons based on the node state."""
-        # Error UX: show a Retry button alongside the fallback choice
-        if is_error:
-            choices_container.mount(
-                Button("🔄 Retry Generation", id="btn-retry", variant="warning")
-            )
-            for i, choice in enumerate(node.choices):
-                # Unique ID per mount to avoid collisions if previous buttons haven't fully unmounted
-                btn_id = f"choice-t{self.turn_count}-{uuid4().hex[:6]}-{i}"
-                btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="default")
-                choices_container.mount(btn)
-        elif node.is_ending:
-            end_btn = Button("✦ Start a New Adventure", id="btn-new-adventure", variant="success")
-            choices_container.mount(end_btn)
-        else:
-            for i, choice in enumerate(node.choices):
-                # Unique ID per mount to avoid collisions if previous buttons haven't fully unmounted
-                btn_id = f"choice-t{self.turn_count}-{uuid4().hex[:6]}-{i}"
-                btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="primary")
-                choices_container.mount(btn)
-
-    async def _trigger_choice(self, choice_idx: int) -> None:
-        """Handle choice selection and delegate to the engine."""
-        if (
-            not self.engine
-            or not self.engine.current_node
-            or choice_idx >= len(self.engine.current_node.choices)
-        ):
-            return
-
-        choice = self.engine.current_node.choices[choice_idx]
-        choice_text = choice.text
-
-        # 1. Instant UI feedback
-        self.action_skip_typewriter()
-        self._current_story += f"\n\n> **You chose:** {choice_text}"
-        self._current_story += "\n\n---\n\n"
-
-        container = self.query_one("#story-container")
-        choice_md = Markdown(f"**You chose:** {choice_text}", classes="player-choice")
-        container.mount(choice_md, before="#scene-art")
-
-        new_turn = Markdown("", classes="story-turn")
-        container.mount(new_turn, before="#scene-art")
-        self._current_turn_widget = new_turn
-        self._current_turn_text = ""
-
-        selected_label = f"[{choice_idx + 1}] {choice_text}"
-        self.show_loading(selected_label=selected_label)
-
-        # 2. Journal update
-        journal_list = self.query_one("#journal-list", ListView)
-        narrative_preview = self.engine.current_node.narrative[:60].replace("\n", " ").strip()
-        if len(self.engine.current_node.narrative) > 60:
-            narrative_preview += "…"
-        journal_entry = f"Turn {self.engine.turn_count}: {choice_text} → {narrative_preview}"
-        journal_list.append(ListItem(Label(journal_entry)))
-        # U2 Fix: Scroll after refresh to ensure layout size is updated
-        self.call_after_refresh(lambda: journal_list.scroll_end(animate=False))
-
-        # 3. Cancel speculations and let the engine handle the rest
-        self.workers.cancel_group(self, "speculation")
-        await self.engine.make_choice(choice_text)
-
-    async def action_restart(self) -> None:
-        """Reset story state via the engine."""
-        if not self.engine:
-            return
-
-        self._current_story = LOADING_ART
-        self._current_turn_text = LOADING_ART
-
-        container = self.query_one("#story-container")
-        await container.query(Markdown).remove()
-
-        new_turn = Markdown(LOADING_ART, classes="story-turn", id="initial-turn")
-        await container.mount(new_turn, before="#scene-art")
-        self._current_turn_widget = new_turn
-
-        self.query_one("#scene-art", Static).update("")
-        self.query_one("#scene-art", Static).add_class("hidden")
-        self.query_one("#choices-container").remove_children()
-        self.query_one("#journal-list", ListView).clear()
-
-        try:
-            status = self.query_one(StatusDisplay)
-            status.health = 100
-            status.gold = 0
-            status.reputation = 0
-            status.inventory = []
-        except Exception as e:
-            logger.debug("Failed to reset status display during restart: %s", e)
-        await self.engine.restart()
-
-    # UX: Confirmation before restart
-    def action_request_restart(self) -> None:
-        """Show a confirmation dialog before restarting the adventure."""
-
-        def on_confirm(confirmed: bool | None) -> None:
-            if confirmed:
-                self.run_worker(self.action_restart(), exclusive=True)
-
-        self.push_screen(
-            ConfirmScreen("[b]Restart the adventure?[/b]\n\nAll progress will be lost."),
-            on_confirm,
-        )
-
-    # UX: Confirmation before quit
-    def action_request_quit(self) -> None:
-        """Show a confirmation dialog before quitting."""
-
-        def on_confirm(confirmed: bool | None) -> None:
-            if confirmed:
-                self.exit()
-
-        self.push_screen(
-            ConfirmScreen("[b]Quit the game?[/b]\n\nUnsaved progress will be lost."),
-            on_confirm,
-        )
-
-    # UX: Help screen
-    def action_show_help(self) -> None:
-        """Show the help screen with keybindings and game mechanics."""
-        self.push_screen(HelpScreen())
-
-    def action_undo(self) -> None:
-        """Restore the game state to before the last choice was made."""
-        if not self.engine:
-            return
-
-        # U4 Fix: Flush typewriter BEFORE DOM manipulation
-        self.action_skip_typewriter()
-
-        # Engine handles core state restoration
-        if not self.engine.undo():
-            self.notify("Nothing to undo.", severity="warning", timeout=2)
-            return
-
-        # Find the last separator and truncate back to it.
-        sep = "\n\n> **You chose:**"
-        last_choice_pos = self._current_story.rfind(sep)
-        if last_choice_pos != -1:
-            self._current_story = self._current_story[:last_choice_pos]
-
-        # UI-specific restoration
-        container = self.query_one("#story-container")
-
-        turns = list(container.query(".story-turn"))
-        choices = list(container.query(".player-choice"))
-
-        if len(turns) > 1:
-            turns[-1].remove()
-            if choices:
-                choices[-1].remove()
-            self._current_turn_widget = turns[-2]
-            self._current_turn_text = self.engine.current_node.narrative if self.engine.current_node else ""
-        else:
-            self._current_turn_text = self._current_story
-            if hasattr(self, "_current_turn_widget"):
-                self._current_turn_widget.update(self._current_turn_text)
-
-        # U5 Fix: Re-mount choice buttons for the restored node
-        choices_container = self.query_one("#choices-container", Container)
-        choices_container.remove_children()
-        if self.engine.current_node:
-            self._mount_choice_buttons(self.engine.current_node, choices_container, is_error=False)
-
-        self.query_one("#loading").add_class("hidden")
-        self._scroll_to_bottom()
-
-        # Remove the last journal entry
-        journal_list = self.query_one("#journal-list", ListView)
-        children = list(journal_list.children)
-        if children:
-            children[-1].remove()
-
-        # U6 Fix: Update story map to reflect old position
-        self.update_story_map()
-
-        self.notify("↩ Undid last choice.", severity="information", timeout=2)
-
-    def action_save_game(self) -> None:
-        """Serialize the current game state to a JSON save file."""
-        if not self.engine or not self.engine.story_title or not self.engine.current_node:
-            self.notify("Nothing to save yet.", severity="warning", timeout=2)
-            return
-
-        os.makedirs(constants.SAVES_DIR, exist_ok=True)
-        safe_title = "".join(
-            c if c.isalnum() or c in " _-" else "_" for c in self.engine.story_title
-        )
-        save_path = os.path.join(constants.SAVES_DIR, f"{safe_title}_turn{self.engine.turn_count}.json")
-
-        save_data = self.engine.get_save_data()
-
-        # UI-specific cleanup: strip transient loading indicators before persistence
-        story_text = self._current_story
-        suffix = "\n\n*(The ancient texts are shifting...)*"
-        if story_text.endswith(suffix):
-            story_text = story_text[: -len(suffix)]
-
-        save_data["current_story_text"] = story_text
-
-        try:
-            with open(save_path, "w", encoding="utf-8") as f:
-                json.dump(save_data, f, indent=2, ensure_ascii=False)
-            self.notify(f"💾 Game saved to {save_path}", severity="information", timeout=3)
-        except OSError as e:
-            self.notify(f"Save failed: {e}", severity="error", timeout=3)
-
-    # UX: Load game from JSON
-    def action_load_game(self) -> None:
-        """Show available save files and load a selected one."""
-        if not os.path.isdir(constants.SAVES_DIR):
-            self.notify("No saves found.", severity="warning", timeout=2)
-            return
-
-        save_files = sorted(
-            [f for f in os.listdir(constants.SAVES_DIR) if f.endswith(".json")],
-            key=lambda f: os.path.getmtime(os.path.join(constants.SAVES_DIR, f)),
-            reverse=True,
-        )
-        if not save_files:
-            self.notify("No saves found.", severity="warning", timeout=2)
-            return
-
-        from cyoa.ui.components import LoadGameScreen
-
-        def on_selected(save_file: str | None) -> None:
-            if save_file:
-                self._restore_from_save(os.path.join(constants.SAVES_DIR, save_file))
-
-        self.push_screen(LoadGameScreen(save_files), on_selected)
-
-    def _restore_from_save(self, save_path: str) -> None:
-        """Load game state via the engine."""
-        try:
-            with open(save_path, encoding="utf-8") as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
-            self.notify(f"Load failed: {e}", severity="error", timeout=3)
-            return
-
-        if not self.engine:
-            return
-
-        # A8 Fix: Cancel any background workers before hydrating new state
-        self.workers.cancel_all()
-
-        self._current_story = data.get("current_story_text", LOADING_ART)
-        self._current_turn_text = self._current_story
-        self._loading_suffix_shown = False
-
-        self.engine.load_save_data(data)
-
-        # Sync UI
-        container = self.query_one("#story-container")
-        for md in container.query(Markdown):
-            md.remove()
-
-        new_turn = Markdown(self._current_turn_text, classes="story-turn")
-        container.mount(new_turn, before="#scene-art")
-        self._current_turn_widget = new_turn
-
-        self._scroll_to_bottom()
-
-        # U8 Fix: If loaded node is empty (error case), provide a way out
-        choices_container = self.query_one("#choices-container")
-        choices_container.remove_children()
-        if self.engine.current_node:
-            self._mount_choice_buttons(self.engine.current_node, choices_container, False)
-        else:
-            choices_container.mount(Button("✦ Start a New Adventure", id="btn-new-adventure", variant="success"))
-
-        self.query_one("#journal-list", ListView).clear()
-
-        self.notify(
-            f"📂 Loaded save from Turn {self.engine.turn_count}.",
-            severity="information",
-            timeout=3,
-        )
-
-    # Persist dark mode preference when toggled
-    def action_toggle_dark(self) -> None:
-        self.dark = not self.dark
-        # A6 Fix: Preserve other config keys
-        config = utils.load_config()
-        config["dark"] = self.dark
-        utils.save_config(config)
-
-    def action_toggle_journal(self) -> None:
-        """Slide the journal panel in/out."""
-        panel = self.query_one("#journal-panel", Container)
-        panel.toggle_class("panel-collapsed")
-        # Ensure scroll to end if opening
-        if not panel.has_class("panel-collapsed"):
-            self.query_one("#journal-list", ListView).scroll_end(animate=False)
-
-    def action_toggle_story_map(self) -> None:
-        """Toggle the visibility of the story map panel."""
-        panel = self.query_one("#story-map-panel")
-        panel.toggle_class("panel-collapsed")
-
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-new-adventure":
-            await self.action_restart()
+            self.action_restart()
             return
 
         if event.button.id == "btn-retry":
             self.show_loading()
             if self.engine:
                 # A5 Fix: Call public engine.retry() instead of private _generate_next()
-                await self.engine.retry()
+                self.engine.retry()
             return
 
         button_id = event.button.id
@@ -1071,102 +323,3 @@ class CYOAApp(App):
             if btn.id and btn.id.startswith(prefix) and btn.id.endswith(f"-{idx}"):
                 await self._trigger_choice(idx)
                 return
-
-    @work(exclusive=True)
-    async def action_branch_past(self) -> None:
-        if not self.engine or not self.engine.db or not self.engine.current_scene_id:
-            return
-
-        history = await asyncio.to_thread(self.engine.db.get_scene_history_path, self.engine.current_scene_id)
-        if not history or not history.get("scenes"):
-            return
-
-        def check_branch(idx: int | None) -> None:
-            if idx is not None:
-                self.restore_to_scene(idx, history)
-
-        self.push_screen(BranchScreen(history["scenes"], history["choices"]), check_branch)
-
-    @work(exclusive=True)
-    async def restore_to_scene(self, idx: int, history: dict[str, Any]) -> None:
-        """Hand off restoration to the engine and update UI state."""
-        if not self.engine:
-            return
-
-        # 1. UI Preparation
-        self.query_one("#choices-container").remove_children()
-        self.query_one("#loading").remove_class("hidden")
-
-        fracture_msg = f"\n\n***\n\n**[Time fractures... you return to Turn {idx + 1}]**"
-        self._current_story += fracture_msg
-
-        container = self.query_one("#story-container")
-        frac_md = Markdown(f"**[Time fractures... you return to Turn {idx + 1}]**", classes="player-choice")
-        container.mount(frac_md, before="#scene-art")
-
-        new_turn = Markdown("", classes="story-turn")
-        container.mount(new_turn, before="#scene-art")
-        self._current_turn_widget = new_turn
-        self._current_turn_text = ""
-
-        self._scroll_to_bottom()
-
-        # 2. Journal Sync
-        journal_list = self.query_one("#journal-list", ListView)
-        journal_list.clear()
-        for i in range(idx):
-            journal_list.append(ListItem(Label(f"Turn {i + 1}: {history['choices'][i]}")))
-        journal_list.scroll_end(animate=False)
-
-        # 3. Hand off the core logic to the engine
-        # Engine events (STATS_UPDATED, INVENTORY_UPDATED, NODE_COMPLETED) will refresh the UI
-        await self.engine.branch_to_scene(idx, history)
-
-    @work(exclusive=True)
-    async def update_story_map(self) -> None:
-        if not self.engine or not self.engine.db or not self.engine.story_title:
-            return
-
-        tree_data = await asyncio.to_thread(self.engine.db.get_story_tree, self.engine.story_title)
-        if not tree_data:
-            return
-
-        try:
-            tree = self.query_one("#story-map-tree", Tree)
-        except Exception as e:  # noqa: BLE001
-            logger.debug("Story map tree widget not found: %s", e)
-            return
-        tree.clear()
-
-        nodes = tree_data.get("nodes", {})
-        edges = tree_data.get("edges", {})
-        root_id = tree_data.get("root_id")
-
-        if not root_id:
-            return
-
-        def add_children(parent_node: Any, scene_id: str) -> None:
-            scene = nodes[scene_id]
-            preview = scene["narrative"][:25].replace("\\n", " ").strip() + "..."
-            if scene_id == self.engine.current_scene_id:
-                label = f"[b][green]> {preview}[/green][/b]"
-            else:
-                label = preview
-
-            tree_node = parent_node.add(label, expand=True)
-
-            for edge in edges.get(scene_id, []):
-                choice_text = edge["choice"]
-                choice_preview = (
-                    choice_text[: constants.MAX_CHOICE_PREVIEW_LEN] + "..."
-                    if len(choice_text) > constants.MAX_CHOICE_PREVIEW_LEN
-                    else choice_text
-                )
-                choice_label = f"[dim][i]- {choice_preview}[/i][/dim]"
-                choice_node = tree_node.add(choice_label, expand=True)
-                add_children(choice_node, edge["target_id"])
-
-        tree.root.label = "Story Nodes"
-        tree.root.expand()
-        if root_id in nodes:
-            add_children(tree.root, root_id)

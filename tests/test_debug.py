@@ -17,12 +17,19 @@ async def test_debug_stats():
     mock_gen.generate_next_node_async = AsyncMock(return_value=StoryNode(narrative="Test", choices=[], is_ending=True))
     mock_gen.save_state_async = AsyncMock(return_value=None)
 
-    with patch("cyoa.ui.app.ModelBroker", return_value=mock_gen), patch("cyoa.ui.app.CYOAGraphDB"):
+    with patch("cyoa.ui.app.ModelBroker", return_value=mock_gen), patch("cyoa.ui.app.CYOAGraphDB") as mock_db_cls:
+        mock_db = mock_db_cls.return_value
+        mock_db.verify_connectivity_async = AsyncMock(return_value=True)
+        mock_db.create_story_node_and_get_title.return_value = "Test Story"
+        mock_db.get_story_tree.return_value = None
+        mock_db.save_scene_async = AsyncMock(return_value="sid")
+        
         app = CYOAApp(model_path="dummy")
         async with app.run_test() as pilot:
             await pilot.pause(0.5)
             if app.engine:
-                app.health = 0
+                from cyoa.ui.components import StatusDisplay
+                app.query_one(StatusDisplay).health = 0
             await pilot.pause(0.1)
             label = app.query_one("#stats-text")
             print(f"\nDEBUG: RAW RENDER: {repr(label.render())}")

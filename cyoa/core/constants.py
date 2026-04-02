@@ -26,6 +26,13 @@ SCENE_KEYWORDS: dict[str, list[str]] = {
 
 # --- UI & Rendering ---
 
+# Load the ASCII art for the initial screen
+try:
+    with open("loading_art.md", encoding="utf-8") as f:
+        LOADING_ART = f.read()
+except FileNotFoundError:
+    LOADING_ART = "# Welcome to the Adventure\n\n*Loading the AI model... Please wait.*"
+
 STREAM_RENDER_THROTTLE_BASE = 8
 STREAM_RENDER_THROTTLE_MAX = 48
 MAX_CHOICE_PREVIEW_LEN = 15
