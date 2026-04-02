@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -33,6 +34,8 @@ from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.llm.broker import ModelBroker
 from cyoa.ui.ascii_art import SCENE_ART
 from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, StatusDisplay, ThemeSpinner
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["CYOAApp"]
 
@@ -103,8 +106,8 @@ class CYOAApp(App):
                     if isinstance(data, dict):
                         self._themes_cached_config = data
                         return data
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to load themes.json: %s", e)
         return {}
 
     def watch_mood(self, old_mood: str, new_mood: str) -> None:
@@ -126,8 +129,8 @@ class CYOAApp(App):
                     if "spinner_frames" in mood_config:
                         spinner.frames = mood_config["spinner_frames"]
                         spinner._frame_idx = 0
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to update spinner frames for mood %s: %s", new_mood, e)
 
                 # 2. Update App Theme (accent color)
                 accent = mood_config.get("accent_color")
@@ -157,8 +160,8 @@ class CYOAApp(App):
                             )
                         )
                         self.theme = theme_name
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Mood watch update failed from %s to %s: %s", old_mood, new_mood, e)
 
     def __init__(
         self,
@@ -374,14 +377,14 @@ class CYOAApp(App):
             status.health = stats.get("health", 100)
             status.gold = stats.get("gold", 0)
             status.reputation = stats.get("reputation", 0)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to update status display stats: %s", e)
 
     def _handle_inventory_updated(self, inventory: list[str]) -> None:
         try:
             self.query_one(StatusDisplay).inventory = list(inventory)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to update status display inventory: %s", e)
 
     def _handle_title_generated(self, title: str) -> None:
         self.notify(f"New Chapter: {title}", severity="information", timeout=5)
@@ -443,8 +446,8 @@ class CYOAApp(App):
                 choice.text,
                 spec_node
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Speculative generation failed: %s", e)
 
     @work(group="typewriter", exclusive=True)
     async def _typewriter_worker(self) -> None:
@@ -527,8 +530,8 @@ class CYOAApp(App):
             if hasattr(self, "_current_turn_widget"):
                 self._current_turn_widget.update(self._current_turn_text)
             self._scroll_to_bottom()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to update UI after skipping typewriter: %s", e)
 
     def on_click(self, event: Click) -> None:
         """Typewriter skip shortcut on clicking the story area."""
@@ -537,8 +540,8 @@ class CYOAApp(App):
             story = self.query_one("#story-container")
             if story.is_ancestor_of(event.control):
                 self.action_skip_typewriter()
-        except (Exception, KeyError):
-            pass
+        except (Exception, KeyError) as e:
+            logger.debug("Click handler failed: %s", e)
 
     def action_toggle_typewriter(self) -> None:
         """Toggle character-by-character animation and persist choice."""
@@ -638,7 +641,8 @@ class CYOAApp(App):
             # A more lenient threshold (8.0) accounts for layout offsets,
             # varied line heights, and padding, making the scroll more "sticky".
             return container.scroll_y >= container.max_scroll_y - 8
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to check if at bottom: %s", e)
             return True
 
     def _scroll_to_bottom(self, animate: bool = True) -> None:
@@ -646,8 +650,8 @@ class CYOAApp(App):
         try:
             container = self.query_one("#story-container")
             self.call_after_refresh(lambda: container.scroll_end(animate=animate))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to scroll to bottom: %s", e)
 
     def display_node(self, node: StoryNode) -> None:
         """Render a newly generated StoryNode to the UI (after streaming completes)."""
@@ -705,8 +709,8 @@ class CYOAApp(App):
         try:
             if hasattr(self, "_current_turn_widget"):
                 self._current_turn_widget.update(self._current_turn_text)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to update current turn widget: %s", e)
 
         # memory.add() moved to worker thread (generate_next_step)
         # so chromadb embedding does not block the UI event loop here.
@@ -719,8 +723,8 @@ class CYOAApp(App):
                 status.gold = self.engine.player_stats.get("gold", 0)
                 status.reputation = self.engine.player_stats.get("reputation", 0)
                 status.inventory = list(self.engine.inventory)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to update status display from engine: %s", e)
 
         choices_container = self.query_one("#choices-container", Container)
         # Clear any leftover stale buttons (e.g. the disabled selected-choice button)
@@ -826,8 +830,8 @@ class CYOAApp(App):
             status.gold = 0
             status.reputation = 0
             status.inventory = []
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to reset status display during restart: %s", e)
         await self.engine.restart()
 
     # UX: Confirmation before restart
@@ -1056,8 +1060,8 @@ class CYOAApp(App):
             try:
                 choice_idx = int(button_id.split("-")[-1])
                 await self._trigger_choice(choice_idx)
-            except (ValueError, IndexError):
-                pass
+            except (ValueError, IndexError) as e:
+                logger.debug("Invalid choice button ID clicked: %s (%s)", button_id, e)
 
     async def action_choose(self, number: str) -> None:
         """Select a choice by its 1-based index."""
@@ -1129,7 +1133,8 @@ class CYOAApp(App):
 
         try:
             tree = self.query_one("#story-map-tree", Tree)
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Story map tree widget not found: %s", e)
             return
         tree.clear()
 

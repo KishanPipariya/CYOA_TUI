@@ -93,8 +93,8 @@ class NarrativeMemory:
         try:
             if self._collection is not None and self._client is not None:
                 self._client.delete_collection(self._collection.name)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Failed to delete ChromaDB collection during close: %s", e)
         self._collection = None
         self._client = None
 
@@ -221,10 +221,10 @@ class NPCMemory:
                 for safe_name, coll in self._collections.items():
                     try:
                         self._client.delete_collection(coll.name)
-                    except Exception:
-                        pass
-        except Exception:  # noqa: BLE001
-            pass
+                    except Exception as e:
+                        logger.debug("Failed to delete NPC collection %s: %s", safe_name, e)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Failed to close NPC memory client: %s", e)
         self._collections.clear()
         self._client = None
 
