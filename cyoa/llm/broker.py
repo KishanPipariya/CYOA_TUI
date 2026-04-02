@@ -314,10 +314,11 @@ class ModelBroker:
         )
         # Unified Generation Queue & Resource Management
         self._lock = asyncio.Lock()
-        # Dedicated lock for background summarization — kept separate from
-        # _lock so that fire-and-forget summarization tasks don't compete
-        # with (or deadlock against) the main generation path.
+        # Dedicated lock for background summarization
         self._summary_lock = asyncio.Lock()
+
+        # Architecture setting: Unified vs Judge pattern
+        self.unified_mode = os.getenv("LLM_UNIFIED_MODE", "true").lower() == "true"
 
 
     def _create_provider_from_env(
@@ -533,15 +534,21 @@ class ModelBroker:
         low_priority: bool = False,
     ) -> StoryNode:
         """
-        Generate the next story node asynchronously using the 'Judge' pattern.
+        Generate the next story node asynchronously.
         
-        Using unified lock to prevent resource starvation on local models.
-        If low_priority is True (e.g. speculation), we yield more frequently.
+        Supports two modes:
+        1. Unified Mode: One single LLM call for all story & extraction data (FASTER).
+        2. Judge Pattern: Narrative generation followed by extraction call (MORE RELIABLE on small models).
         """
         if low_priority:
             # Give main path priority by yielding
             await asyncio.sleep(0.5)
 
+        if self.unified_mode:
+            async with self._lock:
+                return await self._run_unified_generation(context, on_token_chunk)
+
+        # Fallback to Judge pattern (Phase 1: Narrator)
         async with self._lock:
             narrator_node = await self._run_narrator(context, on_token_chunk)
 
@@ -564,6 +571,51 @@ class ModelBroker:
             stat_updates=extraction_node.stat_updates,
         )
 
+    async def _run_unified_generation(
+        self,
+        context: StoryContext,
+        on_token_chunk: Callable[[str], None] | None = None,
+    ) -> StoryNode:
+        """Single-pass generation of the full StoryNode."""
+        stream = on_token_chunk is not None
+        messages = context.get_messages()
+        attempts = 0
+        max_attempts = self._repair_attempts + 1
+
+        last_error = None
+        content = ""
+
+        while attempts < max_attempts:
+            try:
+                if attempts == 0 and stream:
+                    content = await self._stream_with_callback_async(messages, on_token_chunk, self._schema)
+                else:
+                    content = await self.provider.generate_json(
+                        messages=messages,
+                        schema=self._schema,
+                        temperature=self._temperature if attempts == 0 else 0.2,
+                        max_tokens=self._max_tokens,
+                    )
+
+                data = json.loads(content)
+                return StoryNode(**data)
+
+            except Exception as e:
+                attempts += 1
+                last_error = e
+                if attempts >= max_attempts:
+                    break
+                logger.warning("Unified repair attempt %d/%d: %s", attempts, self._repair_attempts, e)
+                messages = list(messages)
+                messages.append({"role": "assistant", "content": content})
+                messages.append({
+                    "role": "user",
+                    "content": f"Fix JSON error: {e}. Respond with ONLY the corrected JSON StoryNode."
+                })
+
+        logger.error("Unified generation failed: %s", last_error)
+        return self._get_fallback_node()
+
     async def _run_narrator(
         self,
         context: StoryContext,
@@ -582,7 +634,7 @@ class ModelBroker:
         while attempts < max_attempts:
             try:
                 if attempts == 0 and stream and on_token_chunk is not None:
-                    content = await self._stream_with_callback_async(messages, on_token_chunk)
+                    content = await self._stream_with_callback_async(messages, on_token_chunk, self._narrator_schema)
                 else:
                     content = await self.provider.generate_json(
                         messages=messages,
@@ -667,6 +719,7 @@ class ModelBroker:
         self,
         messages: list[dict[str, str]],
         on_token_chunk: Callable[[str], None],
+        schema: dict[str, Any],
     ) -> str:
         """
         Consume the streaming response and call back for narrative updates.
@@ -682,7 +735,7 @@ class ModelBroker:
 
         async for token in self.provider.stream_json(
             messages=messages,
-            schema=self._narrator_schema,
+            schema=schema,
             temperature=self._temperature,
             max_tokens=self._max_tokens,
         ):

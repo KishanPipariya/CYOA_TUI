@@ -261,27 +261,35 @@ class TestModelBrokerFallback:
 
         mock_provider = MagicMock(spec=LLMProvider)
         # First call returns garbage, second returns valid JSON
-        # Three calls: Narrator Failure, Narrator Repair Success, Extraction Phase
         mock_provider.generate_json = AsyncMock(
             side_effect=[
                 "GARBAGE {",
                 json.dumps(
-                    {"narrative": "Repaired!", "choices": [{"text": "OK"}, {"text": "Cancel"}]}
+                    {
+                        "narrative": "Repaired!", 
+                        "choices": [{"text": "OK"}, {"text": "Cancel"}],
+                        "items_gained": ["Sword"],
+                        "items_lost": [],
+                        "stat_updates": {"health": 10}
+                    }
                 ),
-                json.dumps({"items_gained": [], "items_lost": [], "stat_updates": {}}),
             ]
         )
 
         broker = ModelBroker(provider=mock_provider)
+        # Force unified mode for this test to match the expected call count logic
+        broker.unified_mode = True
+        
         ctx = StoryContext("start")
         node = await broker.generate_next_node_async(ctx)
 
         assert node.narrative == "Repaired!"
-        assert mock_provider.generate_json.call_count == 3
+        assert node.items_gained == ["Sword"]
+        assert mock_provider.generate_json.call_count == 2
 
         # Verify the second call included the error message
         repair_messages = mock_provider.generate_json.call_args_list[1][1]["messages"]
-        assert any("Your previous output was invalid JSON" in m["content"] for m in repair_messages)
+        assert any("Fix JSON error" in m["content"] for m in repair_messages)
 
     @pytest.mark.asyncio
     async def test_repair_loop_exhaustion_returns_fallback(self):
@@ -642,7 +650,7 @@ class TestStreamingCallback:
 
         gen = ModelBroker(provider=mock_provider)
         received = []
-        result = await gen._stream_with_callback_async([], on_token_chunk=received.append)
+        result = await gen._stream_with_callback_async([], on_token_chunk=received.append, schema={})
 
         extracted = "".join(received)
         assert "torch" in extracted
@@ -670,7 +678,7 @@ class TestStreamingCallback:
 
         gen = ModelBroker(provider=mock_provider)
         received = []
-        await gen._stream_with_callback_async([], on_token_chunk=received.append)
+        await gen._stream_with_callback_async([], on_token_chunk=received.append, schema={})
 
         extracted = "".join(received)
         assert extracted == 'The dragon said, "Return my gold!".'
@@ -753,6 +761,7 @@ class TestBranchingLogic:
             patch("cyoa.ui.app.CYOAGraphDB") as mock_db_cls,
         ):
             mock_db = mock_db_cls.return_value
+            mock_db.verify_connectivity_async = AsyncMock(return_value=True)
             mock_db.create_story_node_and_get_title.return_value = "Test Story"
             mock_db.get_story_tree.return_value = None
             mock_db.save_scene_async = AsyncMock(return_value="sid")
@@ -826,6 +835,7 @@ class TestBranchingLogic:
             patch("cyoa.ui.app.CYOAGraphDB") as mock_db_cls,
         ):
             mock_db = mock_db_cls.return_value
+            mock_db.verify_connectivity_async = AsyncMock(return_value=True)
             mock_db.create_story_node_and_get_title.return_value = "Test Story"
             mock_db.get_story_tree.return_value = None
             mock_db.save_scene_async = AsyncMock(return_value="sid")
@@ -922,6 +932,7 @@ class TestProceduralItemSystem:
             patch("cyoa.ui.app.CYOAGraphDB") as mock_db_cls,
         ):
             mock_db = mock_db_cls.return_value
+            mock_db.verify_connectivity_async = AsyncMock(return_value=True)
             mock_db.create_story_node_and_get_title.return_value = "Test Story"
             mock_db.get_story_tree.return_value = None
             mock_db.save_scene_async = AsyncMock(return_value="sid")

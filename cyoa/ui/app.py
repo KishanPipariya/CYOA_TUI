@@ -74,6 +74,7 @@ class CYOAApp(App):
         Binding("q", "request_quit", "Quit", show=True),
         Binding("r", "request_restart", "Restart", show=True),
         Binding("t", "toggle_typewriter", "Typewriter", show=True),
+        Binding("v", "cycle_typewriter_speed", "Speed", show=True),
         Binding("space", "skip_typewriter", "Skip", show=True),
         Binding("1", "choose('1')", "Choice 1", show=False),
         Binding("2", "choose('2')", "Choice 2", show=False),
@@ -85,6 +86,7 @@ class CYOAApp(App):
     turn_count: reactive[int] = reactive(1)
     mood: reactive[str] = reactive("default")
     typewriter_enabled: reactive[bool] = reactive(True)
+    typewriter_speed: reactive[str] = reactive("normal")
 
     _themes_cached_config: dict[str, Any] | None = None
 
@@ -194,6 +196,7 @@ class CYOAApp(App):
         config = utils.load_config()
         self.dark = config.get("dark", True)
         self.typewriter_enabled = config.get("typewriter", True)
+        self.typewriter_speed = config.get("typewriter_speed", "normal")
 
         # Apply theme accent color if specified
         if self._accent_color:
@@ -469,7 +472,9 @@ class CYOAApp(App):
                     last_refresh = now
 
                 if self._typewriter_active_chunk:
-                    await asyncio.sleep(constants.TYPEWRITER_CHAR_DELAY)
+                    delay = constants.TYPEWRITER_SPEEDS.get(self.typewriter_speed, 0.02)
+                    if delay > 0:
+                        await asyncio.sleep(delay)
 
             if self._typewriter_queue.empty():
                 self._is_typing = False
@@ -548,6 +553,18 @@ class CYOAApp(App):
         # A6 Fix: Preserve other config keys
         config = utils.load_config()
         config["typewriter"] = self.typewriter_enabled
+        utils.save_config(config)
+
+    def action_cycle_typewriter_speed(self) -> None:
+        """Cycle through narrator speeds (slow, normal, fast, instant)."""
+        speeds = list(constants.TYPEWRITER_SPEEDS.keys())
+        current_idx = speeds.index(self.typewriter_speed)
+        new_speed = speeds[(current_idx + 1) % len(speeds)]
+        self.typewriter_speed = new_speed
+        self.notify(f"Typewriter Speed: {new_speed.capitalize()}")
+
+        config = utils.load_config()
+        config["typewriter_speed"] = self.typewriter_speed
         utils.save_config(config)
 
     def _stream_narrative(self, partial: str) -> None:

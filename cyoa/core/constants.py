@@ -31,7 +31,13 @@ STREAM_RENDER_THROTTLE_MAX = 48
 MAX_CHOICE_PREVIEW_LEN = 15
 
 # --- Typewriter Narrator ---
-TYPEWRITER_CHAR_DELAY = 0.02  # seconds per character
+TYPEWRITER_SPEEDS: dict[str, float] = {
+    "slow": 0.05,
+    "normal": 0.02,
+    "fast": 0.005,
+    "instant": 0.0,
+}
+TYPEWRITER_CHAR_DELAY = 0.02  # seconds per character (legacy, kept for compat)
 TYPEWRITER_CATCHUP_THRESHOLD = 50  # if queue > 50, speed up reveal
 TYPEWRITER_MAX_BATCH = 5  # max characters to reveal per tick during catchup
 
