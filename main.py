@@ -19,7 +19,12 @@ def main() -> None:
     # Initialize OpenTelemetry
     setup_observability()
     parser = argparse.ArgumentParser(description="CYOA Terminal Game with Local LLM")
-    parser.add_argument("--model", type=str, required=True, help="Path to the .gguf model file")
+    parser.add_argument(
+        "--model", 
+        type=str, 
+        default=os.getenv("LLM_MODEL_PATH"), 
+        help="Path to the .gguf model file (defaults to LLM_MODEL_PATH in .env)"
+    )
     parser.add_argument(
         "--theme",
         type=str,
@@ -34,6 +39,9 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    if not args.model:
+        sys.exit("Error: No model path provided. Use --model or set LLM_MODEL_PATH in .env")
 
     # --prompt overrides --theme
     if args.prompt:
