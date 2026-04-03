@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import threading
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any, cast
 
 import httpx
@@ -14,6 +14,18 @@ from cyoa.core.observability import LLMObservedSession
 logger = logging.getLogger(__name__)
 
 
+def count_messages_tokens(messages: list[dict[str, str]], token_counter: Callable[[str], int]) -> int:
+    """Helper to count tokens in a list of chat messages using a counter function.
+
+    Summing tokens from role and content is a good approximation for most models.
+    """
+    total = 0
+    for msg in messages:
+        total += token_counter(msg.get("role", ""))
+        total += token_counter(msg.get("content", ""))
+    return total
+
+
 class LLMProvider(abc.ABC):
     @abc.abstractmethod
     def count_tokens(self, text: str) -> int:
@@ -22,13 +34,7 @@ class LLMProvider(abc.ABC):
 
     def count_tokens_in_messages(self, messages: list[dict[str, str]]) -> int:
         """Count the number of tokens in a list of chat messages."""
-        # Baseline implementation: sum up tokens in all parts of the message.
-        # This is a good approximation for most models.
-        total = 0
-        for msg in messages:
-            total += self.count_tokens(msg.get("role", ""))
-            total += self.count_tokens(msg.get("content", ""))
-        return total
+        return count_messages_tokens(messages, self.count_tokens)
 
     @abc.abstractmethod
     async def generate_text(

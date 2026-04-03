@@ -31,7 +31,13 @@ from cyoa.llm.pipeline import (
     PromptPipeline,
     SummarizationComponent,
 )
-from cyoa.llm.providers import LlamaCppProvider, LLMProvider, MockProvider, OllamaProvider
+from cyoa.llm.providers import (
+    count_messages_tokens,
+    LlamaCppProvider,
+    LLMProvider,
+    MockProvider,
+    OllamaProvider,
+)
 
 __all__ = ["StoryContext", "ModelBroker", "SpeculationCache"]
 
@@ -140,8 +146,10 @@ class StoryContext:
             dropped_a = self.history.pop(1)
             dropped_u = self.history.pop(1)
             # Subtract tokens of dropped messages to avoid O(N^2) recount
-            current_tokens -= self.token_counter(dropped_a.get("role", "") + dropped_a.get("content", ""))
-            current_tokens -= self.token_counter(dropped_u.get("role", "") + dropped_u.get("content", ""))
+            current_tokens -= self.token_counter(dropped_a.get("role", ""))
+            current_tokens -= self.token_counter(dropped_a.get("content", ""))
+            current_tokens -= self.token_counter(dropped_u.get("role", ""))
+            current_tokens -= self.token_counter(dropped_u.get("content", ""))
 
         # Phase 2: Dynamic RAG Scaling (Prune memories if still over budget)
         while len(self.memories) > 1 and self.count_total_tokens() > self.token_budget:
@@ -150,13 +158,7 @@ class StoryContext:
 
     def count_total_tokens(self) -> int:
         """Calculate the total token count of the current message stack."""
-        messages = self.get_messages()
-        total = 0
-        for msg in messages:
-            # We count roles too for a more accurate estimate
-            total += self.token_counter(msg.get("role", ""))
-            total += self.token_counter(msg.get("content", ""))
-        return total
+        return count_messages_tokens(self.get_messages(), self.token_counter)
 
     def inject_memory(self, memories: list[str]) -> None:
         """Store memories to be injected dynamically into the system prompt."""
