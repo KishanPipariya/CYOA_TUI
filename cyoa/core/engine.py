@@ -181,6 +181,7 @@ class StoryEngine:
                         choice_text=choice_text,
                         player_stats=self.state.player_stats,
                         inventory=self.state.inventory,
+                        mood=node.mood,
                     )
                 else:
                     self.state.current_scene_id = new_id

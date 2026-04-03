@@ -53,6 +53,27 @@ def test_db_create_scene_node(mock_neo4j):
         assert "BELONGS_TO" in query
 
 
+def test_db_create_scene_node_with_mood(mock_neo4j):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
+        db = CYOAGraphDB()
+
+        # Mocking CREATE result
+        mock_result = MagicMock()
+        mock_result.single.return_value = {"scene_id": "uuid-mood-123"}
+        mock_neo4j.run.return_value = mock_result
+
+        scene_id = db.create_scene_node(
+            "Ethereal lights...", ["Touch them"], "Adventure 1", mood="ethereal"
+        )
+
+        assert scene_id == "uuid-mood-123"
+        kwargs = mock_neo4j.run.call_args[1]
+        assert kwargs["mood"] == "ethereal"
+        query = mock_neo4j.run.call_args[0][0]
+        assert "mood: $mood" in query
+
+
 def test_db_create_choice_edge(mock_neo4j):
     with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
         mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j

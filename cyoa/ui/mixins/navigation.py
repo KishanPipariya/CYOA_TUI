@@ -227,26 +227,40 @@ class NavigationMixin:
 
         def add_children(parent_node: Any, scene_id: str) -> None:
             scene = nodes[scene_id]
-            preview = scene["narrative"][:25].replace("\\n", " ").strip() + "..."
+            mood = scene.get("mood", "default")
+            
+            # Map moods to emojis and colors
+            mood_map = {
+                "mysterious": ("🔮", "purple"),
+                "heroic": ("⚔️", "yellow"),
+                "combat": ("💀", "red"),
+                "ethereal": ("✨", "cyan"),
+                "dark": ("🌑", "gray"),
+                "grimy": ("🌿", "green"),
+                "default": ("📖", "white")
+            }
+            emoji, color = mood_map.get(mood, mood_map["default"])
+            
+            preview = scene["narrative"][:20].replace("\\n", " ").strip() + "..."
             if scene_id == self.engine.state.current_scene_id:
-                label = f"[b][green]> {preview}[/green][/b]"
+                label = f"[b][reverse]{emoji} {preview}[/reverse][/b]"
             else:
-                label = preview
+                label = f"[{color}]{emoji}[/{color}] {preview}"
 
             tree_node = parent_node.add(label, expand=True)
 
             for edge in edges.get(scene_id, []):
                 choice_text = edge["choice"]
                 choice_preview = (
-                    choice_text[: constants.MAX_CHOICE_PREVIEW_LEN] + "..."
-                    if len(choice_text) > constants.MAX_CHOICE_PREVIEW_LEN
+                    choice_text[: 15] + "..."
+                    if len(choice_text) > 15
                     else choice_text
                 )
-                choice_label = f"[dim][i]- {choice_preview}[/i][/dim]"
+                choice_label = f"[dim]↳ {choice_preview}[/dim]"
                 choice_node = tree_node.add(choice_label, expand=True)
                 add_children(choice_node, edge["target_id"])
 
-        tree.root.label = "Story Nodes"
+        tree.root.label = "📍 Adventure Map"
         tree.root.expand()
         if root_id in nodes:
             add_children(tree.root, root_id)

@@ -145,6 +145,7 @@ class CYOAGraphDB:
         story_title: str,
         player_stats: dict[str, int] | None = None,
         inventory: list[str] | None = None,
+        mood: str = "default",
     ) -> str:
         """Creates a Scene node in the graph, links it to its Story, and returns its UUID."""
         scene_id = str(uuid.uuid4())
@@ -161,7 +162,8 @@ class CYOAGraphDB:
                 available_choices: $available_choices,
                 story_title: $story_title,
                 player_stats: $player_stats,
-                inventory: $inventory
+                inventory: $inventory,
+                mood: $mood
             })
             CREATE (s)-[:BELONGS_TO]->(story)
             RETURN s.id AS scene_id
@@ -176,6 +178,7 @@ class CYOAGraphDB:
                         story_title=story_title,
                         player_stats=player_stats or {"health": 100, "gold": 0, "reputation": 0},
                         inventory=inventory or [],
+                        mood=mood,
                     )
                     record = result.single()
                     if record is None:
@@ -228,6 +231,7 @@ class CYOAGraphDB:
         choice_text: str | None,
         player_stats: dict[str, int] | None = None,
         inventory: list[str] | None = None,
+        mood: str = "default",
     ) -> str:
         """
         Writes a new scene node (and optional edge from previous scene) to Neo4j.
@@ -237,7 +241,7 @@ class CYOAGraphDB:
 
         def _write() -> str:
             new_scene_id = self.create_scene_node(
-                narrative, available_choices, story_title, player_stats, inventory
+                narrative, available_choices, story_title, player_stats, inventory, mood
             )
             if source_scene_id and choice_text:
                 self.create_choice_edge(source_scene_id, new_scene_id, choice_text)
@@ -363,7 +367,7 @@ class CYOAGraphDB:
             query = """
             MATCH (story:Story {title: $story_title})<-[:BELONGS_TO]-(scene:Scene)
             OPTIONAL MATCH (scene)-[r:LEADS_TO]->(next:Scene)
-            RETURN scene.id AS id, scene.narrative AS narrative,
+            RETURN scene.id AS id, scene.narrative AS narrative, scene.mood AS mood,
                    next.id AS next_id, r.action_text AS choice
             """
             nodes = {}
@@ -376,7 +380,11 @@ class CYOAGraphDB:
                     sid = record["id"]
                     nxt = record["next_id"]
                     if sid not in nodes:
-                        nodes[sid] = {"id": sid, "narrative": record["narrative"]}
+                        nodes[sid] = {
+                            "id": sid,
+                            "narrative": record["narrative"],
+                            "mood": record.get("mood", "default"),
+                        }
                     if sid not in edges:
                         edges[sid] = []
                     if nxt:
