@@ -772,7 +772,7 @@ class TestBranchingLogic:
                 # Wait for engine to initialize
                 await pilot.pause(0.5)
 
-                app.engine.current_scene_id = "scene-3"
+                app.engine.state.current_scene_id = "scene-3"
                 app._current_story = "You wake up.\n\nYou stand up.\n\nYou walk left into a wall."
 
                 # Allow the initial startup worker to settle
@@ -785,8 +785,8 @@ class TestBranchingLogic:
                 await pilot.pause(0.3)
 
                 # Check context
-                assert app.engine.current_scene_id == "scene-2"
-                assert app.engine.last_choice_text == "Stand"
+                assert app.engine.state.current_scene_id == "scene-2"
+                assert app.engine.state.last_choice_text == "Stand"
 
                 # Context history should correctly have prompt + (narrative, choice) pairs up to idx
                 assert app.engine.story_context is not None
@@ -847,16 +847,16 @@ class TestBranchingLogic:
                 await pilot.pause(0.5)
 
                 # Simulate being at a later turn with different stats
-                app.engine.inventory = ["Sword"]
-                app.engine.player_stats = {"health": 100, "gold": 50, "reputation": 10}
+                app.engine.state.inventory = ["Sword"]
+                app.engine.state.player_stats = {"health": 100, "gold": 50, "reputation": 10}
 
                 # Restore to Turn 1
                 app.restore_to_scene(idx=0, history=history)
                 await pilot.pause(0.3)
 
                 # Check stats and inventory
-                assert app.engine.player_stats == {"health": 80, "gold": 5, "reputation": 0}
-                assert app.engine.inventory == ["Old Key"]
+                assert app.engine.state.player_stats == {"health": 80, "gold": 5, "reputation": 0}
+                assert app.engine.state.inventory == ["Old Key"]
 
     def test_action_branch_past_aborts_if_no_history(self):
         """action_branch_past should return early if there is no engine."""
@@ -945,4 +945,4 @@ class TestProceduralItemSystem:
                 # Wait for engine to initialize
                 await pilot.pause(1.0)
 
-                assert app.engine.inventory == ["Shiny Key", "Map"]
+                assert app.engine.state.inventory == ["Shiny Key", "Map"]

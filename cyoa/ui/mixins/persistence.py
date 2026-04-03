@@ -13,15 +13,15 @@ class PersistenceMixin:
     def action_save_game(self) -> None:
         """Serialize the current game state to a JSON save file."""
         assert isinstance(self, App)
-        if not self.engine or not self.engine.story_title or not self.engine.current_node:
+        if not self.engine or not self.engine.state.story_title or not self.engine.state.current_node:
             self.notify("Nothing to save yet.", severity="warning", timeout=2)
             return
 
         os.makedirs(constants.SAVES_DIR, exist_ok=True)
         safe_title = "".join(
-            c if c.isalnum() or c in " _-" else "_" for c in self.engine.story_title
+            c if c.isalnum() or c in " _-" else "_" for c in self.engine.state.story_title
         )
-        save_path = os.path.join(constants.SAVES_DIR, f"{safe_title}_turn{self.engine.turn_count}.json")
+        save_path = os.path.join(constants.SAVES_DIR, f"{safe_title}_turn{self.engine.state.turn_count}.json")
 
         save_data = self.engine.get_save_data()
 
@@ -100,15 +100,15 @@ class PersistenceMixin:
         # U8 Fix: If loaded node is empty (error case), provide a way out
         choices_container = self.query_one("#choices-container")
         choices_container.remove_children()
-        if self.engine.current_node:
-            self._mount_choice_buttons(self.engine.current_node, choices_container, False)
+        if self.engine.state.current_node:
+            self._mount_choice_buttons(self.engine.state.current_node, choices_container, False)
         else:
             choices_container.mount(Button("✦ Start a New Adventure", id="btn-new-adventure", variant="success"))
 
         self.query_one("#journal-list", ListView).clear()
 
         self.notify(
-            f"📂 Loaded save from Turn {self.engine.turn_count}.",
+            f"📂 Loaded save from Turn {self.engine.state.turn_count}.",
             severity="information",
             timeout=3,
         )

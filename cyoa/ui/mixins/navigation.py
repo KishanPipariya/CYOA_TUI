@@ -106,7 +106,7 @@ class NavigationMixin:
             if choices:
                 choices[-1].remove()
             self._current_turn_widget = turns[-2]
-            self._current_turn_text = self.engine.current_node.narrative if self.engine.current_node else ""
+            self._current_turn_text = self.engine.state.current_node.narrative if self.engine.state.current_node else ""
         else:
             self._current_turn_text = self._current_story
             if hasattr(self, "_current_turn_widget"):
@@ -116,8 +116,8 @@ class NavigationMixin:
         from textual.containers import Container
         choices_container = self.query_one("#choices-container", Container)
         choices_container.remove_children()
-        if self.engine.current_node:
-            self._mount_choice_buttons(self.engine.current_node, choices_container, is_error=False)
+        if self.engine.state.current_node:
+            self._mount_choice_buttons(self.engine.state.current_node, choices_container, is_error=False)
 
         self.query_one("#loading").add_class("hidden")
         self._scroll_to_bottom()
@@ -152,10 +152,10 @@ class NavigationMixin:
     @work(exclusive=True)
     async def action_branch_past(self) -> None:
         assert isinstance(self, App)
-        if not self.engine or not self.engine.db or not self.engine.current_scene_id:
+        if not self.engine or not self.engine.db or not self.engine.state.current_scene_id:
             return
 
-        history = await asyncio.to_thread(self.engine.db.get_scene_history_path, self.engine.current_scene_id)
+        history = await asyncio.to_thread(self.engine.db.get_scene_history_path, self.engine.state.current_scene_id)
         if not history or not history.get("scenes"):
             return
 
@@ -204,10 +204,10 @@ class NavigationMixin:
     @work(exclusive=True)
     async def update_story_map(self) -> None:
         assert isinstance(self, App)
-        if not self.engine or not self.engine.db or not self.engine.story_title:
+        if not self.engine or not self.engine.db or not self.engine.state.story_title:
             return
 
-        tree_data = await asyncio.to_thread(self.engine.db.get_story_tree, self.engine.story_title)
+        tree_data = await asyncio.to_thread(self.engine.db.get_story_tree, self.engine.state.story_title)
         if not tree_data:
             return
 
@@ -228,7 +228,7 @@ class NavigationMixin:
         def add_children(parent_node: Any, scene_id: str) -> None:
             scene = nodes[scene_id]
             preview = scene["narrative"][:25].replace("\\n", " ").strip() + "..."
-            if scene_id == self.engine.current_scene_id:
+            if scene_id == self.engine.state.current_scene_id:
                 label = f"[b][green]> {preview}[/green][/b]"
             else:
                 label = preview

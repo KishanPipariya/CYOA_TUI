@@ -184,10 +184,10 @@ class RenderingMixin:
         if self.engine:
             try:
                 status = self.query_one(StatusDisplay)
-                status.health = self.engine.player_stats.get("health", 100)
-                status.gold = self.engine.player_stats.get("gold", 0)
-                status.reputation = self.engine.player_stats.get("reputation", 0)
-                status.inventory = list(self.engine.inventory)
+                status.health = self.engine.state.player_stats.get("health", 100)
+                status.gold = self.engine.state.player_stats.get("gold", 0)
+                status.reputation = self.engine.state.player_stats.get("reputation", 0)
+                status.inventory = list(self.engine.state.inventory)
             except Exception as e:
                 logger.debug("Failed to update status display from engine: %s", e)
 
@@ -220,12 +220,12 @@ class RenderingMixin:
         assert isinstance(self, App)
         if (
             not self.engine
-            or not self.engine.current_node
-            or choice_idx >= len(self.engine.current_node.choices)
+            or not self.engine.state.current_node
+            or choice_idx >= len(self.engine.state.current_node.choices)
         ):
             return
 
-        choice = self.engine.current_node.choices[choice_idx]
+        choice = self.engine.state.current_node.choices[choice_idx]
         choice_text = choice.text
 
         # 1. Instant UI feedback
@@ -248,10 +248,10 @@ class RenderingMixin:
         # 2. Journal update
         from textual.widgets import ListView, ListItem, Label
         journal_list = self.query_one("#journal-list", ListView)
-        narrative_preview = self.engine.current_node.narrative[:60].replace("\n", " ").strip()
-        if len(self.engine.current_node.narrative) > 60:
+        narrative_preview = self.engine.state.current_node.narrative[:60].replace("\n", " ").strip()
+        if len(self.engine.state.current_node.narrative) > 60:
             narrative_preview += "…"
-        journal_entry = f"Turn {self.engine.turn_count}: {choice_text} → {narrative_preview}"
+        journal_entry = f"Turn {self.engine.state.turn_count}: {choice_text} → {narrative_preview}"
         journal_list.append(ListItem(Label(journal_entry)))
         # U2 Fix: Scroll after refresh to ensure layout size is updated
         self.call_after_refresh(lambda: journal_list.scroll_end(animate=False))

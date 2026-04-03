@@ -31,7 +31,7 @@ class EventsMixin:
     def _handle_node_completed(self, node: StoryNode) -> None:
         assert isinstance(self, App)
         if self.engine:
-            self.turn_count = self.engine.turn_count
+            self.turn_count = self.engine.state.turn_count
         self.display_node(node)
         self.update_story_map()
 

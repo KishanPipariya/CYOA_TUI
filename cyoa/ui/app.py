@@ -217,8 +217,8 @@ class CYOAApp(
                     )
 
             # Check Chroma availability without forcing model download if it's lazy
-            if not self.engine.memory.is_online:
-                 self.notify(
+            if not self.engine.rag.memory.is_online:
+                self.notify(
                     "RAG Engine unavailable. Basic memory fallback active.",
                     severity="warning",
                     timeout=5
@@ -262,7 +262,7 @@ class CYOAApp(
             return
 
         choice = node.choices[0]
-        if self.engine.speculation_cache.get_node(self.engine.current_scene_id or "", choice.text):
+        if self.engine.speculation_cache.get_node(self.engine.state.current_scene_id or "", choice.text):
             return
 
         # Clone context to speculate without polluting the main one
@@ -270,15 +270,15 @@ class CYOAApp(
         spec_context.add_turn(
             node.narrative,
             choice.text,
-            self.engine.inventory,
-            self.engine.player_stats
+            self.engine.state.inventory,
+            self.engine.state.player_stats
         )
 
         try:
             # Low-priority generation (no streaming)
             spec_node = await self.generator.generate_next_node_async(spec_context, low_priority=True)
             self.engine.speculation_cache.set_node(
-                self.engine.current_scene_id or "",
+                self.engine.state.current_scene_id or "",
                 choice.text,
                 spec_node
             )

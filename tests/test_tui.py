@@ -148,13 +148,13 @@ async def test_inventory_updates_on_item_gain_and_loss(mock_app_dependencies):
         await pilot.pause(1.0)
 
         # Initial inventory should have Broken Sword (from node1)
-        assert "Broken Sword" in app.engine.inventory
+        assert "Broken Sword" in app.engine.state.inventory
 
         # Gain an item via a choice that returns node2 (which has Health Potion)
         await pilot.press("1")
         await pilot.pause(1.0)
-        assert "Health Potion" in app.engine.inventory
-        assert "Broken Sword" in app.engine.inventory
+        assert "Health Potion" in app.engine.state.inventory
+        assert "Broken Sword" in app.engine.state.inventory
 
         # Mock item loss: Manually trigger a display update for a hypothetical node that loses an item
         from cyoa.core.models import Choice, StoryNode
@@ -303,11 +303,11 @@ async def test_game_over_state_and_restart(mock_app_dependencies):
         await pilot.pause(1.0)  # Back to Node 1
 
         # Verify reset
-        assert app.engine.turn_count == 1
+        assert app.engine.state.turn_count == 1
         assert "You awaken in a test dungeon." in app._current_story
-        assert app.engine.inventory == ["Broken Sword"]
-        assert app.engine.player_stats["health"] == 100
-        assert app.engine.player_stats["gold"] == 0
+        assert app.engine.state.inventory == ["Broken Sword"]
+        assert app.engine.state.player_stats["health"] == 100
+        assert app.engine.state.player_stats["gold"] == 0
 
 
 @pytest.mark.asyncio
@@ -330,11 +330,11 @@ async def test_app_restart_via_keyboard(mock_app_dependencies):
         await pilot.press("y")
         await pilot.pause(1.0)  # Node 1 again
 
-        assert app.engine.turn_count == 1
+        assert app.engine.state.turn_count == 1
         assert "You awaken in a test dungeon." in app._current_story
-        assert app.engine.inventory == ["Broken Sword"]
-        assert app.engine.player_stats["health"] == 100
-        assert app.engine.player_stats["gold"] == 0
+        assert app.engine.state.inventory == ["Broken Sword"]
+        assert app.engine.state.player_stats["health"] == 100
+        assert app.engine.state.player_stats["gold"] == 0
 
         journal_list = app.query_one("#journal-list", ListView)
         assert len(list(journal_list.children)) == 0
@@ -510,15 +510,15 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
         # Set some unique state
         from cyoa.core.models import Choice, StoryNode
 
-        app.engine.inventory = ["Unique Item 1", "Unique Item 2"]
-        app.engine.player_stats = {"health": 88, "gold": 123, "reputation": 5}
-        app.engine.turn_count = 5
+        app.engine.state.inventory = ["Unique Item 1", "Unique Item 2"]
+        app.engine.state.player_stats = {"health": 88, "gold": 123, "reputation": 5}
+        app.engine.state.turn_count = 5
         node = StoryNode(
             narrative="A unique story begins.",
             choices=[Choice(text="Continue"), Choice(text="Quit")],
             title="Test Adventure",
         )
-        app.engine.current_node = node
+        app.engine.state.current_node = node
         app._current_story = "Previous history.\n\n---\n\n" + node.narrative
 
         # Save
@@ -539,10 +539,10 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
             app2._restore_from_save(save_path)
 
             # Verify restoration
-            assert app2.engine.turn_count == 5
-            assert app2.engine.inventory == ["Unique Item 1", "Unique Item 2"]
-            assert app2.engine.player_stats["health"] == 88
-            assert app2.engine.player_stats["gold"] == 123
+            assert app2.engine.state.turn_count == 5
+            assert app2.engine.state.inventory == ["Unique Item 1", "Unique Item 2"]
+            assert app2.engine.state.player_stats["health"] == 88
+            assert app2.engine.state.player_stats["gold"] == 123
             # After restore, _current_story should contain the narrative
             assert "unique story" in app2._current_story
             stats_label2_text = app2.query_one("#stats-text").render().plain
