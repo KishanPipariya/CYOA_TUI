@@ -725,13 +725,7 @@ class ModelBroker:
         Consume the streaming response and call back for narrative updates.
         """
         buffer = ""
-        
-        # O(N) Streaming parser state machine to extract the "narrative" field
-        # avoiding the O(N^2) overhead of parsing the full buffer on every token.
-        state = "SEARCH_KEY"
-        key_target = '"narrative"'
-        key_idx = 0
-        escape = False
+        last_yielded_narrative = ""
 
         async for token in self.provider.stream_json(
             messages=messages,
@@ -741,53 +735,21 @@ class ModelBroker:
         ):
             buffer += token
             
-            chunk_to_yield = ""
-            for char in token:
-                if state == "SEARCH_KEY":
-                    if char == key_target[key_idx]:
-                        key_idx += 1
-                        if key_idx == len(key_target):
-                            state = "SEARCH_COLON"
-                    else:
-                        if char == key_target[0]:
-                            key_idx = 1
-                        else:
-                            key_idx = 0
+            try:
+                # Use jiter to parse partial JSON. partial_mode="trailing-strings" 
+                # allows us to extract the narrative even while it's being typed.
+                data = jiter.from_json(buffer.encode("utf-8"), partial_mode="trailing-strings")
                 
-                elif state == "SEARCH_COLON":
-                    if char == ':':
-                        state = "SEARCH_QUOTE"
-                    elif not char.isspace():
-                        # False alarm, go back to searching
-                        state = "SEARCH_KEY"
-                        key_idx = 0
-                        
-                elif state == "SEARCH_QUOTE":
-                    if char == '"':
-                        state = "IN_STRING"
-                        escape = False
-                    elif not char.isspace():
-                        state = "SEARCH_KEY"
-                        key_idx = 0
-                        
-                elif state == "IN_STRING":
-                    if escape:
-                        if char == 'n': chunk_to_yield += '\n'
-                        elif char == 'r': chunk_to_yield += '\r'
-                        elif char == 't': chunk_to_yield += '\t'
-                        elif char == '"': chunk_to_yield += '"'
-                        elif char == '\\': chunk_to_yield += '\\'
-                        else: chunk_to_yield += char
-                        escape = False
-                    elif char == '\\':
-                        escape = True
-                    elif char == '"':
-                        state = "DONE"
-                    else:
-                        chunk_to_yield += char
-                        
-            if chunk_to_yield:
-                on_token_chunk(chunk_to_yield)
+                if isinstance(data, dict) and "narrative" in data:
+                    current_narrative = data["narrative"]
+                    if isinstance(current_narrative, str) and len(current_narrative) > len(last_yielded_narrative):
+                        # Yield only the new part of the narrative
+                        new_chunk = current_narrative[len(last_yielded_narrative):]
+                        on_token_chunk(new_chunk)
+                        last_yielded_narrative = current_narrative
+            except (jiter.JiterError, ValueError):
+                # Expected when buffer is incomplete or malformed (e.g. mid-escape)
+                continue
 
         return buffer
 
