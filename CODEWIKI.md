@@ -12,7 +12,7 @@ It is a developer-facing status wiki, not an aspirational design doc.
 - Story generation backends:
   - `llama-cpp-python`
   - Ollama HTTP API
-  - `MockProvider` fallback
+  - `MockProvider` for explicit test/dev runs
 - Persistence and memory:
   - Neo4j graph persistence in [`cyoa/db/graph_db.py`](/Users/kishan/CYOA_TUI/cyoa/db/graph_db.py)
   - Chroma-backed narrative/NPC memory with in-memory fallback in [`cyoa/db/rag_memory.py`](/Users/kishan/CYOA_TUI/cyoa/db/rag_memory.py)
@@ -90,11 +90,17 @@ flowchart TD
     H --> J[start typewriter worker]
     H --> K[initialize_and_start]
     K --> L[construct ModelBroker]
+    L --> L1{provider}
+    L1 -->|llama_cpp| L2[use local GGUF]
+    L1 -->|ollama| L3[use Ollama HTTP API]
+    L1 -->|mock| L4[use canned responses]
     K --> M[construct StoryEngine]
     K --> N[verify Neo4j connectivity]
+    N -->|offline| N1[continue without graph persistence]
     K --> O[engine.initialize]
     O --> P[_generate_next]
     P --> Q[retrieve memories]
+    Q -->|memory offline| Q1[use fallback recent-history memory]
     P --> R[maybe launch background summarization]
     P --> S[generate or use speculative cache]
     S --> T[apply state updates]
@@ -179,7 +185,7 @@ Selection is controlled by `LLM_UNIFIED_MODE` and defaults to unified mode.
   - token counting uses `tiktoken` if present, otherwise rough estimate
 - `MockProvider`
   - returns canned narrative/JSON
-  - used directly for tests/dev, and indirectly when local GGUF path is missing for `llama_cpp`
+  - used directly for tests/dev when `LLM_PROVIDER=mock`
 
 ### 4.6 UI behavior
 
@@ -293,6 +299,35 @@ Defined events:
 
 `CYOAApp.on_mount()` subscribes to these and updates the UI.
 
+Current payload contracts used by subscribers:
+
+- `engine.started`
+  - no payload
+- `engine.restarted`
+  - no payload
+- `engine.choice_made`
+  - `choice_text: str`
+- `engine.node_generating`
+  - no payload
+- `engine.token_streamed`
+  - `token: str`
+- `engine.summarization_started`
+  - no payload
+- `engine.node_completed`
+  - `node: StoryNode`
+- `engine.stats_updated`
+  - `stats: dict[str, int]`
+- `engine.inventory_updated`
+  - `inventory: list[str]`
+- `engine.story_title_generated`
+  - `title: str | None`
+- `engine.ending_reached`
+  - `node: StoryNode`
+- `engine.error_occurred`
+  - `error: str`
+- `engine.status_message`
+  - `message: str`
+
 ## 7) Configuration Surface
 
 ### 7.1 LLM selection
@@ -331,6 +366,7 @@ Defined events:
 High-signal tests currently present:
 
 - [`tests/test_main.py`](/Users/kishan/CYOA_TUI/tests/test_main.py): startup config validation and main lifecycle.
+- [`tests/test_story_logger.py`](/Users/kishan/CYOA_TUI/tests/test_story_logger.py): event-to-transcript wiring for `story.md`.
 - [`tests/test_story.py`](/Users/kishan/CYOA_TUI/tests/test_story.py): story context, summarization, repair loop, fallback generation.
 - [`tests/test_engine_state.py`](/Users/kishan/CYOA_TUI/tests/test_engine_state.py): retry, cache hits, persistence hooks, save/load, branching, event emission.
 - [`tests/test_tui.py`](/Users/kishan/CYOA_TUI/tests/test_tui.py): Textual startup, choices, panels, inventory/stats behavior.
@@ -345,19 +381,13 @@ High-signal tests currently present:
   - `test_broker_cache.py`
   - `test_debug.py`
 
-## 9) Known Mismatches and Caveats
+## 9) Operational Caveats
 
-- `StoryLogger` is instantiated from `main.py`, but it subscribes to legacy event names:
-  - `"story_started"`
-  - `"choice_made"`
-  - `"scene_generated"`
-  The current engine emits `engine.*` names from `Events`, so logger callbacks are effectively not wired to current runtime behavior.
-
-- `story.md` should be treated as a dormant target for now, not a reliable live transcript.
+- `story.md` is event-driven. It is refreshed from `Events.STORY_TITLE_GENERATED`, `Events.CHOICE_MADE`, and `Events.NODE_COMPLETED`, so it should now track the live transcript rather than acting as a dormant placeholder.
 
 - `themes/themes.json` is used for mood-to-style mapping, but starting prompt/theme selection comes from individual TOML theme files.
 
-- `ModelBroker._create_provider_from_env()` will fall back to `MockProvider` if `LLM_PROVIDER=llama_cpp` and the model file path does not exist. That is useful for development, but it also means a misconfigured local model can silently degrade into mock generation after startup validation passes.
+- `ModelBroker._create_provider_from_env()` no longer silently falls back to `MockProvider` for `LLM_PROVIDER=llama_cpp`. A missing local model path is now treated as a configuration error.
 
 - Neo4j and Chroma are both optional at runtime. The app is designed to keep running in degraded mode, so “feature available in code” does not always mean “feature active in this session.”
 

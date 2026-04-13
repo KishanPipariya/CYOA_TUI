@@ -2,7 +2,8 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from cyoa.core.events import bus
+from cyoa.core.events import Events, bus
+from cyoa.core.models import StoryNode
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +19,12 @@ class StoryLogger:
         self._file_handle: Any | None = None
         self._unsubscribers: list[Callable[[], None]] = []
 
-        # Subscribe to events
-        self._unsubscribers.append(bus.subscribe("story_started", self.on_story_started))
-        self._unsubscribers.append(bus.subscribe("choice_made", self.on_choice_made))
-        self._unsubscribers.append(bus.subscribe("scene_generated", self.on_scene_generated))
+        # Subscribe to the current engine event contract.
+        self._unsubscribers.append(
+            bus.subscribe(Events.STORY_TITLE_GENERATED, self.on_story_title_generated)
+        )
+        self._unsubscribers.append(bus.subscribe(Events.CHOICE_MADE, self.on_choice_made))
+        self._unsubscribers.append(bus.subscribe(Events.NODE_COMPLETED, self.on_node_completed))
 
     def start_new_log(self, title: str) -> None:
         """Initialize or clear the story log file."""
@@ -38,7 +41,7 @@ class StoryLogger:
             self._file_handle.write(content)
             self._file_handle.flush()
 
-    def on_story_started(self, **kwargs: Any) -> None:
+    def on_story_title_generated(self, **kwargs: Any) -> None:
         title = kwargs.get("title", "Untitled Adventure")
         self.start_new_log(title)
 
@@ -47,10 +50,10 @@ class StoryLogger:
         if choice_text:
             self.write_append(f"> **You chose:** {choice_text}\n\n---\n\n")
 
-    def on_scene_generated(self, **kwargs: Any) -> None:
-        # Currently handled by the UI since we don't dump raw scene texts redundantly,
-        # but the skeleton is here if we want to log it in the future.
-        pass
+    def on_node_completed(self, **kwargs: Any) -> None:
+        node = kwargs.get("node")
+        if isinstance(node, StoryNode):
+            self.write_append(f"{node.narrative}\n\n")
 
     def close(self) -> None:
         if self._file_handle:

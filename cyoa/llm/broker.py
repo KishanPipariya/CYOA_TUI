@@ -331,6 +331,8 @@ class ModelBroker:
             model = os.getenv("LLM_MODEL", model_path or "llama3")
             base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
             return OllamaProvider(model=model, base_url=base_url)
+        if provider_type == "mock":
+            return MockProvider(model_name=model_path or os.getenv("LLM_MODEL", "mock"))
         else:
             m_path = model_path or os.getenv("LLM_MODEL_PATH")
             if not m_path:
@@ -339,10 +341,9 @@ class ModelBroker:
 
             n_ctx_val = n_ctx or int(os.getenv("LLM_N_CTX", str(DEFAULT_LLM_N_CTX)))
             if not os.path.exists(m_path):
-                logger.warning(
-                    f"Model file '{m_path}' not found. Falling back to MockProvider for development."
+                raise FileNotFoundError(
+                    f"Configured llama_cpp model file does not exist: {m_path!r}."
                 )
-                return MockProvider(model_name=m_path)
             return LlamaCppProvider(model_path=m_path, n_ctx=n_ctx_val)
 
     async def generate_summary_async(self, turns_to_compress: list[dict[str, str]]) -> str:

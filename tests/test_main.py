@@ -23,6 +23,15 @@ def test_validate_startup_config_requires_model_for_llama_cpp(monkeypatch: pytes
         main.validate_startup_config(_args())
 
 
+def test_validate_startup_config_requires_existing_model_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "llama_cpp")
+
+    with pytest.raises(main.StartupConfigError, match="model file does not exist"):
+        main.validate_startup_config(_args(model="missing.gguf"))
+
+
 def test_validate_startup_config_allows_ollama_without_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

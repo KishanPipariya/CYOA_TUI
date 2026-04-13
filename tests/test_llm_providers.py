@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -182,19 +183,33 @@ async def test_mock_provider_stream_json():
     assert "digital void" in data["narrative"]
 
 
-@pytest.mark.asyncio
-async def test_model_broker_fallback_to_mock():
-    from cyoa.llm.broker import ModelBroker, StoryContext
+def test_model_broker_rejects_missing_llama_cpp_model() -> None:
+    from cyoa.llm.broker import ModelBroker
+
+    with pytest.raises(FileNotFoundError, match="model file does not exist"):
+        ModelBroker(model_path="completely_non_existent_model_1212.gguf")
+
+
+def test_model_broker_uses_mock_provider_when_requested() -> None:
+    from cyoa.llm.broker import ModelBroker
     from cyoa.llm.providers import MockProvider
 
-    # Use a non-existent path
-    m_path = "completely_non_existent_model_1212.gguf"
-    broker = ModelBroker(model_path=m_path)
+    with patch.dict(os.environ, {"LLM_PROVIDER": "mock"}, clear=False):
+        broker = ModelBroker()
+
     assert isinstance(broker.provider, MockProvider)
 
-    ctx = StoryContext("start")
-    node = await broker.generate_next_node_async(ctx)
-    assert "digital void" in node.narrative
+
+def test_model_broker_uses_llama_cpp_provider_when_model_exists(tmp_path: Path, mock_llama) -> None:
+    from cyoa.llm.broker import ModelBroker
+
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"gguf")
+
+    with patch.dict(os.environ, {"LLM_PROVIDER": "llama_cpp"}, clear=False):
+        broker = ModelBroker(model_path=str(model_path))
+
+    assert isinstance(broker.provider, LlamaCppProvider)
 
 
 def test_model_broker_uses_ollama_provider_when_requested():

@@ -100,6 +100,10 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:
         raise StartupConfigError(
             "No local model configured for llama_cpp. Use --model or set LLM_MODEL_PATH in .env."
         )
+    if provider == "llama_cpp" and model and not os.path.exists(model):
+        raise StartupConfigError(
+            f"Configured llama_cpp model file does not exist: {model!r}."
+        )
 
     return StartupConfig(
         model=model,
