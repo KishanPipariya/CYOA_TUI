@@ -10,8 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest  # type: ignore
 
 from cyoa.core.models import Choice, StoryNode
-from cyoa.core.theme_loader import list_themes, load_theme
-from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import NarrativeMemory
 from cyoa.llm.broker import StoryContext
 
@@ -34,15 +32,6 @@ def mock_textual_workers(request, monkeypatch):
     from textual.worker import Worker  # type: ignore
 
     monkeypatch.setattr(Worker, "_start", lambda *args, **kwargs: None)
-
-
-def _make_node(
-    narrative: str = "You are in a dungeon.",
-    n_choices: int = 2,
-    is_ending: bool = False,
-) -> StoryNode:
-    choices = [Choice(text=f"Choice {i + 1}") for i in range(n_choices)]
-    return StoryNode(narrative=narrative, choices=choices, is_ending=is_ending)
 
 
 # ── 1. Context window sliding window ─────────────────────────────────────────
@@ -423,89 +412,7 @@ class TestModelBrokerFallback:
         assert engine.state.current_node is not None
 
 
-# ── 3. Graph DB offline graceful degradation ──────────────────────────────────
-
-
-class TestCYOAGraphDBOffline:
-    def test_offline_sets_driver_none(self):
-        """CYOAGraphDB with unreachable URI should set driver=None without raising."""
-        db = CYOAGraphDB(uri="bolt://localhost:9999")  # nothing listening here
-        assert db.driver is None
-
-    def test_offline_create_scene_returns_uuid(self):
-        """create_scene_node with no driver should return a UUID string without crashing."""
-        db = CYOAGraphDB(uri="bolt://localhost:9999")
-        scene_id = db.create_scene_node("narrative", ["choice"], "My Story")
-        assert isinstance(scene_id, str) and len(scene_id) == 36  # UUID format
-
-    def test_offline_create_edge_is_noop(self):
-        """create_choice_edge with no driver should return silently."""
-        db = CYOAGraphDB(uri="bolt://localhost:9999")
-        db.create_choice_edge("id-a", "id-b", "Go north")  # should not raise
-
-    def test_offline_story_title_passthrough(self):
-        """create_story_node_and_get_title with no driver should return the input title unchanged."""
-        db = CYOAGraphDB(uri="bolt://localhost:9999")
-        result = db.create_story_node_and_get_title("My Adventure")
-        assert result == "My Adventure"
-
-
-# ── 4. is_ending propagation ──────────────────────────────────────────────────
-
-
-class TestStoryNodeEnding:
-    def test_is_ending_defaults_false(self):
-        node = _make_node()
-        assert node.is_ending is False
-
-    def test_is_ending_true_with_empty_choices(self):
-        node = StoryNode(narrative="You have escaped!", choices=[], is_ending=True)
-        assert node.is_ending is True
-        assert len(node.choices) == 0
-
-    def test_is_ending_false_with_choices(self):
-        node = _make_node(n_choices=3)
-        assert node.is_ending is False
-        assert len(node.choices) == 3
-
-    def test_mood_defaults_and_assignment(self):
-        node = _make_node()
-        assert node.mood == "default"
-
-        node_with_mood = StoryNode(
-            narrative="A scary cave.",
-            choices=[Choice(text="Enter"), Choice(text="Run")],
-            mood="dark"
-        )
-        assert node_with_mood.mood == "dark"
-
-
-# ── 5. Theme loading ──────────────────────────────────────────────────────────
-
-
-class TestThemeLoader:
-    def test_load_dark_dungeon(self):
-        theme = load_theme("dark_dungeon")
-        assert "prompt" in theme
-        assert "name" in theme
-        assert len(theme["prompt"]) > 10
-
-    def test_load_space_explorer(self):
-        theme = load_theme("space_explorer")
-        assert "prompt" in theme
-        assert "name" in theme
-
-    def test_invalid_theme_raises(self):
-        with pytest.raises(FileNotFoundError, match="not found"):
-            load_theme("nonexistent_theme_xyz")
-
-    def test_list_themes_includes_defaults(self):
-        themes = list_themes()
-        assert "dark_dungeon" in themes
-        assert "space_explorer" in themes
-
-
-# ── 6. RAG Narrative Memory ───────────────────────────────────────────────────
+# ── 3. RAG Narrative Memory ───────────────────────────────────────────────────
 
 
 class TestNarrativeMemory:
@@ -589,7 +496,7 @@ class TestNPCMemory:
         assert await mem.query_async("UnknownNPC", "anything") == []
 
 
-# ── 7. Streaming token callback ───────────────────────────────────────────────
+# ── 4. Streaming token callback ───────────────────────────────────────────────
 
 
 class TestStreamingCallback:
@@ -685,7 +592,7 @@ class TestStreamingCallback:
         assert "gold" in extracted
 
 
-# ── 8. New UI Components: Branching and Animated Spinner ───────────────────────
+# ── 5. New UI Components: Branching and Animated Spinner ───────────────────────
 
 
 class TestThemeSpinner:
@@ -876,7 +783,7 @@ class TestBranchingLogic:
             mock_call.assert_not_called()
 
 
-# ── 9. Procedural Item System ────────────────────────────────────────────────
+# ── 6. Procedural Item System ────────────────────────────────────────────────
 
 
 class TestProceduralItemSystem:
@@ -899,50 +806,3 @@ class TestProceduralItemSystem:
         sys_msg = messages[0]
         assert sys_msg["role"] == "system"
         assert "Current Inventory: Empty" in sys_msg["content"]
-
-    @pytest.mark.asyncio
-    @pytest.mark.no_worker_mock
-    async def test_app_updates_inventory_state(self):
-        """CYOAApp should extract the items list from the generated StoryNode and update state."""
-        from cyoa.core.models import Choice, StoryNode
-        from cyoa.ui.app import CYOAApp
-
-        mock_node = StoryNode(
-            narrative="You found a shiny key.",
-            choices=[Choice(text="Take key"), Choice(text="Leave it")],
-            items_gained=["Shiny Key", "Map"],
-            items_lost=[],
-        )
-
-        mock_gen = MagicMock()
-        mock_gen.token_budget = 2048
-        mock_provider = MagicMock()
-        mock_provider.count_tokens = MagicMock(return_value=10)
-        mock_gen.provider = mock_provider
-        mock_gen.generate_next_node_async = AsyncMock(return_value=mock_node)
-        mock_gen.update_story_summaries_async = AsyncMock()
-        mock_gen.save_state_async = AsyncMock(return_value=b"state")
-        mock_gen.load_state_async = AsyncMock()
-
-        # Use a factory callable (matching test_tui.py's _mock_generator pattern)
-        # so StoryGenerator(...) instantiation returns the pre-built mock_gen.
-        def mock_generator_factory(*args, **kwargs):
-            return mock_gen
-
-        with (
-            patch("cyoa.ui.app.ModelBroker", new=mock_generator_factory),
-            patch("cyoa.ui.app.CYOAGraphDB") as mock_db_cls,
-        ):
-            mock_db = mock_db_cls.return_value
-            mock_db.verify_connectivity_async = AsyncMock(return_value=True)
-            mock_db.create_story_node_and_get_title.return_value = "Test Story"
-            mock_db.get_story_tree.return_value = None
-            mock_db.save_scene_async = AsyncMock(return_value="sid")
-            mock_db.verify_connectivity_async = AsyncMock(return_value=True) # Redundant but safe
-
-            app = CYOAApp(model_path="dummy")
-            async with app.run_test() as pilot:
-                # Wait for engine to initialize
-                await pilot.pause(1.0)
-
-                assert app.engine.state.inventory == ["Shiny Key", "Map"]

@@ -74,3 +74,35 @@ def test_cb_reset_timeout():
     def success_func(): return "ok"
     assert cb.call(success_func) == "ok"
     assert cb.state == CircuitState.CLOSED
+
+
+def test_cb_half_open_failure_reopens_circuit():
+    cb = CircuitBreaker("test", failure_threshold=1, reset_timeout=0.05)
+
+    def fail():
+        raise ValueError("still failing")
+
+    with pytest.raises(ValueError):
+        cb.call(fail)
+    assert cb.state == CircuitState.OPEN
+
+    time.sleep(0.06)
+    with pytest.raises(ValueError):
+        cb.call(fail)
+
+    assert cb.state == CircuitState.OPEN
+    assert cb.failure_count >= 2
+
+
+def test_cb_is_available_reflects_timeout_window():
+    cb = CircuitBreaker("test", failure_threshold=1, reset_timeout=0.05)
+
+    def fail():
+        raise ValueError("fail")
+
+    with pytest.raises(ValueError):
+        cb.call(fail)
+
+    assert cb.is_available is False
+    time.sleep(0.06)
+    assert cb.is_available is True

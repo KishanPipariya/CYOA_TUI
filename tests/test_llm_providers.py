@@ -118,6 +118,34 @@ async def test_ollama_stream_json():
         assert "".join(chunks) == '{"narrative": "Ollama"}'
 
 
+@pytest.mark.asyncio
+async def test_ollama_stream_json_skips_malformed_lines():
+    async def async_iter(items):
+        for item in items:
+            yield item
+
+    mock_response = MagicMock()
+    mock_response.aiter_lines.return_value = async_iter(
+        [
+            "{not valid json",
+            json.dumps({"message": {"content": "A"}}),
+            json.dumps({"done": True}),
+        ]
+    )
+    mock_response.raise_for_status = MagicMock()
+
+    mock_context = MagicMock()
+    mock_context.__aenter__ = AsyncMock(return_value=mock_response)
+
+    with patch("httpx.AsyncClient.stream", return_value=mock_context):
+        provider = OllamaProvider(model="llama3")
+        chunks = []
+        async for chunk in provider.stream_json([{"role": "user", "content": "hi"}], {}):
+            chunks.append(chunk)
+
+    assert "".join(chunks) == "A"
+
+
 # ── MockProvider Tests ───────────────────────────────────────────────────────
 
 
@@ -166,3 +194,13 @@ async def test_model_broker_fallback_to_mock():
     ctx = StoryContext("start")
     node = await broker.generate_next_node_async(ctx)
     assert "digital void" in node.narrative
+
+
+def test_llama_cpp_token_count_falls_back_when_lock_is_busy(mock_llama):
+    provider = LlamaCppProvider(model_path="dummy.gguf")
+    provider._lock.acquire()
+    try:
+        text = "busy lock text"
+        assert provider.count_tokens(text) == len(text) // 4
+    finally:
+        provider._lock.release()
