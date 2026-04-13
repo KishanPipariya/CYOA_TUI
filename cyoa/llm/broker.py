@@ -332,7 +332,8 @@ class ModelBroker:
             base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
             return OllamaProvider(model=model, base_url=base_url)
         if provider_type == "mock":
-            return MockProvider(model_name=model_path or os.getenv("LLM_MODEL", "mock"))
+            mock_model = model_path or os.getenv("LLM_MODEL") or "mock"
+            return MockProvider(model_name=mock_model)
         else:
             m_path = model_path or os.getenv("LLM_MODEL_PATH")
             if not m_path:

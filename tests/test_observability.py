@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from typing import TypedDict
 
 import pytest
 
@@ -26,7 +27,7 @@ class FakeSpan:
     attributes: dict[str, object]
     events: list[tuple[str, dict[str, float]]] = field(default_factory=list)
     exceptions: list[BaseException] = field(default_factory=list)
-    status: object | None = None
+    status: obs.Status | None = None
     ended: bool = False
 
     def add_event(self, name: str, attributes: dict[str, float] | None = None) -> None:
@@ -35,7 +36,7 @@ class FakeSpan:
     def record_exception(self, exc: BaseException) -> None:
         self.exceptions.append(exc)
 
-    def set_status(self, status: object) -> None:
+    def set_status(self, status: obs.Status) -> None:
         self.status = status
 
     def set_attribute(self, key: str, value: object) -> None:
@@ -55,11 +56,24 @@ class FakeTracer:
         return span
 
 
+class FakeTelemetry(TypedDict):
+    tracer: FakeTracer
+    db_latency_histogram: FakeMetric
+    db_operation_counter: FakeMetric
+    db_error_counter: FakeMetric
+    engine_turn_duration_histogram: FakeMetric
+    engine_event_counter: FakeMetric
+    ttft_histogram: FakeMetric
+    tps_histogram: FakeMetric
+    success_counter: FakeMetric
+    failure_counter: FakeMetric
+    repair_counter: FakeMetric
+
+
 @pytest.fixture
-def fake_telemetry(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
-    tracer = FakeTracer()
-    metrics = {
-        "tracer": tracer,
+def fake_telemetry(monkeypatch: pytest.MonkeyPatch) -> FakeTelemetry:
+    metrics: FakeTelemetry = {
+        "tracer": FakeTracer(),
         "db_latency_histogram": FakeMetric(),
         "db_operation_counter": FakeMetric(),
         "db_error_counter": FakeMetric(),
@@ -88,7 +102,7 @@ def _patch_perf_counter(
 
 def test_db_observed_session_records_success_path(
     monkeypatch: pytest.MonkeyPatch,
-    fake_telemetry: dict[str, object],
+    fake_telemetry: FakeTelemetry,
 ) -> None:
     _patch_perf_counter(monkeypatch, [10.0, 10.25])
 
@@ -110,7 +124,7 @@ def test_db_observed_session_records_success_path(
 
 def test_db_observed_session_records_failure_path(
     monkeypatch: pytest.MonkeyPatch,
-    fake_telemetry: dict[str, object],
+    fake_telemetry: FakeTelemetry,
 ) -> None:
     _patch_perf_counter(monkeypatch, [20.0, 20.05])
 
@@ -134,12 +148,13 @@ def test_db_observed_session_records_failure_path(
     ]
     assert len(span.exceptions) == 1
     assert span.ended is True
+    assert span.status is not None
     assert span.status.status_code == obs.StatusCode.ERROR
 
 
 def test_engine_observed_session_tracks_process_turn_success(
     monkeypatch: pytest.MonkeyPatch,
-    fake_telemetry: dict[str, object],
+    fake_telemetry: FakeTelemetry,
 ) -> None:
     _patch_perf_counter(monkeypatch, [1.0, 1.15])
 
@@ -159,7 +174,7 @@ def test_engine_observed_session_tracks_process_turn_success(
 
 def test_llm_observed_session_records_success_metrics(
     monkeypatch: pytest.MonkeyPatch,
-    fake_telemetry: dict[str, object],
+    fake_telemetry: FakeTelemetry,
 ) -> None:
     _patch_perf_counter(monkeypatch, [5.0, 5.1, 5.6])
 
@@ -193,7 +208,7 @@ def test_llm_observed_session_records_success_metrics(
 
 def test_llm_observed_session_records_failure_metrics(
     monkeypatch: pytest.MonkeyPatch,
-    fake_telemetry: dict[str, object],
+    fake_telemetry: FakeTelemetry,
 ) -> None:
     _patch_perf_counter(monkeypatch, [7.0, 7.5])
 

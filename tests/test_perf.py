@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from unittest.mock import AsyncMock
 
@@ -80,7 +81,7 @@ class _StreamingProvider(LLMProvider):
 
 @pytest.mark.asyncio
 async def test_process_turn_records_ttft_and_duration_guardrails(monkeypatch):
-    perf_values = iter([1.0, 1.03, 1.12, 1.2, 1.2, 1.2])
+    perf_values: Iterator[float] = iter([1.0, 1.03, 1.12, 1.2, 1.2, 1.2])
 
     def fake_perf_counter() -> float:
         try:

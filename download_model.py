@@ -1,5 +1,7 @@
 import logging
 import os
+import platform
+import subprocess
 import sys
 from pathlib import Path
 
@@ -19,21 +21,23 @@ MODEL_DIR = Path("models")
 ENV_FILE = Path(".env")
 REPO_USER = "Qwen"
 
+
 def get_total_ram_gb() -> float:
     """Detect total system memory."""
     try:
-        # Mac / POSIX
-        import subprocess
-        if sys.platform == "darwin":
+        system_name = platform.system()
+        if system_name == "Darwin":
             cmd = ["sysctl", "-n", "hw.memsize"]
             val = subprocess.check_output(cmd).decode().strip()
             return int(val) / (1024**3)
 
-        # Generic POSIX (Linux)
-        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024**3)
+        if system_name == "Linux":
+            return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024**3)
     except Exception:
         # Ultimate fallback
         return 8.0
+
+    return 8.0
 
 def recommend_model(ram_gb: float) -> tuple[str, str, str]:
     """Recommend a model based on hardware profile."""
@@ -72,21 +76,22 @@ def check_for_existing_model() -> str | None:
 
     return None
 
-def setup_env_file():
+def setup_env_file() -> None:
     """Ensure .env exists with initial comments if missing."""
     if not ENV_FILE.exists():
         logger.info("Creating new .env file.")
-        with open(ENV_FILE, "w") as f:
+        with ENV_FILE.open("w") as f:
             f.write("# CYOA TUI Environment Configuration\n\n")
 
-def main():
+
+def main() -> int:
     logger.info("--- CYOA Model Bootstrapper ---")
 
     existing = check_for_existing_model()
     if existing:
         logger.info(f"Existing model detected: {existing}")
         logger.info("Weights already present. Skipping download.")
-        return
+        return 0
 
     ram = get_total_ram_gb()
     repo_id, filename, desc = recommend_model(ram)
@@ -96,9 +101,9 @@ def main():
     logger.info(f"Repository: {repo_id}")
 
     confirm = input(f"\nProceed with download of '{filename}'? (y/n): ")
-    if confirm.lower() != 'y':
-        logger.warn("Download aborted by user.")
-        return
+    if confirm.lower() != "y":
+        logger.warning("Download aborted by user.")
+        return 0
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -119,14 +124,14 @@ def main():
         logger.info(f"SUCCESS: Model downloaded to {relative_path}")
         logger.info("Application is now ready to launch.")
         logger.info("--------------------------------------------------")
+        return 0
 
     except KeyboardInterrupt:
-        logger.warn("\nDownload interrupted by user.")
-        sys.exit(1)
+        logger.warning("\nDownload interrupted by user.")
+        return 1
     except Exception as e:
         logger.error(f"Download Error: {e}")
-        sys.exit(1)
+        return 1
 
 if __name__ == "__main__":
-    main()
-
+    sys.exit(main())

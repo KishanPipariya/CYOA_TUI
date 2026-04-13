@@ -58,7 +58,6 @@ ignore = [
 known-first-party = ["cyoa"]
 
 [tool.ruff.lint.per-file-ignores]
-"cyoa/db/graph_db.py" = ["C901"]
 "cyoa/llm/providers.py" = ["C901"]
 
 [tool.mypy]
@@ -78,6 +77,8 @@ strict_equality = true
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = "tests.*"
+module = ["tests", "tests.*"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
+check_untyped_defs = false
+warn_unused_ignores = false
