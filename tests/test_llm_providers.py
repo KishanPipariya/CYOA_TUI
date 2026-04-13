@@ -227,6 +227,7 @@ def test_model_broker_rejects_missing_llama_cpp_model() -> None:
         ModelBroker(model_path="completely_non_existent_model_1212.gguf")
 
 
+@pytest.mark.smoke
 def test_model_broker_uses_mock_provider_when_requested() -> None:
     from cyoa.llm.broker import ModelBroker
     from cyoa.llm.providers import MockProvider

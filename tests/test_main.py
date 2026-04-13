@@ -16,6 +16,7 @@ def _args(**overrides: str | None) -> argparse.Namespace:
     return argparse.Namespace(**values)
 
 
+@pytest.mark.smoke
 def test_validate_startup_config_requires_model_for_llama_cpp(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "llama_cpp")
 
@@ -82,6 +83,7 @@ def test_validate_startup_config_rejects_unknown_provider(
         main.validate_startup_config(_args())
 
 
+@pytest.mark.smoke
 def test_main_closes_logger_on_keyboard_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     logger_service = MagicMock()

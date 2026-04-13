@@ -615,6 +615,7 @@ async def test_save_and_load_game(mock_app_dependencies, tmp_path, monkeypatch):
         assert app.turn_count == 1
 
 
+@pytest.mark.smoke
 @pytest.mark.asyncio
 async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeypatch):
     """Test that saving and then loading a game correctly restores all relevant state."""

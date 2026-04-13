@@ -116,6 +116,7 @@ or `--model`; numeric limits such as `LLM_N_CTX`, `LLM_MAX_TOKENS`,
 
 These are the local quality-gate commands mirrored by CI:
 
+*   **Smoke Suite**: `bash scripts/run_smoke.sh`
 *   **Tests + Coverage**: `uv run pytest --cov=cyoa --cov-report=term-missing --cov-report=xml --cov-report=json -q`
 *   **Coverage Floors**: `uv run python scripts/check_coverage.py`
 *   **Linting**: `uv run ruff check .`
@@ -123,7 +124,36 @@ These are the local quality-gate commands mirrored by CI:
 
 The GitHub Actions workflow at [`.github/workflows/quality.yml`](./.github/workflows/quality.yml)
 runs the same staged gates on pushes to `main`/`master` and on pull requests:
-coverage-enabled `pytest`, the per-package coverage gate, `ruff`, then `mypy cyoa`.
+the smoke suite, coverage-enabled `pytest`, the per-package coverage gate,
+`ruff`, then `mypy cyoa`.
+
+## Operational Runbook
+
+Use this when local setup drifts or startup fails before the TUI becomes interactive.
+
+### Fast Startup Checks
+
+1. Sync dependencies: `uv sync --group dev`
+2. Run startup/config smoke checks: `bash scripts/run_smoke.sh`
+3. Launch with the lightweight provider when you only need wiring validation:
+   `LLM_PROVIDER=mock uv run python main.py --prompt "Smoke test"`
+
+If step 2 fails:
+*   `Unsupported LLM_PROVIDER` means `LLM_PROVIDER` is not one of `llama_cpp`, `ollama`, or `mock`.
+*   `No local model configured` or `model file does not exist` only applies to `llama_cpp`.
+*   Integer/float validation failures (`LLM_N_CTX`, `LLM_MAX_TOKENS`, `LLM_TOKEN_BUDGET`, `LLM_TEMPERATURE`) happen before UI boot, so fix env/config first rather than debugging the TUI.
+
+### Provider Boot Diagnostics
+
+*   `mock`: no model weights or external service required. Use it first to isolate app wiring, save/load, and startup validation from inference problems.
+*   `llama_cpp`: verify `LLM_MODEL_PATH` or `--model` points to an existing `.gguf` file. A missing file is a hard startup failure.
+*   `ollama`: verify the daemon is up and the configured model exists. The app can boot without a local `.gguf`, but generation will fail later if Ollama is unreachable or missing the model.
+
+### Neo4j Checks
+
+1. Start infrastructure: `docker-compose up -d`
+2. Confirm Neo4j is reachable at `bolt://localhost:7687`
+3. Apply the schema bootstrap once per database:
 
 ## Neo4j Schema Hardening
 
@@ -140,3 +170,28 @@ CREATE INDEX scene_story_title IF NOT EXISTS FOR (s:Scene) ON (s.story_title);
 These constraints back the retrieval assumptions in `cyoa/db/graph_db.py`:
 one canonical Story per title, one Scene per ID, and efficient filtering of
 scenes by `story_title`.
+
+Expected degraded mode:
+*   If Neo4j auth or connectivity fails, graph persistence is disabled and warnings are logged, but the app can still run in-memory for the session.
+*   Save/load via local JSON files remains available even when Neo4j is down.
+
+### Chroma Checks
+
+Chroma is optional runtime enrichment, not the source of truth.
+
+Expected degraded mode:
+*   If Chroma initialization fails, narrative generation falls back to the in-memory recap buffer.
+*   The app periodically re-probes Chroma after cooldown, so a temporary outage can self-heal without restart.
+
+Fast checks:
+*   Start the stack with `docker-compose up -d`
+*   Launch once with `LLM_PROVIDER=mock` to confirm the app still boots even if vector memory is degraded
+*   Watch for recovery/fallback messages rather than treating the first Chroma warning as a permanent failure
+
+### Save/Load Smoke Scope
+
+The smoke suite covers:
+*   startup validation failure for a misconfigured `llama_cpp` boot
+*   app launch on the `mock` provider path
+*   mock-provider broker selection
+*   full UI save/load restoration without local model inference

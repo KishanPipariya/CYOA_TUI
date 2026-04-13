@@ -35,6 +35,7 @@ dev = [
 asyncio_mode = "auto"
 markers = [
     "no_worker_mock: skip the autouse mock_textual_workers fixture for tests using app.run_test()",
+    "smoke: fast operational smoke coverage for startup validation, provider boot, and save/load flow",
 ]
 
 [tool.coverage.run]
