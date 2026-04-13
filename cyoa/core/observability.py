@@ -1,6 +1,8 @@
 import logging
 import os
 import time
+from types import TracebackType
+from typing import Self
 
 from opentelemetry import metrics, trace
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
@@ -10,6 +12,7 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.trace import Span, Status, StatusCode
 
 logger = logging.getLogger(__name__)
 
@@ -115,13 +118,13 @@ engine_event_counter = meter.create_counter(
 class DBObservedSession:
     """Helper to track timing and errors for a single DB call."""
 
-    def __init__(self, db_type: str, operation: str):
+    def __init__(self, db_type: str, operation: str) -> None:
         self.db_type = db_type
         self.operation = operation
-        self.start_time = None
-        self.span = None
+        self.start_time: float | None = None
+        self.span: Span | None = None
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         self.start_time = time.perf_counter()
         # Use provided operation name directly for span
         self.span = tracer.start_span(
@@ -130,8 +133,14 @@ class DBObservedSession:
         )
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        duration_ms = (time.perf_counter() - self.start_time) * 1000
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        del exc_tb
+        duration_ms = self._elapsed_ms()
         db_latency_histogram.record(
             duration_ms, {"db.type": self.db_type, "db.operation": self.operation}
         )
@@ -148,23 +157,33 @@ class DBObservedSession:
                     "error_type": exc_type.__name__,
                 },
             )
-            if self.span:
+            if self.span and exc_val is not None:
                 self.span.record_exception(exc_val)
-                self.span.set_status(trace.Status(trace.StatusCode.ERROR))
+                self.span.set_status(Status(StatusCode.ERROR))
 
         if self.span:
             self.span.end()
+
+    def _elapsed_ms(self) -> float:
+        if self.start_time is None:
+            logger.warning(
+                "DBObservedSession exited before start time was initialized for %s.%s",
+                self.db_type,
+                self.operation,
+            )
+            return 0.0
+        return (time.perf_counter() - self.start_time) * 1000
 
 
 class EngineObservedSession:
     """Helper to track timing for engine operations."""
 
-    def __init__(self, operation: str):
+    def __init__(self, operation: str) -> None:
         self.operation = operation
-        self.start_time = None
-        self.span = None
+        self.start_time: float | None = None
+        self.span: Span | None = None
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         self.start_time = time.perf_counter()
         self.span = tracer.start_span(
             f"engine.{self.operation}",
@@ -172,8 +191,14 @@ class EngineObservedSession:
         )
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        duration_ms = (time.perf_counter() - self.start_time) * 1000
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        del exc_tb
+        duration_ms = self._elapsed_ms()
         if self.operation == "process_turn":
             engine_turn_duration_histogram.record(duration_ms)
 
@@ -181,26 +206,35 @@ class EngineObservedSession:
             1, {"engine.operation": self.operation, "success": str(exc_type is None)}
         )
 
-        if exc_type and self.span:
+        if exc_type and self.span and exc_val is not None:
             self.span.record_exception(exc_val)
-            self.span.set_status(trace.Status(trace.StatusCode.ERROR))
+            self.span.set_status(Status(StatusCode.ERROR))
 
         if self.span:
             self.span.end()
+
+    def _elapsed_ms(self) -> float:
+        if self.start_time is None:
+            logger.warning(
+                "EngineObservedSession exited before start time was initialized for %s",
+                self.operation,
+            )
+            return 0.0
+        return (time.perf_counter() - self.start_time) * 1000
 
 
 class LLMObservedSession:
     """Helper to track timing and token counts for a single LLM call."""
 
-    def __init__(self, model_name: str, task: str):
+    def __init__(self, model_name: str, task: str) -> None:
         self.model_name = model_name
         self.task = task
-        self.start_time = None
-        self.first_token_time = None
+        self.start_time: float | None = None
+        self.first_token_time: float | None = None
         self.token_count = 0
-        self.span = None
+        self.span: Span | None = None
 
-    def start(self):
+    def start(self) -> Self:
         self.start_time = time.perf_counter()
         self.span = tracer.start_span(
             f"llm.generate.{self.task}",
@@ -208,18 +242,30 @@ class LLMObservedSession:
         )
         return self
 
-    def report_first_token(self):
-        if self.first_token_time is None:
-            self.first_token_time = time.perf_counter()
-            ttft_ms = (self.first_token_time - self.start_time) * 1000
-            ttft_histogram.record(ttft_ms, {"llm.model": self.model_name, "llm.task": self.task})
-            if self.span:
-                self.span.add_event("first_token", attributes={"ttft_ms": ttft_ms})
+    def report_first_token(self) -> None:
+        if self.start_time is None or self.first_token_time is not None:
+            return
 
-    def report_token(self, count: int = 1):
+        self.first_token_time = time.perf_counter()
+        ttft_ms = (self.first_token_time - self.start_time) * 1000
+        ttft_histogram.record(ttft_ms, {"llm.model": self.model_name, "llm.task": self.task})
+        if self.span:
+            self.span.add_event("first_token", attributes={"ttft_ms": ttft_ms})
+
+    def report_token(self, count: int = 1) -> None:
         self.token_count += count
 
-    def end(self, success: bool = True):
+    def end(self, success: bool = True) -> None:
+        if self.start_time is None:
+            logger.warning(
+                "LLMObservedSession ended before start time was initialized for %s/%s",
+                self.model_name,
+                self.task,
+            )
+            if self.span:
+                self.span.end()
+            return
+
         end_time = time.perf_counter()
         duration = end_time - self.start_time
 
@@ -237,5 +283,5 @@ class LLMObservedSession:
             self.span.end()
 
 
-def record_repair_attempt(model_name: str, error_type: str):
+def record_repair_attempt(model_name: str, error_type: str) -> None:
     repair_counter.add(1, {"llm.model": model_name, "error_type": error_type})
