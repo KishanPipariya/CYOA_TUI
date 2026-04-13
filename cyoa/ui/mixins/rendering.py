@@ -1,8 +1,10 @@
 import logging
 from uuid import uuid4
+
 from textual.app import App
-from textual.widgets import Markdown, Static, Button
 from textual.containers import Container
+from textual.widgets import Button, Markdown, Static
+
 from cyoa.core import constants
 from cyoa.core.models import StoryNode
 from cyoa.ui.ascii_art import SCENE_ART
@@ -239,6 +241,7 @@ class RenderingMixin:
 
         # 2. Journal update
         from textual.widgets import Label, ListView
+
         from cyoa.ui.components import JournalListItem
 
         journal_list = self.query_one("#journal-list", ListView)

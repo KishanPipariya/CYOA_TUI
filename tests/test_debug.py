@@ -23,7 +23,7 @@ async def test_debug_stats():
         mock_db.create_story_node_and_get_title.return_value = "Test Story"
         mock_db.get_story_tree.return_value = None
         mock_db.save_scene_async = AsyncMock(return_value="sid")
-        
+
         app = CYOAApp(model_path="dummy")
         async with app.run_test() as pilot:
             await pilot.pause(0.5)

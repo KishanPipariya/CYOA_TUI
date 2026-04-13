@@ -1,6 +1,8 @@
 import logging
+
 from textual.app import App
 from textual.widgets import ListView
+
 from cyoa.core.models import StoryNode
 from cyoa.ui.components import StatusDisplay
 

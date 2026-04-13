@@ -1,10 +1,11 @@
 import asyncio
 import logging
 from typing import Any
+
 from textual import work
 from textual.app import App
-from textual.widgets import Markdown, Static, ListView, Label, Tree
-from cyoa.core.events import bus, Events
+from textual.widgets import Label, ListView, Markdown, Static, Tree
+
 from cyoa.core import constants
 from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, JournalListItem
 
@@ -243,7 +244,7 @@ class NavigationMixin:
         def add_children(parent_node: Any, scene_id: str) -> None:
             scene = nodes[scene_id]
             mood = scene.get("mood", "default")
-            
+
             # Compact mood markers for consistent visual language.
             mood_map = {
                 "mysterious": ("M", "magenta"),
@@ -255,7 +256,7 @@ class NavigationMixin:
                 "default": ("N", "white"),
             }
             marker, color = mood_map.get(mood, mood_map["default"])
-            
+
             preview = scene["narrative"][:20].replace("\\n", " ").strip() + "..."
             if scene_id == self.engine.state.current_scene_id:
                 label = f"[b][reverse][{marker}] {preview}[/reverse][/b]"

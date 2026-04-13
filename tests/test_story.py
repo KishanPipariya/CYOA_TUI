@@ -255,7 +255,7 @@ class TestModelBrokerFallback:
                 "GARBAGE {",
                 json.dumps(
                     {
-                        "narrative": "Repaired!", 
+                        "narrative": "Repaired!",
                         "choices": [{"text": "OK"}, {"text": "Cancel"}],
                         "items_gained": ["Sword"],
                         "items_lost": [],
@@ -268,7 +268,7 @@ class TestModelBrokerFallback:
         broker = ModelBroker(provider=mock_provider)
         # Force unified mode for this test to match the expected call count logic
         broker.unified_mode = True
-        
+
         ctx = StoryContext("start")
         node = await broker.generate_next_node_async(ctx)
 

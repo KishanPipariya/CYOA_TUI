@@ -26,8 +26,7 @@ from cyoa.core.events import Events, bus
 from cyoa.core.models import StoryNode
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.llm.broker import ModelBroker
-from cyoa.ui.components import StatusDisplay, ThemeSpinner
-from cyoa.ui.components import JournalListItem
+from cyoa.ui.components import JournalListItem, StatusDisplay, ThemeSpinner
 from cyoa.ui.mixins import (
     EventsMixin,
     NavigationMixin,

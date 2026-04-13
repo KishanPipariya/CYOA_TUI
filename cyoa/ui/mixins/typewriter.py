@@ -1,7 +1,9 @@
 import asyncio
 import logging
+
 from textual import work
 from textual.app import App
+
 from cyoa.core import constants, utils
 
 logger = logging.getLogger(__name__)

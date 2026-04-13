@@ -1,8 +1,10 @@
 import json
 import logging
 import os
+
 from textual.app import App
-from textual.widgets import Markdown, Button, ListView
+from textual.widgets import Button, ListView, Markdown
+
 from cyoa.core import constants
 
 logger = logging.getLogger(__name__)

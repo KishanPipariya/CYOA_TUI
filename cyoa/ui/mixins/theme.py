@@ -1,10 +1,9 @@
 import logging
-from typing import Any
 
 from textual.app import App
-from textual.theme import Theme, BUILTIN_THEMES
+from textual.theme import BUILTIN_THEMES, Theme
 
-from cyoa.core import utils, theme_loader
+from cyoa.core import theme_loader, utils
 from cyoa.ui.components import ThemeSpinner
 
 logger = logging.getLogger(__name__)
