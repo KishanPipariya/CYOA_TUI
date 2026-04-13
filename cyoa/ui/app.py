@@ -285,8 +285,9 @@ class CYOAApp(
         # Skip long sleep if the generator is idle
         is_locked = False
         lock = getattr(self.generator, "_lock", None)
-        if hasattr(lock, "locked"):
-            is_locked = lock.locked()
+        locked = getattr(lock, "locked", None)
+        if callable(locked):
+            is_locked = bool(locked())
 
         if is_locked:
             await asyncio.sleep(2.0)
@@ -327,8 +328,12 @@ class CYOAApp(
         try:
             # U1 Fix: Only skip if clicking within the story container
             story = self.query_one("#story-container")
-            if story.is_ancestor_of(event.control):
-                self.action_skip_typewriter()
+            current = event.control
+            while current is not None:
+                if current is story:
+                    self.action_skip_typewriter()
+                    break
+                current = getattr(current, "parent", None)
         except (Exception, KeyError) as e:
             logger.debug("Click handler failed: %s", e)
 

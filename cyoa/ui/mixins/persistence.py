@@ -2,10 +2,11 @@ import json
 import logging
 import os
 
-from textual.app import App
+from textual.containers import Container
 from textual.widgets import Button, ListView, Markdown
 
 from cyoa.core import constants
+from cyoa.ui.mixins.contracts import as_mixin_host, as_textual_app
 
 logger = logging.getLogger(__name__)
 
@@ -14,33 +15,37 @@ class PersistenceMixin:
 
     def action_save_game(self) -> None:
         """Serialize the current game state to a JSON save file."""
-        assert isinstance(self, App)
-        if not self.engine or not self.engine.state.story_title or not self.engine.state.current_node:
-            self.notify("Nothing to save yet.", severity="warning", timeout=2)
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        if not host.engine or not host.engine.state.story_title or not host.engine.state.current_node:
+            app.notify("Nothing to save yet.", severity="warning", timeout=2)
             return
 
         os.makedirs(constants.SAVES_DIR, exist_ok=True)
         safe_title = "".join(
-            c if c.isalnum() or c in " _-" else "_" for c in self.engine.state.story_title
+            c if c.isalnum() or c in " _-" else "_" for c in host.engine.state.story_title
         )
-        save_path = os.path.join(constants.SAVES_DIR, f"{safe_title}_turn{self.engine.state.turn_count}.json")
+        save_path = os.path.join(
+            constants.SAVES_DIR,
+            f"{safe_title}_turn{host.engine.state.turn_count}.json",
+        )
 
-        save_data = self.engine.get_save_data()
+        save_data = host.engine.get_save_data()
 
-        save_data["current_story_text"] = self._current_story
+        save_data["current_story_text"] = host._current_story
 
         try:
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(save_data, f, indent=2, ensure_ascii=False)
-            self.notify(f"Game saved to {save_path}", severity="information", timeout=3)
+            app.notify(f"Game saved to {save_path}", severity="information", timeout=3)
         except OSError as e:
-            self.notify(f"Save failed: {e}", severity="error", timeout=3)
+            app.notify(f"Save failed: {e}", severity="error", timeout=3)
 
     def action_load_game(self) -> None:
         """Show available save files and load a selected one."""
-        assert isinstance(self, App)
+        app = as_textual_app(self)
         if not os.path.isdir(constants.SAVES_DIR):
-            self.notify("No saves found.", severity="warning", timeout=2)
+            app.notify("No saves found.", severity="warning", timeout=2)
             return
 
         save_files = sorted(
@@ -49,7 +54,7 @@ class PersistenceMixin:
             reverse=True,
         )
         if not save_files:
-            self.notify("No saves found.", severity="warning", timeout=2)
+            app.notify("No saves found.", severity="warning", timeout=2)
             return
 
         from cyoa.ui.components import LoadGameScreen
@@ -58,53 +63,54 @@ class PersistenceMixin:
             if save_file:
                 self._restore_from_save(os.path.join(constants.SAVES_DIR, save_file))
 
-        self.push_screen(LoadGameScreen(save_files), on_selected)
+        app.push_screen(LoadGameScreen(save_files), on_selected)
 
     def _restore_from_save(self, save_path: str) -> None:
         """Load game state via the engine."""
-        assert isinstance(self, App)
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
         try:
             with open(save_path, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError) as e:
-            self.notify(f"Load failed: {e}", severity="error", timeout=3)
+            app.notify(f"Load failed: {e}", severity="error", timeout=3)
             return
 
-        if not self.engine:
+        if not host.engine:
             return
 
         # Cancel speculative generation before hydrating; keep core UI workers alive.
-        self.workers.cancel_group(self, "speculation")
+        app.workers.cancel_group(app, "speculation")
 
-        self._current_story = data.get("current_story_text", constants.LOADING_ART)
-        self._current_turn_text = self._current_story
-        self._loading_suffix_shown = False
+        host._current_story = data.get("current_story_text", constants.LOADING_ART)
+        host._current_turn_text = host._current_story
+        host._loading_suffix_shown = False
 
-        self.engine.load_save_data(data)
+        host.engine.load_save_data(data)
 
         # Sync UI
-        container = self.query_one("#story-container")
+        container = app.query_one("#story-container")
         for md in container.query(Markdown):
             md.remove()
 
-        new_turn = Markdown(self._current_turn_text, classes="story-turn")
+        new_turn = Markdown(host._current_turn_text, classes="story-turn")
         container.mount(new_turn, before="#scene-art")
-        self._current_turn_widget = new_turn
+        host._current_turn_widget = new_turn
 
-        self._scroll_to_bottom()
+        host._scroll_to_bottom()
 
         # U8 Fix: If loaded node is empty (error case), provide a way out
-        choices_container = self.query_one("#choices-container")
+        choices_container = app.query_one("#choices-container", Container)
         choices_container.remove_children()
-        if self.engine.state.current_node:
-            self._mount_choice_buttons(self.engine.state.current_node, choices_container, False)
+        if host.engine.state.current_node:
+            host._mount_choice_buttons(host.engine.state.current_node, choices_container, False)
         else:
             choices_container.mount(Button("✦ Start a New Adventure", id="btn-new-adventure", variant="success"))
 
-        self.query_one("#journal-list", ListView).clear()
+        app.query_one("#journal-list", ListView).clear()
 
-        self.notify(
-            f"Loaded save from Turn {self.engine.state.turn_count}.",
+        app.notify(
+            f"Loaded save from Turn {host.engine.state.turn_count}.",
             severity="information",
             timeout=3,
         )

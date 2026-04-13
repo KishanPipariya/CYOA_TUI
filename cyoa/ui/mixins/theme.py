@@ -1,10 +1,10 @@
 import logging
 
-from textual.app import App
 from textual.theme import BUILTIN_THEMES, Theme
 
 from cyoa.core import theme_loader, utils
 from cyoa.ui.components import ThemeSpinner
+from cyoa.ui.mixins.contracts import as_mixin_host, as_textual_app
 
 logger = logging.getLogger(__name__)
 
@@ -13,9 +13,10 @@ class ThemeMixin:
 
     def watch_mood(self, old_mood: str, new_mood: str) -> None:
         """Update the main container class and application theme when the mood changes."""
-        assert isinstance(self, App)
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
         try:
-            container = self.query_one("#main-container")
+            container = app.query_one("#main-container")
             container.remove_class(f"mood-{old_mood}")
             container.add_class(f"mood-{new_mood}")
 
@@ -25,7 +26,7 @@ class ThemeMixin:
             if mood_config:
                 # 1. Update Spinner frames
                 try:
-                    spinner = self.query_one("#loading", ThemeSpinner)
+                    spinner = app.query_one("#loading", ThemeSpinner)
                     if "spinner_frames" in mood_config:
                         spinner.frames = mood_config["spinner_frames"]
                         spinner._frame_idx = 0
@@ -35,12 +36,12 @@ class ThemeMixin:
                 # 2. Update App Theme (accent color)
                 accent = mood_config.get("accent_color")
                 if accent:
-                    base_theme_name = "textual-dark" if self.dark else "textual-light"
+                    base_theme_name = "textual-dark" if host.dark else "textual-light"
                     base_theme = BUILTIN_THEMES.get(base_theme_name)
                     if base_theme:
                         theme_name = f"mood-{new_mood}"
                         # Re-register theme with new accent
-                        self.register_theme(
+                        app.register_theme(
                             Theme(
                                 name=theme_name,
                                 primary=base_theme.primary,
@@ -57,25 +58,26 @@ class ThemeMixin:
                                 dark=base_theme.dark,
                             )
                         )
-                        self.theme = theme_name
+                        app.theme = theme_name
         except Exception as e:
             logger.debug("Mood watch update failed from %s to %s: %s", old_mood, new_mood, e)
 
     def action_toggle_dark(self) -> None:
         """Toggle dark mode and persist preference."""
-        assert isinstance(self, App)
-        self.dark = not self.dark
+        host = as_mixin_host(self)
+        host.dark = not host.dark
         config = utils.load_config()
-        config["dark"] = self.dark
+        config["dark"] = host.dark
         utils.save_config(config)
 
     def _apply_custom_accent(self, accent_color: str) -> None:
         """Apply a custom accent color to the current theme."""
-        assert isinstance(self, App)
-        base_theme_name = "textual-dark" if self.dark else "textual-light"
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        base_theme_name = "textual-dark" if host.dark else "textual-light"
         base_theme = BUILTIN_THEMES.get(base_theme_name)
         if base_theme:
-            self.register_theme(
+            app.register_theme(
                 Theme(
                     name="cyoa-custom",
                     primary=base_theme.primary,
@@ -92,4 +94,4 @@ class ThemeMixin:
                     dark=base_theme.dark,
                 )
             )
-            self.theme = "cyoa-custom"
+            app.theme = "cyoa-custom"

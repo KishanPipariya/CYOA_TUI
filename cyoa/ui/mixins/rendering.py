@@ -1,7 +1,6 @@
 import logging
 from uuid import uuid4
 
-from textual.app import App
 from textual.containers import Container
 from textual.widgets import Button, Markdown, Static
 
@@ -9,6 +8,7 @@ from cyoa.core import constants
 from cyoa.core.models import StoryNode
 from cyoa.ui.ascii_art import SCENE_ART
 from cyoa.ui.components import StatusDisplay
+from cyoa.ui.mixins.contracts import as_mixin_host, as_textual_app
 
 logger = logging.getLogger(__name__)
 
@@ -25,30 +25,31 @@ class RenderingMixin:
 
     def _stream_narrative(self, partial: str) -> None:
         """Streaming callback: feeds the typewriter queue or updates UI immediately."""
-        assert isinstance(self, App)
-        if self._loading_suffix_shown:
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        if host._loading_suffix_shown:
             # First token batch arrived — loading state is visual-only (spinner).
-            self._loading_suffix_shown = False
-            self.query_one("#loading").add_class("hidden")
+            host._loading_suffix_shown = False
+            app.query_one("#loading").add_class("hidden")
 
-            if self._current_story == constants.LOADING_ART:
-                self._current_story = ""
-                self._current_turn_text = ""
+            if host._current_story == constants.LOADING_ART:
+                host._current_story = ""
+                host._current_turn_text = ""
 
-        if not self.typewriter_enabled:
-            self._current_story += partial
-            self._current_turn_text += partial
-            if hasattr(self, "_current_turn_widget"):
-                self._current_turn_widget.update(self._current_turn_text)
-            if self._is_at_bottom():
-                self._scroll_to_bottom(animate=False)
+        if not host.typewriter_enabled:
+            host._current_story += partial
+            host._current_turn_text += partial
+            host._current_turn_widget.update(host._current_turn_text)
+            if host._is_at_bottom():
+                host._scroll_to_bottom(animate=False)
         else:
-            self._typewriter_queue.put_nowait(partial)
+            host._typewriter_queue.put_nowait(partial)
 
     def show_loading(self, selected_button_id: str | None = None) -> None:
         """Clear choice buttons and show spinner while generation is in progress."""
-        assert isinstance(self, App)
-        choices_container = self.query_one("#choices-container")
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        choices_container = app.query_one("#choices-container")
         if selected_button_id is not None:
             # Keep only the selected button, disable and dim it
             for btn in list(choices_container.query(Button)):
@@ -59,15 +60,15 @@ class RenderingMixin:
                     btn.variant = "default"
         else:
             choices_container.remove_children()
-        self.query_one("#loading").remove_class("hidden")
+        app.query_one("#loading").remove_class("hidden")
 
-        self._loading_suffix_shown = True
+        host._loading_suffix_shown = True
 
     def _is_at_bottom(self) -> bool:
         """Return True if the story container is near its bottom edge."""
-        assert isinstance(self, App)
+        app = as_textual_app(self)
         try:
-            container = self.query_one("#story-container")
+            container = app.query_one("#story-container")
             return container.scroll_y >= container.max_scroll_y - 8
         except Exception as e:
             logger.debug("Failed to check if at bottom: %s", e)
@@ -75,18 +76,19 @@ class RenderingMixin:
 
     def _scroll_to_bottom(self, animate: bool = True) -> None:
         """Scroll the story container to the end after the next refresh."""
-        assert isinstance(self, App)
+        app = as_textual_app(self)
         try:
-            container = self.query_one("#story-container")
-            self.call_after_refresh(lambda: container.scroll_end(animate=animate))
+            container = app.query_one("#story-container")
+            app.call_after_refresh(lambda: container.scroll_end(animate=animate))
         except Exception as e:
             logger.debug("Failed to scroll to bottom: %s", e)
 
     def display_node(self, node: StoryNode) -> None:
         """Render a newly generated StoryNode to the UI (after streaming completes)."""
-        assert isinstance(self, App)
-        self.query_one("#loading").add_class("hidden")
-        self.mood = getattr(node, "mood", "default")
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        app.query_one("#loading").add_class("hidden")
+        host.mood = getattr(node, "mood", "default")
 
         is_error = node.narrative.startswith(constants.ERROR_NARRATIVE_PREFIX)
 
@@ -99,13 +101,12 @@ class RenderingMixin:
         # 3. Add error message if necessary
         if is_error and "⚠️" not in node.narrative:
             error_msg = "\n\n> ⚠️ **An error occurred.** The story engine could not generate a valid response."
-            self._current_story += error_msg
-            self._current_turn_text += error_msg
+            host._current_story += error_msg
+            host._current_turn_text += error_msg
 
         # 4. Update the widget
         try:
-            if hasattr(self, "_current_turn_widget"):
-                self._current_turn_widget.update(self._current_turn_text)
+            host._current_turn_widget.update(host._current_turn_text)
         except Exception as e:
             logger.debug("Failed to update current turn widget: %s", e)
 
@@ -113,22 +114,21 @@ class RenderingMixin:
         self._update_ui_stats()
 
         # 6. Mount choices
-        choices_container = self.query_one("#choices-container", Container)
+        choices_container = app.query_one("#choices-container", Container)
         choices_container.remove_children()
         self._mount_choice_buttons(node, choices_container, is_error)
 
         # 7. Trigger speculation
-        if hasattr(self, "speculate_all_choices"):
-             self.speculate_all_choices(node)
+        host.speculate_all_choices(node)
 
         # 8. Scroll
         self._scroll_to_bottom()
 
     def _update_scene_art(self, narrative: str, is_error: bool) -> None:
         """Detect and update the separate ASCII art widget."""
-        assert isinstance(self, App)
+        app = as_textual_app(self)
         art = _detect_scene_art(narrative) if not is_error else None
-        art_widget = self.query_one("#scene-art", Static)
+        art_widget = app.query_one("#scene-art", Static)
         if art:
             art_widget.update(art)
             art_widget.remove_class("hidden")
@@ -138,41 +138,43 @@ class RenderingMixin:
 
     def _sync_narrative(self, narrative: str) -> None:
         """Synchronize the narrative text, handling fallback/cache hit vs streaming."""
-        if self._loading_suffix_shown:
-            self._loading_suffix_shown = False
+        host = as_mixin_host(self)
+        if host._loading_suffix_shown:
+            host._loading_suffix_shown = False
 
-            if self._current_story == constants.LOADING_ART:
-                self._current_story = ""
-                self._current_turn_text = ""
+            if host._current_story == constants.LOADING_ART:
+                host._current_story = ""
+                host._current_turn_text = ""
 
-            if not self.typewriter_enabled:
-                self._current_story += narrative
-                self._current_turn_text += narrative
+            if not host.typewriter_enabled:
+                host._current_story += narrative
+                host._current_turn_text += narrative
             else:
-                self._typewriter_queue.put_nowait(narrative)
+                host._typewriter_queue.put_nowait(narrative)
         else:
             # Streaming happened. Sync to the finalized narrative.
-            self.action_skip_typewriter()
+            host.action_skip_typewriter()
 
-            last_sep = self._current_story.rfind("\n\n---\n\n")
+            last_sep = host._current_story.rfind("\n\n---\n\n")
             if last_sep != -1:
-                prefix = self._current_story[: last_sep + len("\n\n---\n\n")]
-                self._current_story = prefix + narrative
+                prefix = host._current_story[: last_sep + len("\n\n---\n\n")]
+                host._current_story = prefix + narrative
             else:
-                self._current_story = narrative
+                host._current_story = narrative
 
-            self._current_turn_text = narrative
+            host._current_turn_text = narrative
 
     def _update_ui_stats(self) -> None:
         """Update UI stats from engine state."""
-        assert isinstance(self, App)
-        if self.engine:
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        if host.engine:
             try:
-                status = self.query_one(StatusDisplay)
-                status.health = self.engine.state.player_stats.get("health", 100)
-                status.gold = self.engine.state.player_stats.get("gold", 0)
-                status.reputation = self.engine.state.player_stats.get("reputation", 0)
-                status.inventory = list(self.engine.state.inventory)
+                status = app.query_one(StatusDisplay)
+                status.health = host.engine.state.player_stats.get("health", 100)
+                status.gold = host.engine.state.player_stats.get("gold", 0)
+                status.reputation = host.engine.state.player_stats.get("reputation", 0)
+                status.inventory = list(host.engine.state.inventory)
             except Exception as e:
                 logger.debug("Failed to update status display from engine: %s", e)
 
@@ -187,7 +189,7 @@ class RenderingMixin:
             )
             for i, choice in enumerate(node.choices):
                 # Unique ID per mount to avoid collisions if previous buttons haven't fully unmounted
-                btn_id = f"choice-t{self.turn_count}-{uuid4().hex[:6]}-{i}"
+                btn_id = f"choice-t{as_mixin_host(self).turn_count}-{uuid4().hex[:6]}-{i}"
                 btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="default")
                 choices_container.mount(btn)
         elif node.is_ending:
@@ -196,7 +198,7 @@ class RenderingMixin:
         else:
             for i, choice in enumerate(node.choices):
                 # Unique ID per mount to avoid collisions if previous buttons haven't fully unmounted
-                btn_id = f"choice-t{self.turn_count}-{uuid4().hex[:6]}-{i}"
+                btn_id = f"choice-t{as_mixin_host(self).turn_count}-{uuid4().hex[:6]}-{i}"
                 btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="primary")
                 choices_container.mount(btn)
 
@@ -204,38 +206,39 @@ class RenderingMixin:
 
     def _focus_first_choice_button(self, choices_container: Container) -> None:
         """Focus first available choice button for faster keyboard play."""
-        assert isinstance(self, App)
+        app = as_textual_app(self)
         buttons = [btn for btn in choices_container.query(Button) if not btn.disabled]
         if not buttons:
             return
-        self.call_after_refresh(buttons[0].focus)
+        app.call_after_refresh(buttons[0].focus)
 
     async def _trigger_choice(self, choice_idx: int, selected_button_id: str | None = None) -> None:
         """Handle choice selection and delegate to the engine."""
-        assert isinstance(self, App)
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
         if (
-            not self.engine
-            or not self.engine.state.current_node
-            or choice_idx >= len(self.engine.state.current_node.choices)
+            not host.engine
+            or not host.engine.state.current_node
+            or choice_idx >= len(host.engine.state.current_node.choices)
         ):
             return
 
-        choice = self.engine.state.current_node.choices[choice_idx]
+        choice = host.engine.state.current_node.choices[choice_idx]
         choice_text = choice.text
 
         # 1. Instant UI feedback
-        self.action_skip_typewriter()
-        self._current_story += f"\n\n> **You chose:** {choice_text}"
-        self._current_story += "\n\n---\n\n"
+        host.action_skip_typewriter()
+        host._current_story += f"\n\n> **You chose:** {choice_text}"
+        host._current_story += "\n\n---\n\n"
 
-        container = self.query_one("#story-container")
+        container = app.query_one("#story-container")
         choice_md = Markdown(f"**You chose:** {choice_text}", classes="player-choice")
         container.mount(choice_md, before="#scene-art")
 
         new_turn = Markdown("", classes="story-turn")
         container.mount(new_turn, before="#scene-art")
-        self._current_turn_widget = new_turn
-        self._current_turn_text = ""
+        host._current_turn_widget = new_turn
+        host._current_turn_text = ""
 
         self.show_loading(selected_button_id=selected_button_id)
 
@@ -244,20 +247,22 @@ class RenderingMixin:
 
         from cyoa.ui.components import JournalListItem
 
-        journal_list = self.query_one("#journal-list", ListView)
-        narrative_preview = self.engine.state.current_node.narrative[:60].replace("\n", " ").strip()
-        if len(self.engine.state.current_node.narrative) > 60:
+        journal_list = app.query_one("#journal-list", ListView)
+        current_node = host.engine.state.current_node
+        assert current_node is not None
+        narrative_preview = current_node.narrative[:60].replace("\n", " ").strip()
+        if len(current_node.narrative) > 60:
             narrative_preview += "…"
-        journal_entry = f"Turn {self.engine.state.turn_count}: {choice_text} → {narrative_preview}"
+        journal_entry = f"Turn {host.engine.state.turn_count}: {choice_text} → {narrative_preview}"
         journal_list.append(
             JournalListItem(
                 Label(journal_entry),
-                scene_index=max(0, self.engine.state.turn_count - 1),
+                scene_index=max(0, host.engine.state.turn_count - 1),
             )
         )
         # U2 Fix: Scroll after refresh to ensure layout size is updated
-        self.call_after_refresh(lambda: journal_list.scroll_end(animate=False))
+        app.call_after_refresh(lambda: journal_list.scroll_end(animate=False))
 
         # 3. Cancel speculations and let the engine handle the rest
-        self.workers.cancel_group(self, "speculation")
-        await self.engine.make_choice(choice_text)
+        app.workers.cancel_group(app, "speculation")
+        await host.engine.make_choice(choice_text)
