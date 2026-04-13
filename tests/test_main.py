@@ -44,6 +44,35 @@ def test_validate_startup_config_rejects_invalid_numeric_env(
         main.validate_startup_config(_args())
 
 
+def test_validate_startup_config_rejects_non_positive_integer_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    monkeypatch.setenv("LLM_MAX_TOKENS", "0")
+
+    with pytest.raises(main.StartupConfigError, match="LLM_MAX_TOKENS must be greater than 0"):
+        main.validate_startup_config(_args())
+
+
+def test_validate_startup_config_rejects_negative_float_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    monkeypatch.setenv("LLM_TEMPERATURE", "-0.1")
+
+    with pytest.raises(main.StartupConfigError, match="LLM_TEMPERATURE must be non-negative"):
+        main.validate_startup_config(_args())
+
+
+def test_validate_startup_config_rejects_unknown_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "unsupported")
+
+    with pytest.raises(main.StartupConfigError, match="Unsupported LLM_PROVIDER"):
+        main.validate_startup_config(_args())
+
+
 def test_main_closes_logger_on_keyboard_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     logger_service = MagicMock()
@@ -66,3 +95,19 @@ def test_main_closes_logger_on_keyboard_interrupt(monkeypatch: pytest.MonkeyPatc
     assert exit_code == 130
     logger_service.close.assert_called_once_with()
     app_cls.assert_called_once()
+
+
+def test_main_returns_error_for_invalid_startup_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "invalid")
+
+    with (
+        patch("cyoa.core.observability.setup_observability"),
+        patch("cyoa.core.theme_loader.list_themes", return_value=["dark_dungeon"]),
+        patch("cyoa.db.story_logger.StoryLogger") as logger_cls,
+        patch("cyoa.ui.app.CYOAApp") as app_cls,
+    ):
+        exit_code = main.main([])
+
+    assert exit_code == 2
+    logger_cls.assert_not_called()
+    app_cls.assert_not_called()

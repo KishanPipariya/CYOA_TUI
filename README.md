@@ -75,6 +75,11 @@ Run the TUI using `uv`:
 uv run python main.py
 ```
 
+Startup validation runs before the UI boots. `LLM_PROVIDER` must be one of
+`llama_cpp`, `ollama`, or `mock`; `llama_cpp` also requires `LLM_MODEL_PATH`
+or `--model`; numeric limits such as `LLM_N_CTX`, `LLM_MAX_TOKENS`,
+`LLM_TOKEN_BUDGET`, and `LLM_TEMPERATURE` are rejected early if malformed.
+
 ---
 
 ## CLI and Controls
@@ -113,6 +118,10 @@ These are the local quality-gate commands mirrored by CI:
 *   **Tests**: `uv run pytest -q`
 *   **Linting**: `uv run ruff check .`
 *   **Type Check**: `uv run mypy cyoa`
+
+The GitHub Actions workflow at [`.github/workflows/quality.yml`](./.github/workflows/quality.yml)
+runs the same staged gates on pushes to `main`/`master` and on pull requests:
+`pytest`, `ruff`, then `mypy cyoa`.
 
 ## Neo4j Schema Hardening
 
