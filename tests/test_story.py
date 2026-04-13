@@ -299,6 +299,64 @@ class TestModelBrokerFallback:
             assert mock_provider.generate_json.call_count == 2
 
     @pytest.mark.asyncio
+    async def test_unified_repair_retry_uses_repair_prompt_and_lower_temperature(self):
+        """Unified mode should retry with the broken payload and repair instructions."""
+        import json
+
+        from cyoa.llm.broker import ModelBroker
+        from cyoa.llm.providers import LLMProvider
+
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate_json = AsyncMock(
+            side_effect=[
+                '{"narrative": "broken"',
+                json.dumps(
+                    {
+                        "narrative": "Recovered.",
+                        "choices": [{"text": "Continue"}, {"text": "Hide"}],
+                        "items_gained": [],
+                        "items_lost": [],
+                        "stat_updates": {},
+                    }
+                ),
+            ]
+        )
+
+        broker = ModelBroker(provider=mock_provider)
+        broker.unified_mode = True
+
+        node = await broker.generate_next_node_async(StoryContext("start"))
+
+        assert node.narrative == "Recovered."
+        assert mock_provider.generate_json.await_count == 2
+
+        first_call = mock_provider.generate_json.await_args_list[0].kwargs
+        second_call = mock_provider.generate_json.await_args_list[1].kwargs
+        repair_messages = second_call["messages"]
+
+        assert first_call["temperature"] == broker._temperature
+        assert second_call["temperature"] == 0.2
+        assert repair_messages[-2]["content"] == '{"narrative": "broken"'
+        assert "Fix JSON error" in repair_messages[-1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_judge_pattern_skips_extraction_when_narrator_fails(self):
+        """Judge extraction must not run when narrator generation exhausts retries."""
+        from cyoa.llm.broker import ModelBroker
+        from cyoa.llm.providers import LLMProvider
+
+        mock_provider = MagicMock(spec=LLMProvider)
+        mock_provider.generate_json = AsyncMock(return_value="not valid json")
+
+        broker = ModelBroker(provider=mock_provider)
+        broker.unified_mode = False
+
+        node = await broker.generate_next_node_async(StoryContext("start"))
+
+        assert "anomaly" in node.narrative
+        assert mock_provider.generate_json.await_count == broker._repair_attempts + 1
+
+    @pytest.mark.asyncio
     async def test_summarization_does_not_block_generation(self):
         """Summarization should be dispatched as a background task, not blocking TTFT.
 

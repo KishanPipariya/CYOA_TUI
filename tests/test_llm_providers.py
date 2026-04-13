@@ -1,4 +1,5 @@
 import json
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -194,6 +195,21 @@ async def test_model_broker_fallback_to_mock():
     ctx = StoryContext("start")
     node = await broker.generate_next_node_async(ctx)
     assert "digital void" in node.narrative
+
+
+def test_model_broker_uses_ollama_provider_when_requested():
+    from cyoa.llm.broker import ModelBroker
+
+    with patch.dict(
+        os.environ,
+        {"LLM_PROVIDER": "ollama", "LLM_MODEL": "llama3.2", "OLLAMA_BASE_URL": "http://ollama:11434"},
+        clear=False,
+    ):
+        broker = ModelBroker()
+
+    assert isinstance(broker.provider, OllamaProvider)
+    assert broker.provider.model == "llama3.2"
+    assert broker.provider.base_url == "http://ollama:11434/api/chat"
 
 
 def test_llama_cpp_token_count_falls_back_when_lock_is_busy(mock_llama):
