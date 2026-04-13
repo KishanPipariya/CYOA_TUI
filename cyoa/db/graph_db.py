@@ -1,7 +1,8 @@
 import logging
 import os
 import uuid
-from typing import Any
+from collections.abc import Iterable
+from typing import Any, TypedDict, cast
 
 from neo4j import GraphDatabase
 from neo4j.exceptions import AuthError, ServiceUnavailable
@@ -11,6 +12,17 @@ from cyoa.core.constants import DEFAULT_NEO4J_URI
 from cyoa.core.observability import DBObservedSession
 
 logger = logging.getLogger(__name__)
+
+
+class StoryTreeEdge(TypedDict):
+    target_id: str
+    choice: str | None
+
+
+class StoryTreeNode(TypedDict):
+    id: str
+    narrative: str
+    mood: str
 
 
 class CYOAGraphDB:
@@ -24,9 +36,8 @@ class CYOAGraphDB:
         uri = uri or os.getenv("NEO4J_URI", DEFAULT_NEO4J_URI)
         user = user or os.getenv("NEO4J_USER")
         password = password or os.getenv("NEO4J_PASSWORD")
-        self.driver = None  # Initialize to None
-
-        self.cb = CircuitBreaker("Neo4j", failure_threshold=3, reset_timeout=30.0)
+        self.driver: Any | None = None
+        self.cb: CircuitBreaker = CircuitBreaker("Neo4j", failure_threshold=3, reset_timeout=30.0)
 
         try:
             # Cast uri to str because the Neo4j driver expects a non-None URI
@@ -82,7 +93,108 @@ class CYOAGraphDB:
         if self.driver:
             self.driver.close()
 
-    # ── Fix #1: Restored method (was trapped in dead docstring in close()) ──
+    @staticmethod
+    def _parse_title_modifier(existing_title: str, base_title: str) -> int | None:
+        if existing_title == base_title:
+            return 1
+
+        prefix = f"{base_title} ("
+        if not existing_title.startswith(prefix) or not existing_title.endswith(")"):
+            return None
+
+        try:
+            return int(existing_title[len(prefix) : -1])
+        except ValueError:
+            return None
+
+    @classmethod
+    def _resolve_story_title_collision(
+        cls, base_title: str, existing_titles: Iterable[str]
+    ) -> str:
+        highest_modifier = max(
+            (
+                modifier
+                for modifier in (
+                    cls._parse_title_modifier(existing_title, base_title)
+                    for existing_title in existing_titles
+                )
+                if modifier is not None
+            ),
+            default=0,
+        )
+        if highest_modifier == 0:
+            return base_title
+        return f"{base_title} ({highest_modifier + 1})"
+
+    @staticmethod
+    def _pick_story_root(
+        nodes: dict[str, StoryTreeNode], has_incoming: set[str]
+    ) -> str | None:
+        for node_id in nodes:
+            if node_id not in has_incoming:
+                return node_id
+        return next(iter(nodes), None)
+
+    @staticmethod
+    def _build_story_tree_payload(records: Iterable[Any]) -> dict[str, Any]:
+        nodes: dict[str, StoryTreeNode] = {}
+        raw_edges: dict[str, list[StoryTreeEdge]] = {}
+        has_incoming: set[str] = set()
+
+        for record in records:
+            scene_id = record["id"]
+            next_id = record["next_id"]
+
+            nodes.setdefault(
+                scene_id,
+                {
+                    "id": scene_id,
+                    "narrative": record["narrative"],
+                    "mood": record.get("mood", "default"),
+                },
+            )
+            raw_edges.setdefault(scene_id, [])
+
+            if not next_id:
+                continue
+
+            raw_edges[scene_id].append({"target_id": next_id, "choice": record["choice"]})
+            has_incoming.add(next_id)
+
+        root_id = CYOAGraphDB._pick_story_root(nodes, has_incoming)
+        if root_id is None:
+            return {}
+
+        if root_id in has_incoming:
+            logger.warning(
+                "Story tree for root candidate %s has no incoming-free root; pruning cycles from fallback root.",
+                root_id,
+            )
+
+        edges: dict[str, list[StoryTreeEdge]] = {scene_id: [] for scene_id in nodes}
+
+        def walk(scene_id: str, active_path: set[str]) -> None:
+            active_path.add(scene_id)
+            for edge in raw_edges.get(scene_id, []):
+                target_id = edge["target_id"]
+                if target_id in active_path:
+                    logger.warning(
+                        "Skipping cyclic story tree edge %s -> %s for story root %s",
+                        scene_id,
+                        target_id,
+                        root_id,
+                    )
+                    continue
+                edges[scene_id].append(edge)
+                walk(target_id, active_path)
+            active_path.remove(scene_id)
+
+        walk(root_id, set())
+        return {"root_id": root_id, "nodes": nodes, "edges": edges}
+
+    def _require_driver(self) -> Any:
+        assert self.driver is not None
+        return self.driver
 
     def create_story_node_and_get_title(self, generated_title: str) -> str:
         """
@@ -100,25 +212,12 @@ class CYOAGraphDB:
             )
 
             with DBObservedSession("neo4j", "create_story_node") as session_obs:
-                with self.driver.session() as session:
+                with self._require_driver().session() as session:
                     result = session.run(title_exists_query, base_title=generated_title)
                     existing_titles = [record["title"] for record in result]
-
-                    final_title = generated_title
-                    if existing_titles:
-                        max_mod = 0
-                        for title in existing_titles:
-                            if title == generated_title:
-                                max_mod = max(max_mod, 1)
-                            elif title.startswith(f"{generated_title} ("):
-                                try:
-                                    mod_str = title[len(generated_title) + 2 : -1]
-                                    max_mod = max(max_mod, int(mod_str))
-                                except ValueError:
-                                    pass
-
-                        if max_mod > 0:
-                            final_title = f"{generated_title} ({max_mod + 1})"
+                    final_title = self._resolve_story_title_collision(
+                        generated_title, existing_titles
+                    )
 
                     query_create = """
                     CREATE (s:Story {
@@ -133,7 +232,7 @@ class CYOAGraphDB:
                     return final_title
 
         try:
-            return self.cb.call(_work)
+            return cast(str, self.cb.call(_work))
         except (CircuitBreakerOpenError, Exception) as e:  # noqa: BLE001
             logger.warning(f"Neo4j story creation skipped: {e}")
             return generated_title
@@ -169,7 +268,7 @@ class CYOAGraphDB:
             RETURN s.id AS scene_id
             """
             with DBObservedSession("neo4j", "create_scene_node") as session_obs:
-                with self.driver.session() as session:
+                with self._require_driver().session() as session:
                     result = session.run(
                         query,
                         scene_id=scene_id,
@@ -190,7 +289,7 @@ class CYOAGraphDB:
                     return final_id
 
         try:
-            return self.cb.call(_work)
+            return cast(str, self.cb.call(_work))
         except (CircuitBreakerOpenError, Exception) as e:  # noqa: BLE001
             logger.warning(f"Neo4j scene creation skipped: {e}")
             return scene_id
@@ -209,7 +308,7 @@ class CYOAGraphDB:
             CREATE (source)-[r:LEADS_TO {action_text: $choice_text}]->(target)
             """
             with DBObservedSession("neo4j", "create_choice_edge"):
-                with self.driver.session() as session:
+                with self._require_driver().session() as session:
                     session.run(
                         query,
                         source_id=source_scene_id,
@@ -271,7 +370,7 @@ class CYOAGraphDB:
                 "WHERE NOT ()-[:LEADS_TO]->(start)\n"
                 "RETURN nodes(path) AS scenes, relationships(path) AS choices"
             )
-            with self.driver.session() as session:
+            with self._require_driver().session() as session:
                 result = session.run(query, current_id=current_scene_id)
                 record = result.single()
                 if not record:
@@ -292,12 +391,12 @@ class CYOAGraphDB:
                 return {"scenes": scenes, "choices": choices}
 
         try:
-            return self.cb.call(_work)
+            return cast(dict[str, Any] | None, self.cb.call(_work))
         except (CircuitBreakerOpenError, Exception) as e:  # noqa: BLE001
             logger.warning(f"Neo4j history retrieval skipped: {e}")
             return None
 
-    def get_all_story_scenes(self, story_title: str) -> list[dict]:
+    def get_all_story_scenes(self, story_title: str) -> list[dict[str, Any]]:
         """
         Returns all scenes for the given story in traversal order (root → leaf),
         following the main path (the first LEADS_TO edge from each scene).
@@ -313,7 +412,7 @@ class CYOAGraphDB:
         if not self.is_online:
             return []
 
-        def _work() -> list[dict]:
+        def _work() -> list[dict[str, Any]]:
             # Single Cypher path query — one round-trip instead of N+1.
             # The OPTIONAL MATCH on the outgoing edge lets us capture
             # choice_taken for every node including the last (leaf) one.
@@ -328,7 +427,7 @@ class CYOAGraphDB:
             ORDER BY length(path)
             """
             with DBObservedSession("neo4j", "get_all_story_scenes"):
-                with self.driver.session() as session:
+                with self._require_driver().session() as session:
                     try:
                         result = session.run(query, story_title=story_title)
                         return [
@@ -344,13 +443,13 @@ class CYOAGraphDB:
                         return []
 
         try:
-            return self.cb.call(_work)
+            return cast(list[dict[str, Any]], self.cb.call(_work))
         except (CircuitBreakerOpenError, Exception) as e:  # noqa: BLE001
             logger.warning(f"Neo4j scenes retrieval skipped: {e}")
             return []
 
 
-    def get_story_tree(self, story_title: str) -> dict:
+    def get_story_tree(self, story_title: str) -> dict[str, Any]:
         """
         Returns all nodes and edges for the given story to build a topological tree.
         Format:
@@ -363,47 +462,19 @@ class CYOAGraphDB:
         if not self.is_online:
             return {}
 
-        def _work() -> dict:
+        def _work() -> dict[str, Any]:
             query = """
             MATCH (story:Story {title: $story_title})<-[:BELONGS_TO]-(scene:Scene)
             OPTIONAL MATCH (scene)-[r:LEADS_TO]->(next:Scene)
             RETURN scene.id AS id, scene.narrative AS narrative, scene.mood AS mood,
                    next.id AS next_id, r.action_text AS choice
             """
-            nodes = {}
-            edges: dict[str, list[dict[str, Any]]] = {}
-            has_incoming = set()
-
-            with self.driver.session() as session:
+            with self._require_driver().session() as session:
                 result = session.run(query, story_title=story_title)
-                for record in result:
-                    sid = record["id"]
-                    nxt = record["next_id"]
-                    if sid not in nodes:
-                        nodes[sid] = {
-                            "id": sid,
-                            "narrative": record["narrative"],
-                            "mood": record.get("mood", "default"),
-                        }
-                    if sid not in edges:
-                        edges[sid] = []
-                    if nxt:
-                        edges[sid].append({"target_id": nxt, "choice": record["choice"]})
-                        has_incoming.add(nxt)
-
-            if not nodes:
-                return {}
-
-            root_id = None
-            for n in nodes:
-                if n not in has_incoming:
-                    root_id = n
-                    break
-
-            return {"root_id": root_id, "nodes": nodes, "edges": edges}
+                return self._build_story_tree_payload(result)
 
         try:
-            return self.cb.call(_work)
+            return cast(dict[str, Any], self.cb.call(_work))
         except (CircuitBreakerOpenError, Exception) as e:  # noqa: BLE001
             logger.warning(f"Neo4j story tree retrieval skipped: {e}")
             return {}
