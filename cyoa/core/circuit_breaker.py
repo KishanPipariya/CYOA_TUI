@@ -4,20 +4,22 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import Any, Generic, TypeVar
+from typing import Any
 
-T = TypeVar("T")
 logger = logging.getLogger(__name__)
+
 
 class CircuitState(Enum):
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
 
-class CircuitBreaker(Generic[T]):
+
+class CircuitBreaker[T]:
     """
     A circuit breaker implementation that is both thread-safe and async-safe.
     """
+
     def __init__(self, name: str, failure_threshold: int = 3, reset_timeout: float = 60.0):
         self.name = name
         self.failure_threshold = failure_threshold
@@ -117,4 +119,5 @@ class CircuitBreaker(Generic[T]):
 
 class CircuitBreakerOpenError(Exception):
     """Exception raised when the circuit breaker is open."""
+
     pass

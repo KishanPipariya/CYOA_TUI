@@ -32,11 +32,11 @@ from cyoa.llm.pipeline import (
     SummarizationComponent,
 )
 from cyoa.llm.providers import (
-    count_messages_tokens,
     LlamaCppProvider,
     LLMProvider,
     MockProvider,
     OllamaProvider,
+    count_messages_tokens,
 )
 
 __all__ = ["StoryContext", "ModelBroker", "SpeculationCache"]
@@ -537,7 +537,7 @@ class ModelBroker:
     ) -> StoryNode:
         """
         Generate the next story node asynchronously.
-        
+
         Supports two modes:
         1. Unified Mode: One single LLM call for all story & extraction data (FASTER).
         2. Judge Pattern: Narrative generation followed by extraction call (MORE RELIABLE on small models).
@@ -673,7 +673,7 @@ class ModelBroker:
 
     async def _extract_state_delta_async(self, narrative: str) -> ExtractionNode:
         """
-        Secondary phase: A focused LLM call to extract structured state changes 
+        Secondary phase: A focused LLM call to extract structured state changes
         from the provided narrative text.
         """
         judge_messages = [
@@ -736,12 +736,12 @@ class ModelBroker:
             max_tokens=self._max_tokens,
         ):
             buffer += token
-            
+
             try:
-                # Use jiter to parse partial JSON. partial_mode="trailing-strings" 
+                # Use jiter to parse partial JSON. partial_mode="trailing-strings"
                 # allows us to extract the narrative even while it's being typed.
                 data = jiter.from_json(buffer.encode("utf-8"), partial_mode="trailing-strings")
-                
+
                 if isinstance(data, dict) and "narrative" in data:
                     current_narrative = data["narrative"]
                     if isinstance(current_narrative, str) and len(current_narrative) > len(last_yielded_narrative):

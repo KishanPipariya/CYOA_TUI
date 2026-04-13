@@ -7,22 +7,22 @@ from dotenv import load_dotenv
 # Load .env before anything that reads os.getenv (graph_db)
 load_dotenv()
 
-# Import core constants to keep things consistent
-from cyoa.core.constants import DEFAULT_STARTING_PROMPT, STORY_LOG_FILE  # noqa: E402
-from cyoa.core.observability import setup_observability
-from cyoa.core.theme_loader import list_themes, load_theme  # noqa: E402
-from cyoa.db.story_logger import StoryLogger  # noqa: E402
-from cyoa.ui.app import CYOAApp  # noqa: E402
-
 
 def main() -> None:
+    # Import after .env loading because graph_db reads env at import time.
+    from cyoa.core.constants import DEFAULT_STARTING_PROMPT, STORY_LOG_FILE
+    from cyoa.core.observability import setup_observability
+    from cyoa.core.theme_loader import list_themes, load_theme
+    from cyoa.db.story_logger import StoryLogger
+    from cyoa.ui.app import CYOAApp
+
     # Initialize OpenTelemetry
     setup_observability()
     parser = argparse.ArgumentParser(description="CYOA Terminal Game with Local LLM")
     parser.add_argument(
-        "--model", 
-        type=str, 
-        default=os.getenv("LLM_MODEL_PATH"), 
+        "--model",
+        type=str,
+        default=os.getenv("LLM_MODEL_PATH"),
         help="Path to the .gguf model file (defaults to LLM_MODEL_PATH in .env)"
     )
     parser.add_argument(
