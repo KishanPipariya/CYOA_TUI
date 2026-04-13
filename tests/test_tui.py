@@ -402,8 +402,6 @@ async def test_app_mount_does_not_duplicate_event_subscriptions(mock_app_depende
 @pytest.mark.asyncio
 async def test_startup_failure_closes_runtime_resources() -> None:
     app = CYOAApp(model_path="dummy_path.gguf")
-    app.set_timer = MagicMock()
-    app.notify = MagicMock()
 
     generator = MagicMock()
     db = MagicMock()
@@ -414,6 +412,8 @@ async def test_startup_failure_closes_runtime_resources() -> None:
     engine.initialize = AsyncMock(side_effect=RuntimeError("boom"))
 
     with (
+        patch.object(app, "set_timer"),
+        patch.object(app, "notify") as notify_mock,
         patch("cyoa.ui.app.ModelBroker", return_value=generator),
         patch("cyoa.ui.app.StoryEngine", return_value=engine),
     ):
@@ -423,7 +423,7 @@ async def test_startup_failure_closes_runtime_resources() -> None:
                 app.initialize_and_start("dummy_path.gguf")
                 await pilot.pause(0.3)
 
-    app.notify.assert_called()
+    notify_mock.assert_called()
     generator.close.assert_called_once_with()
     db.close.assert_called_once_with()
     assert app.generator is None
