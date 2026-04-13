@@ -13,6 +13,7 @@ class EventsMixin:
         assert isinstance(self, App)
         self.turn_count = 1
         self.mood = "default"
+        self._last_stats_snapshot = None
         self.query_one("#journal-list", ListView).clear()
 
     def _handle_engine_restarted(self) -> None:
@@ -48,6 +49,36 @@ class EventsMixin:
             status.health = stats.get("health", 100)
             status.gold = stats.get("gold", 0)
             status.reputation = stats.get("reputation", 0)
+
+            previous = getattr(self, "_last_stats_snapshot", None)
+            if previous is not None:
+                deltas: list[str] = []
+
+                health_delta = stats.get("health", 100) - previous.get("health", 100)
+                if health_delta:
+                    deltas.append(f"{health_delta:+d} HP")
+
+                gold_delta = stats.get("gold", 0) - previous.get("gold", 0)
+                if gold_delta:
+                    deltas.append(f"{gold_delta:+d} Gold")
+
+                rep_delta = stats.get("reputation", 0) - previous.get("reputation", 0)
+                if rep_delta:
+                    deltas.append(f"{rep_delta:+d} Rep")
+
+                if deltas:
+                    severity = "information"
+                    if health_delta < 0:
+                        severity = "warning"
+                    elif health_delta > 0:
+                        severity = "success"
+                    self.notify(" | ".join(deltas), severity=severity, timeout=2)
+
+            self._last_stats_snapshot = {
+                "health": stats.get("health", 100),
+                "gold": stats.get("gold", 0),
+                "reputation": stats.get("reputation", 0),
+            }
         except Exception as e:
             logger.debug("Failed to update status display stats: %s", e)
 

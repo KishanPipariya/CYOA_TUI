@@ -25,12 +25,7 @@ class RenderingMixin:
         """Streaming callback: feeds the typewriter queue or updates UI immediately."""
         assert isinstance(self, App)
         if self._loading_suffix_shown:
-            # First token batch arrived — strip the loading placeholder
-            suffix = "\n\n*(The ancient texts are shifting...)*"
-            if self._current_story.endswith(suffix):
-                self._current_story = self._current_story[: -len(suffix)]
-            if self._current_turn_text.endswith(suffix):
-                self._current_turn_text = self._current_turn_text[: -len(suffix)]
+            # First token batch arrived — loading state is visual-only (spinner).
             self._loading_suffix_shown = False
             self.query_one("#loading").add_class("hidden")
 
@@ -49,7 +44,7 @@ class RenderingMixin:
             self._typewriter_queue.put_nowait(partial)
 
     def show_loading(self, selected_button_id: str | None = None) -> None:
-        """Clear choice buttons, show spinner, append 'shifting' text."""
+        """Clear choice buttons and show spinner while generation is in progress."""
         assert isinstance(self, App)
         choices_container = self.query_one("#choices-container")
         if selected_button_id is not None:
@@ -64,14 +59,7 @@ class RenderingMixin:
             choices_container.remove_children()
         self.query_one("#loading").remove_class("hidden")
 
-        if not self._loading_suffix_shown:
-            suffix = "\n\n*(The ancient texts are shifting...)*"
-            self._current_story += suffix
-            self._current_turn_text += suffix
-            self._loading_suffix_shown = True
-            if hasattr(self, "_current_turn_widget"):
-                self._current_turn_widget.update(self._current_turn_text)
-            self._scroll_to_bottom()
+        self._loading_suffix_shown = True
 
     def _is_at_bottom(self) -> bool:
         """Return True if the story container is near its bottom edge."""
@@ -150,11 +138,6 @@ class RenderingMixin:
         """Synchronize the narrative text, handling fallback/cache hit vs streaming."""
         if self._loading_suffix_shown:
             self._loading_suffix_shown = False
-            suffix = "\n\n*(The ancient texts are shifting...)*"
-            if self._current_story.endswith(suffix):
-                self._current_story = self._current_story[: -len(suffix)]
-            if self._current_turn_text.endswith(suffix):
-                self._current_turn_text = self._current_turn_text[: -len(suffix)]
 
             if self._current_story == constants.LOADING_ART:
                 self._current_story = ""
@@ -255,13 +238,20 @@ class RenderingMixin:
         self.show_loading(selected_button_id=selected_button_id)
 
         # 2. Journal update
-        from textual.widgets import ListView, ListItem, Label
+        from textual.widgets import Label, ListView
+        from cyoa.ui.components import JournalListItem
+
         journal_list = self.query_one("#journal-list", ListView)
         narrative_preview = self.engine.state.current_node.narrative[:60].replace("\n", " ").strip()
         if len(self.engine.state.current_node.narrative) > 60:
             narrative_preview += "…"
         journal_entry = f"Turn {self.engine.state.turn_count}: {choice_text} → {narrative_preview}"
-        journal_list.append(ListItem(Label(journal_entry)))
+        journal_list.append(
+            JournalListItem(
+                Label(journal_entry),
+                scene_index=max(0, self.engine.state.turn_count - 1),
+            )
+        )
         # U2 Fix: Scroll after refresh to ensure layout size is updated
         self.call_after_refresh(lambda: journal_list.scroll_end(animate=False))
 

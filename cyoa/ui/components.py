@@ -13,6 +13,7 @@ __all__ = [
     "ConfirmScreen",
     "HelpScreen",
     "LoadGameScreen",
+    "JournalListItem",
     "SceneListItem",
     "SaveListItem",
     "StatusDisplay",
@@ -33,6 +34,14 @@ class SaveListItem(ListItem):
     def __init__(self, *args: Any, save_filename: str = "", **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.save_filename = save_filename
+
+
+class JournalListItem(ListItem):
+    """ListItem that points to a narrative turn in the story pane."""
+
+    def __init__(self, *args: Any, scene_index: int = 0, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.scene_index = scene_index
 
 
 class BranchScreen(ModalScreen[int]):
@@ -295,7 +304,7 @@ class LoadGameScreen(ModalScreen[str]):
 
     def compose(self) -> ComposeResult:
         with Container(id="load-dialog"):
-            yield Label("[b]📂 Load Game[/b] \u2014 Select a save file", id="load-title")
+            yield Label("[b]Load Game[/b] \u2014 Select a save file", id="load-title")
             yield ListView(id="load-list")
             yield Button("Cancel [b](Esc)[/b]", id="btn-load-cancel", variant="error")
 
@@ -304,7 +313,7 @@ class LoadGameScreen(ModalScreen[str]):
         for save_file in self._save_files:
             display_name = save_file.replace(".json", "").replace("_", " ")
             item = SaveListItem(
-                Label(f"💾 {display_name}", classes="save-entry"), save_filename=save_file
+                Label(display_name, classes="save-entry"), save_filename=save_file
             )
             list_view.append(item)
 

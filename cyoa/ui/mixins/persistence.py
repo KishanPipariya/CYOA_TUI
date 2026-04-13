@@ -25,18 +25,12 @@ class PersistenceMixin:
 
         save_data = self.engine.get_save_data()
 
-        # UI-specific cleanup: strip transient loading indicators before persistence
-        story_text = self._current_story
-        suffix = "\n\n*(The ancient texts are shifting...)*"
-        if story_text.endswith(suffix):
-            story_text = story_text[: -len(suffix)]
-
-        save_data["current_story_text"] = story_text
+        save_data["current_story_text"] = self._current_story
 
         try:
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(save_data, f, indent=2, ensure_ascii=False)
-            self.notify(f"💾 Game saved to {save_path}", severity="information", timeout=3)
+            self.notify(f"Game saved to {save_path}", severity="information", timeout=3)
         except OSError as e:
             self.notify(f"Save failed: {e}", severity="error", timeout=3)
 
@@ -108,7 +102,7 @@ class PersistenceMixin:
         self.query_one("#journal-list", ListView).clear()
 
         self.notify(
-            f"📂 Loaded save from Turn {self.engine.state.turn_count}.",
+            f"Loaded save from Turn {self.engine.state.turn_count}.",
             severity="information",
             timeout=3,
         )

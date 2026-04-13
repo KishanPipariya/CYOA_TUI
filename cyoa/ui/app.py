@@ -27,6 +27,7 @@ from cyoa.core.models import StoryNode
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.llm.broker import ModelBroker
 from cyoa.ui.components import StatusDisplay, ThemeSpinner
+from cyoa.ui.components import JournalListItem
 from cyoa.ui.mixins import (
     EventsMixin,
     NavigationMixin,
@@ -109,6 +110,7 @@ class CYOAApp(
         self._typewriter_queue: asyncio.Queue[str] = asyncio.Queue()
         self._typewriter_active_chunk: list[str] = []
         self._is_typing: bool = False
+        self._last_stats_snapshot: dict[str, int] | None = None
 
         # Restore preferences
         config = utils.load_config()
@@ -197,6 +199,31 @@ class CYOAApp(
         for unsub in self._unsubscribers:
             unsub()
         self._unsubscribers.clear()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        """Handle journal selection: jump to and highlight the corresponding turn."""
+        if event.list_view.id != "journal-list":
+            return
+        if isinstance(event.item, JournalListItem):
+            self._jump_to_story_turn(event.item.scene_index)
+
+    def _jump_to_story_turn(self, scene_index: int) -> None:
+        """Scroll story view to a turn and flash-highlight it."""
+        story_container = self.query_one("#story-container")
+        turns = list(story_container.query(".story-turn"))
+        if not turns:
+            return
+
+        clamped_index = max(0, min(scene_index, len(turns) - 1))
+        target = turns[clamped_index]
+        for turn in turns:
+            turn.remove_class("turn-highlight")
+        target.add_class("turn-highlight")
+
+        self.call_after_refresh(
+            lambda: story_container.scroll_to_widget(target, animate=True, top=True)
+        )
+        self.set_timer(1.2, lambda: target.remove_class("turn-highlight"))
 
     @work(exclusive=True)
     async def initialize_and_start(self, model_path: str) -> None:

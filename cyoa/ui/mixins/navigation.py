@@ -3,10 +3,10 @@ import logging
 from typing import Any
 from textual import work
 from textual.app import App
-from textual.widgets import Markdown, Static, ListView, ListItem, Label, Tree
+from textual.widgets import Markdown, Static, ListView, Label, Tree
 from cyoa.core.events import bus, Events
 from cyoa.core import constants
-from cyoa.ui.components import ConfirmScreen, HelpScreen, BranchScreen
+from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, JournalListItem
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +204,12 @@ class NavigationMixin:
         journal_list = self.query_one("#journal-list", ListView)
         journal_list.clear()
         for i in range(idx):
-            journal_list.append(ListItem(Label(f"Turn {i + 1}: {history['choices'][i]}")))
+            journal_list.append(
+                JournalListItem(
+                    Label(f"Turn {i + 1}: {history['choices'][i]}"),
+                    scene_index=i,
+                )
+            )
         journal_list.scroll_end(animate=False)
 
         # 3. Hand off the core logic to the engine
@@ -239,23 +244,23 @@ class NavigationMixin:
             scene = nodes[scene_id]
             mood = scene.get("mood", "default")
             
-            # Map moods to emojis and colors
+            # Compact mood markers for consistent visual language.
             mood_map = {
-                "mysterious": ("🔮", "purple"),
-                "heroic": ("⚔️", "yellow"),
-                "combat": ("💀", "red"),
-                "ethereal": ("✨", "cyan"),
-                "dark": ("🌑", "gray"),
-                "grimy": ("🌿", "green"),
-                "default": ("📖", "white")
+                "mysterious": ("M", "magenta"),
+                "heroic": ("H", "yellow"),
+                "combat": ("C", "red"),
+                "ethereal": ("E", "cyan"),
+                "dark": ("D", "gray"),
+                "grimy": ("G", "green"),
+                "default": ("N", "white"),
             }
-            emoji, color = mood_map.get(mood, mood_map["default"])
+            marker, color = mood_map.get(mood, mood_map["default"])
             
             preview = scene["narrative"][:20].replace("\\n", " ").strip() + "..."
             if scene_id == self.engine.state.current_scene_id:
-                label = f"[b][reverse]{emoji} {preview}[/reverse][/b]"
+                label = f"[b][reverse][{marker}] {preview}[/reverse][/b]"
             else:
-                label = f"[{color}]{emoji}[/{color}] {preview}"
+                label = f"[{color}][{marker}][/{color}] {preview}"
 
             tree_node = parent_node.add(label, expand=True)
 
@@ -270,7 +275,7 @@ class NavigationMixin:
                 choice_node = tree_node.add(choice_label, expand=True)
                 add_children(choice_node, edge["target_id"])
 
-        tree.root.label = "📍 Adventure Map"
+        tree.root.label = "Adventure Map"
         tree.root.expand()
         if root_id in nodes:
             add_children(tree.root, root_id)

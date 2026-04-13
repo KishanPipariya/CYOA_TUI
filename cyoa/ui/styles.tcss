@@ -180,12 +180,17 @@ ThemeSpinner {
 Button {
     width: 100%;
     margin-bottom: 1;
-    height: 3; /* Taller buttons for a more premium feel */
+    height: auto;
+    min-height: 3;
 }
 
 Button > .textual-button--label {
     text-align: left;
     padding-left: 2;
+}
+
+#choices-container Button > .textual-button--label {
+    text-wrap: wrap;
 }
 
 #choices-container Button:focus {
@@ -234,7 +239,7 @@ Footer > .footer--highlight {
 /* Mysterious: Deep purples and indigo */
 .mood-mysterious #story-container {
     border: thick $primary;
-    color: violet 80%;
+    background: $panel 10%;
 }
 .mood-mysterious #choices-container {
     border: double $primary;
@@ -243,7 +248,7 @@ Footer > .footer--highlight {
 /* Heroic: Gold and bright highlights */
 .mood-heroic #story-container {
     border: thick #FFD700;
-    color: #FFFACD;
+    background: #FFD700 8%;
 }
 .mood-heroic #choices-container {
     border: solid #FFD700;
@@ -252,7 +257,7 @@ Footer > .footer--highlight {
 /* Combat: Red alerts and aggressive borders */
 .mood-combat #story-container {
     border: heavy $error;
-    color: $error 80%;
+    background: $error 8%;
 }
 .mood-combat #choices-container {
     border: solid $error;
@@ -261,7 +266,7 @@ Footer > .footer--highlight {
 /* Ethereal: Cyan, celestial glow */
 .mood-ethereal #story-container {
     border: outer cyan;
-    color: lightcyan;
+    background: cyan 8%;
 }
 .mood-ethereal #choices-container {
     border: dashed cyan;
@@ -270,7 +275,7 @@ Footer > .footer--highlight {
 /* Dark: Gritty grays and dim text */
 .mood-dark #story-container {
     border: tall gray;
-    color: silver;
+    background: gray 8%;
 }
 .mood-dark #choices-container {
     border: solid gray;
@@ -279,7 +284,7 @@ Footer > .footer--highlight {
 /* Grimy: Earthy greens and browns */
 .mood-grimy #story-container {
     border: heavy #556B2F;
-    color: #BDB76B;
+    background: #556B2F 8%;
 }
 .mood-grimy #choices-container {
     border: solid #556B2F;
@@ -288,4 +293,9 @@ Footer > .footer--highlight {
 /* ── Utilities ──────────────────────────────────────────────── */
 .hidden {
     display: none;
+}
+
+.turn-highlight {
+    border: tall $accent;
+    background: $accent 15%;
 }
