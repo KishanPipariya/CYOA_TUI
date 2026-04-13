@@ -10,6 +10,9 @@ beyond the sliding context window.
 import logging
 import uuid
 from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from time import monotonic
 from typing import Any
 
 from cyoa.core.observability import DBObservedSession
@@ -24,6 +27,48 @@ except ImportError:
     _CHROMA_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _RetryState:
+    """Tracks temporary Chroma outages and schedules recovery probes."""
+
+    max_failures: int = 3
+    base_backoff_seconds: float = 1.0
+    max_backoff_seconds: float = 30.0
+    reprobe_interval_seconds: float = 60.0
+    clock: Callable[[], float] = field(default=monotonic)
+    consecutive_failures: int = 0
+    retry_at: float = 0.0
+    unavailable_since: float | None = None
+
+    def can_attempt(self) -> bool:
+        now = self.clock()
+        if self.unavailable_since is not None:
+            if (now - self.unavailable_since) >= self.reprobe_interval_seconds:
+                self.reset()
+                return True
+            return False
+        return now >= self.retry_at
+
+    def record_success(self) -> None:
+        self.reset()
+
+    def record_failure(self) -> None:
+        now = self.clock()
+        self.consecutive_failures += 1
+        backoff = min(
+            self.base_backoff_seconds * (2 ** (self.consecutive_failures - 1)),
+            self.max_backoff_seconds,
+        )
+        self.retry_at = now + backoff
+        if self.consecutive_failures >= self.max_failures:
+            self.unavailable_since = now
+
+    def reset(self) -> None:
+        self.consecutive_failures = 0
+        self.retry_at = 0.0
+        self.unavailable_since = None
 
 
 class NarrativeMemory:
@@ -44,6 +89,7 @@ class NarrativeMemory:
         self._client: Any | None = None
         self._collection: Any | None = None
         self._init_attempted: bool = False
+        self._retry_state = _RetryState()
 
         # Fallback: maintain a small circular buffer of recent narratives
         # if ChromaDB is missing. This ensures the prompt still gets some
@@ -53,20 +99,47 @@ class NarrativeMemory:
     @property
     def is_online(self) -> bool:
         """Returns True if ChromaDB is available and ready."""
-        return self._available and (self._collection is not None or not self._init_attempted)
+        return self._available and (
+            self._collection is not None
+            or (not self._init_attempted and self._retry_state.can_attempt())
+            or self._retry_state.can_attempt()
+        )
 
     def verify_availability(self) -> bool:
         """Explicitly attempt to initialize ChromaDB and return status."""
-        return self._ensure_ready()
+        return self._ensure_ready(force=True)
 
-    def _ensure_ready(self) -> bool:
+    def _reset_client_state(self) -> None:
+        self._collection = None
+        self._client = None
+        self._init_attempted = False
+
+    def _mark_failure(self, context: str, error: Exception) -> None:
+        self._reset_client_state()
+        self._retry_state.record_failure()
+        if self._retry_state.unavailable_since is not None:
+            logger.warning(
+                "RAG memory: %s failed repeatedly; memory marked unavailable until next probe. Error: %s",
+                context,
+                error,
+            )
+        else:
+            retry_in = max(self._retry_state.retry_at - self._retry_state.clock(), 0.0)
+            logger.warning(
+                "RAG memory: %s failed; retrying after %.1fs. Error: %s",
+                context,
+                retry_in,
+                error,
+            )
+
+    def _ensure_ready(self, *, force: bool = False) -> bool:
         """Create the chroma client and collection on first use. Returns False if unavailable."""
         if not self._available:
             return False
         if self._collection is not None:
             return True
 
-        if self._init_attempted:
+        if not force and not self._retry_state.can_attempt():
             return False
 
         self._init_attempted = True
@@ -78,14 +151,11 @@ class NarrativeMemory:
                 name=unique_name,
                 metadata={"hnsw:space": "cosine"},
             )
+            self._retry_state.record_success()
             logger.info("RAG memory: chroma client initialised (collection: %s)", unique_name)
             return True
         except Exception as e:  # noqa: BLE001
-            logger.warning(
-                "RAG memory: failed to initialise chromadb. Falling back to basic memory. Error: %s",
-                e,
-            )
-            self._available = False
+            self._mark_failure("initialise chromadb", e)
             return False
 
     def close(self) -> None:
@@ -95,8 +165,8 @@ class NarrativeMemory:
                 self._client.delete_collection(self._collection.name)
         except Exception as e:  # noqa: BLE001
             logger.debug("Failed to delete ChromaDB collection during close: %s", e)
-        self._collection = None
-        self._client = None
+        self._reset_client_state()
+        self._retry_state.reset()
 
     async def add_async(self, scene_id: str, narrative: str) -> None:
         """Embed and store a scene narrative asynchronously."""
@@ -117,9 +187,10 @@ class NarrativeMemory:
                         ids=[scene_id],
                         documents=[narrative],
                     )
+                    self._retry_state.record_success()
                 except Exception as e:  # noqa: BLE001
                     logger.error("RAG memory: failed to add scene %s: %s", scene_id, e)
-                    self._available = False
+                    self._mark_failure(f"add scene {scene_id}", e)
 
         await asyncio.to_thread(_sync_add)
 
@@ -147,9 +218,11 @@ class NarrativeMemory:
                         query_texts=[text],
                         n_results=min(n, count),
                     )
+                    self._retry_state.record_success()
                     return results["documents"][0] if results["documents"] else []
                 except Exception as e:  # noqa: BLE001
                     logger.error("RAG memory: query failed: %s", e)
+                    self._mark_failure("query chromadb", e)
                     return list(self._fallback)[-n:]
 
         return await asyncio.to_thread(_sync_query)
@@ -166,6 +239,7 @@ class NPCMemory:
         self._client: Any | None = None
         self._collections: dict[str, Any] = {}
         self._init_attempted: bool = False
+        self._retry_state = _RetryState()
 
         # Fallback: Dictionary of NPC names to their recent scene buffers
         self._fallbacks: dict[str, deque[str]] = {}
@@ -173,13 +247,40 @@ class NPCMemory:
     @property
     def is_online(self) -> bool:
         """Returns True if the basic Chroma client is available."""
-        return self._available
+        return self._available and (
+            self._client is not None or not self._init_attempted or self._retry_state.can_attempt()
+        )
 
     def verify_availability(self) -> bool:
         """Explicitly attempt to initialize the basic Chroma client and return status."""
-        return self._ensure_ready("test_init")
+        return self._ensure_ready("test_init", force=True)
 
-    def _ensure_ready(self, npc_name: str) -> bool:
+    def _reset_client_state(self) -> None:
+        self._collections.clear()
+        self._client = None
+        self._init_attempted = False
+
+    def _mark_failure(self, npc_name: str, context: str, error: Exception) -> None:
+        self._reset_client_state()
+        self._retry_state.record_failure()
+        if self._retry_state.unavailable_since is not None:
+            logger.warning(
+                "RAG NPC memory: %s for %s failed repeatedly; memory marked unavailable until next probe. Error: %s",
+                context,
+                npc_name,
+                error,
+            )
+        else:
+            retry_in = max(self._retry_state.retry_at - self._retry_state.clock(), 0.0)
+            logger.warning(
+                "RAG NPC memory: %s for %s failed; retrying after %.1fs. Error: %s",
+                context,
+                npc_name,
+                retry_in,
+                error,
+            )
+
+    def _ensure_ready(self, npc_name: str, *, force: bool = False) -> bool:
         if not self._available:
             return False
         # Create a safe alphanumeric name for chroma collections
@@ -188,7 +289,7 @@ class NPCMemory:
         if safe_name in self._collections:
             return True
 
-        if self._init_attempted and self._client is None:
+        if not force and not self._retry_state.can_attempt():
             return False
 
         try:
@@ -202,16 +303,10 @@ class NPCMemory:
                 name=unique_name,
                 metadata={"hnsw:space": "cosine"},
             )
+            self._retry_state.record_success()
             return True
         except Exception as e:  # noqa: BLE001
-            logger.warning(
-                "RAG NPC memory: failed to initialise chromadb for %s. Error: %s",
-                npc_name,
-                e,
-            )
-            # If the client itself failed, mark global unavailability
-            if self._client is None:
-                self._available = False
+            self._mark_failure(npc_name, "initialise chromadb", e)
             return False
 
     def close(self) -> None:
@@ -225,8 +320,8 @@ class NPCMemory:
                         logger.debug("Failed to delete NPC collection %s: %s", safe_name, e)
         except Exception as e:  # noqa: BLE001
             logger.debug("Failed to close NPC memory client: %s", e)
-        self._collections.clear()
-        self._client = None
+        self._reset_client_state()
+        self._retry_state.reset()
 
     async def add_async(self, npc_name: str, scene_id: str, narrative: str) -> None:
         # Update fallback buffer for this NPC
@@ -252,6 +347,7 @@ class NPCMemory:
                         ids=[scene_id],
                         documents=[narrative],
                     )
+                    self._retry_state.record_success()
                 except Exception as e:  # noqa: BLE001
                     logger.error(
                         "RAG NPC memory: failed to add scene %s for %s: %s",
@@ -259,7 +355,7 @@ class NPCMemory:
                         npc_name,
                         e,
                     )
-                    self._available = False
+                    self._mark_failure(npc_name, f"add scene {scene_id}", e)
 
         await asyncio.to_thread(_sync_add)
 
@@ -293,9 +389,11 @@ class NPCMemory:
                         query_texts=[text],
                         n_results=min(n, count),
                     )
+                    self._retry_state.record_success()
                     return results["documents"][0] if results["documents"] else []
                 except Exception as e:  # noqa: BLE001
                     logger.error("RAG NPC memory: query failed for %s: %s", npc_name, e)
+                    self._mark_failure(npc_name, "query chromadb", e)
                     buffer = self._fallbacks.get(npc_name, deque())
                     return list(buffer)[-n:]
 

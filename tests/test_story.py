@@ -416,6 +416,47 @@ class TestModelBrokerFallback:
 
 
 class TestNarrativeMemory:
+    class _FakeClock:
+        def __init__(self) -> None:
+            self.current = 0.0
+
+        def now(self) -> float:
+            return self.current
+
+        def advance(self, seconds: float) -> None:
+            self.current += seconds
+
+    class _FakeCollection:
+        def __init__(self, fail_upsert: bool = False) -> None:
+            self.name = "fake_collection"
+            self._docs: dict[str, str] = {}
+            self._fail_upsert = fail_upsert
+
+        def upsert(self, *, ids, documents) -> None:
+            if self._fail_upsert:
+                raise RuntimeError("upsert failed")
+            for doc_id, document in zip(ids, documents, strict=True):
+                self._docs[doc_id] = document
+
+        def count(self) -> int:
+            return len(self._docs)
+
+        def query(self, *, query_texts, n_results):
+            _ = query_texts
+            docs = list(self._docs.values())[:n_results]
+            return {"documents": [docs]}
+
+    class _FakeClient:
+        def __init__(self, collection) -> None:
+            self._collection = collection
+
+        def create_collection(self, *, name, metadata):
+            _ = name, metadata
+            return self._collection
+
+        def delete_collection(self, name: str) -> None:
+            _ = name
+
     @pytest.mark.asyncio
     async def test_add_and_query_returns_results(self):
         """Adding a scene and querying with similar text should return it."""
@@ -458,6 +499,46 @@ class TestNarrativeMemory:
         # Should not raise; collection count stays at 1
         assert mem._collection.count() == 1
 
+    @pytest.mark.asyncio
+    async def test_retries_then_reprobes_after_chroma_init_failures(self, monkeypatch):
+        clock = self._FakeClock()
+        attempts = {"count": 0}
+
+        def fake_client_factory():
+            attempts["count"] += 1
+            if attempts["count"] < 4:
+                raise RuntimeError(f"init failed {attempts['count']}")
+            return self._FakeClient(self._FakeCollection())
+
+        monkeypatch.setattr("cyoa.db.rag_memory.chromadb.Client", fake_client_factory)
+
+        mem = NarrativeMemory()
+        mem._retry_state.clock = clock.now
+        mem._retry_state.reprobe_interval_seconds = 5.0
+
+        await mem.add_async("scene-1", "Fallback memory one.")
+        assert await mem.query_async("anything") == ["Fallback memory one."]
+        assert mem._collection is None
+
+        clock.advance(1.0)
+        await mem.add_async("scene-2", "Fallback memory two.")
+        clock.advance(2.0)
+        await mem.add_async("scene-3", "Fallback memory three.")
+
+        assert mem.is_online is False
+        assert mem._retry_state.unavailable_since is not None
+
+        clock.advance(4.0)
+        await mem.add_async("scene-4", "Recovered memory.")
+        assert mem._collection is None
+
+        clock.advance(1.0)
+        await mem.add_async("scene-4", "Recovered memory.")
+
+        assert attempts["count"] == 4
+        assert mem._collection is not None
+        assert await mem.query_async("recovered", n=1) == ["Recovered memory."]
+
 
 class TestNPCMemory:
     @pytest.mark.asyncio
@@ -494,6 +575,37 @@ class TestNPCMemory:
 
         mem = NPCMemory()
         assert await mem.query_async("UnknownNPC", "anything") == []
+
+    @pytest.mark.asyncio
+    async def test_npc_memory_recovers_after_operational_failure(self, monkeypatch):
+        from cyoa.db.rag_memory import NPCMemory
+
+        clock = TestNarrativeMemory._FakeClock()
+        collections = iter(
+            [
+                TestNarrativeMemory._FakeCollection(fail_upsert=True),
+                TestNarrativeMemory._FakeCollection(),
+            ]
+        )
+
+        def fake_client_factory():
+            return TestNarrativeMemory._FakeClient(next(collections))
+
+        monkeypatch.setattr("cyoa.db.rag_memory.chromadb.Client", fake_client_factory)
+
+        mem = NPCMemory()
+        mem._retry_state.clock = clock.now
+        mem._retry_state.base_backoff_seconds = 0.5
+
+        await mem.add_async("Elara", "scene-1", "Elara fallback memory.")
+        assert await mem.query_async("Elara", "anything") == ["Elara fallback memory."]
+        assert mem._collections == {}
+
+        clock.advance(0.5)
+        await mem.add_async("Elara", "scene-2", "Elara recovered memory.")
+
+        assert mem._collections
+        assert await mem.query_async("Elara", "anything", n=1) == ["Elara recovered memory."]
 
 
 # ── 4. Streaming token callback ───────────────────────────────────────────────
