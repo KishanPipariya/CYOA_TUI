@@ -77,8 +77,8 @@ class PersistenceMixin:
         if not self.engine:
             return
 
-        # A8 Fix: Cancel any background workers before hydrating new state
-        self.workers.cancel_all()
+        # Cancel speculative generation before hydrating; keep core UI workers alive.
+        self.workers.cancel_group(self, "speculation")
 
         self._current_story = data.get("current_story_text", constants.LOADING_ART)
         self._current_turn_text = self._current_story

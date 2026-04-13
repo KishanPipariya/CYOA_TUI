@@ -304,14 +304,14 @@ class CYOAApp(
             self.show_loading()
             if self.engine:
                 # A5 Fix: Call public engine.retry() instead of private _generate_next()
-                self.engine.retry()
+                await self.engine.retry()
             return
 
         button_id = event.button.id
         if button_id and button_id.startswith("choice-"):
             try:
                 choice_idx = int(button_id.split("-")[-1])
-                await self._trigger_choice(choice_idx)
+                await self._trigger_choice(choice_idx, selected_button_id=button_id)
             except (ValueError, IndexError) as e:
                 logger.debug("Invalid choice button ID clicked: %s (%s)", button_id, e)
 
@@ -321,5 +321,5 @@ class CYOAApp(
         prefix = f"choice-t{self.turn_count}-"
         for btn in self.query("Button"):
             if btn.id and btn.id.startswith(prefix) and btn.id.endswith(f"-{idx}"):
-                await self._trigger_choice(idx)
+                await self._trigger_choice(idx, selected_button_id=btn.id)
                 return

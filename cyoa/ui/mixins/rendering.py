@@ -48,14 +48,14 @@ class RenderingMixin:
         else:
             self._typewriter_queue.put_nowait(partial)
 
-    def show_loading(self, selected_label: str | None = None) -> None:
+    def show_loading(self, selected_button_id: str | None = None) -> None:
         """Clear choice buttons, show spinner, append 'shifting' text."""
         assert isinstance(self, App)
         choices_container = self.query_one("#choices-container")
-        if selected_label is not None:
+        if selected_button_id is not None:
             # Keep only the selected button, disable and dim it
             for btn in list(choices_container.query(Button)):
-                if str(btn.label) != selected_label:
+                if btn.id != selected_button_id:
                     btn.remove()
                 else:
                     btn.disabled = True
@@ -215,7 +215,7 @@ class RenderingMixin:
                 btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="primary")
                 choices_container.mount(btn)
 
-    async def _trigger_choice(self, choice_idx: int) -> None:
+    async def _trigger_choice(self, choice_idx: int, selected_button_id: str | None = None) -> None:
         """Handle choice selection and delegate to the engine."""
         assert isinstance(self, App)
         if (
@@ -242,8 +242,7 @@ class RenderingMixin:
         self._current_turn_widget = new_turn
         self._current_turn_text = ""
 
-        selected_label = f"[{choice_idx + 1}] {choice_text}"
-        self.show_loading(selected_label=selected_label)
+        self.show_loading(selected_button_id=selected_button_id)
 
         # 2. Journal update
         from textual.widgets import ListView, ListItem, Label

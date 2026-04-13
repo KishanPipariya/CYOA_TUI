@@ -33,7 +33,13 @@ class EventsMixin:
         if self.engine:
             self.turn_count = self.engine.state.turn_count
         self.display_node(node)
-        self.update_story_map()
+        try:
+            # Avoid DB/UI work when the panel is hidden.
+            story_map_panel = self.query_one("#story-map-panel")
+            if not story_map_panel.has_class("panel-collapsed"):
+                self.update_story_map()
+        except Exception as e:
+            logger.debug("Failed to conditionally update story map: %s", e)
 
     def _handle_stats_updated(self, stats: dict[str, int]) -> None:
         assert isinstance(self, App)
