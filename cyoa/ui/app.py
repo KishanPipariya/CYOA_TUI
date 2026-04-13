@@ -7,7 +7,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
-from textual.events import Click
+from textual.events import Click, Resize
 from textual.reactive import reactive
 from textual.widgets import (
     Button,
@@ -82,6 +82,7 @@ class CYOAApp(
     mood: reactive[str] = reactive("default")
     typewriter_enabled: reactive[bool] = reactive(True)
     typewriter_speed: reactive[str] = reactive("normal")
+    compact_layout: reactive[bool] = reactive(False)
 
     def __init__(
         self,
@@ -148,6 +149,7 @@ class CYOAApp(
         self.query_one("#story-container").border_title = "Story"
 
         self._current_turn_widget = self.query_one("#initial-turn", Markdown)
+        self._set_compact_layout(self.size.width)
 
         # Subscribe to Engine Events
         self._unsubscribers.extend(
@@ -173,6 +175,15 @@ class CYOAApp(
         self._typewriter_worker()
         # Short delay to let the UI paint the initial scene before starting the engine
         self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
+
+    def on_resize(self, event: Resize) -> None:
+        self._set_compact_layout(event.size.width)
+
+    def _set_compact_layout(self, width: int) -> None:
+        """Enable compact mode on narrow terminals to preserve story readability."""
+        is_compact = width < 140
+        self.compact_layout = is_compact
+        self.set_class(is_compact, "compact-layout")
 
     def on_unmount(self) -> None:
         """Cancel all background work and release resources."""

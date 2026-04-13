@@ -13,7 +13,9 @@ Screen {
 }
 
 #journal-panel, #story-map-panel {
-    width: 40;
+    width: 32%;
+    min-width: 26;
+    max-width: 40;
     border-left: vkey $secondary;
     padding: 1;
     background: $surface;
@@ -30,6 +32,17 @@ Screen {
     margin: 0;
     border: none;
     opacity: 0;
+}
+
+/* Narrow terminals: prioritize readable story width. */
+.compact-layout #main-container {
+    width: 1fr;
+}
+
+.compact-layout #journal-panel, .compact-layout #story-map-panel {
+    width: 48%;
+    min-width: 24;
+    max-width: 34;
 }
 
 
@@ -173,6 +186,13 @@ Button {
 Button > .textual-button--label {
     text-align: left;
     padding-left: 2;
+}
+
+#choices-container Button:focus {
+    background: $accent 25%;
+    border: tall $accent;
+    color: $text;
+    text-style: bold;
 }
 
 /* ── Footer ────────────────────────────────────────────────── */

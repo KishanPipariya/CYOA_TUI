@@ -138,6 +138,9 @@ class NavigationMixin:
         assert isinstance(self, App)
         from textual.containers import Container
         panel = self.query_one("#journal-panel", Container)
+        if getattr(self, "compact_layout", False) and panel.has_class("panel-collapsed"):
+            # In compact mode, keep only one side panel open at a time.
+            self.query_one("#story-map-panel", Container).add_class("panel-collapsed")
         panel.toggle_class("panel-collapsed")
         # Ensure scroll to end if opening
         if not panel.has_class("panel-collapsed"):
@@ -146,8 +149,15 @@ class NavigationMixin:
     def action_toggle_story_map(self) -> None:
         """Toggle the visibility of the story map panel."""
         assert isinstance(self, App)
-        panel = self.query_one("#story-map-panel")
+        from textual.containers import Container
+
+        panel = self.query_one("#story-map-panel", Container)
+        if getattr(self, "compact_layout", False) and panel.has_class("panel-collapsed"):
+            # In compact mode, keep only one side panel open at a time.
+            self.query_one("#journal-panel", Container).add_class("panel-collapsed")
         panel.toggle_class("panel-collapsed")
+        if not panel.has_class("panel-collapsed"):
+            self.update_story_map()
 
     @work(exclusive=True)
     async def action_branch_past(self) -> None:

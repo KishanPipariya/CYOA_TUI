@@ -215,6 +215,16 @@ class RenderingMixin:
                 btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="primary")
                 choices_container.mount(btn)
 
+        self._focus_first_choice_button(choices_container)
+
+    def _focus_first_choice_button(self, choices_container: Container) -> None:
+        """Focus first available choice button for faster keyboard play."""
+        assert isinstance(self, App)
+        buttons = [btn for btn in choices_container.query(Button) if not btn.disabled]
+        if not buttons:
+            return
+        self.call_after_refresh(buttons[0].focus)
+
     async def _trigger_choice(self, choice_idx: int, selected_button_id: str | None = None) -> None:
         """Handle choice selection and delegate to the engine."""
         assert isinstance(self, App)
