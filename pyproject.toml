@@ -27,6 +27,7 @@ dependencies = [
 dev = [
     "mypy>=1.19.1",
     "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
     "ruff>=0.15.7",
 ]
 
@@ -35,6 +36,21 @@ asyncio_mode = "auto"
 markers = [
     "no_worker_mock: skip the autouse mock_textual_workers fixture for tests using app.run_test()",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["cyoa"]
+
+[tool.coverage.report]
+skip_empty = true
+show_missing = true
+precision = 2
+omit = [
+    "cyoa/ui/*",
+]
+
+[tool.coverage.json]
+output = "coverage.json"
 
 [tool.ruff]
 line-length = 100

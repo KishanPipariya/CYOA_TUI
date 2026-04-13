@@ -432,7 +432,8 @@ uv run python main.py --theme dark_dungeon
 Quality checks used by the repo:
 
 ```bash
-uv run pytest -q
+uv run pytest --cov=cyoa --cov-report=term-missing --cov-report=xml --cov-report=json -q
+uv run python scripts/check_coverage.py
 uv run ruff check .
 uv run mypy cyoa
 ```
