@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cyoa.llm.providers import LlamaCppProvider, OllamaProvider
+from cyoa.llm.providers import LlamaCppProvider, OllamaProvider, ProviderResponseError
 
 # ── LlamaCppProvider Tests ───────────────────────────────────────────────────
 
@@ -89,6 +89,23 @@ async def test_ollama_generate_json():
         assert payload["format"] == schema
         assert payload["stream"] is False
 
+
+@pytest.mark.asyncio
+async def test_ollama_generate_json_rejects_missing_message_content():
+    messages = [{"role": "user", "content": "hi"}]
+    schema = {"type": "object"}
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"message": {}}
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+
+        provider = OllamaProvider(model="llama3")
+        with pytest.raises(ProviderResponseError, match="missing message content"):
+            await provider.generate_json(messages, schema)
+
 @pytest.mark.asyncio
 async def test_ollama_stream_json():
     # Helper for async iteration
@@ -146,6 +163,26 @@ async def test_ollama_stream_json_skips_malformed_lines():
             chunks.append(chunk)
 
     assert "".join(chunks) == "A"
+
+
+@pytest.mark.asyncio
+async def test_ollama_stream_json_rejects_non_object_chunks():
+    async def async_iter(items):
+        for item in items:
+            yield item
+
+    mock_response = MagicMock()
+    mock_response.aiter_lines.return_value = async_iter([json.dumps(["bad"])])
+    mock_response.raise_for_status = MagicMock()
+
+    mock_context = MagicMock()
+    mock_context.__aenter__ = AsyncMock(return_value=mock_response)
+
+    with patch("httpx.AsyncClient.stream", return_value=mock_context):
+        provider = OllamaProvider(model="llama3")
+        with pytest.raises(ProviderResponseError, match="JSON object"):
+            async for _ in provider.stream_json([{"role": "user", "content": "hi"}], {}):
+                pass
 
 
 # ── MockProvider Tests ───────────────────────────────────────────────────────

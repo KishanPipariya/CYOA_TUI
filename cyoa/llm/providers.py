@@ -1,4 +1,5 @@
 import abc
+import asyncio
 import json
 import logging
 import os
@@ -12,6 +13,10 @@ from llama_cpp import Llama
 from cyoa.core.observability import LLMObservedSession
 
 logger = logging.getLogger(__name__)
+
+
+def _fallback_token_estimate(text: str) -> int:
+    return len(text) // 4
 
 
 def count_messages_tokens(messages: list[dict[str, str]], token_counter: Callable[[str], int]) -> int:
@@ -102,6 +107,10 @@ class _InterruptionLogitsProcessor:
         return scores
 
 
+class ProviderResponseError(RuntimeError):
+    """Raised when a provider returns a structurally invalid payload."""
+
+
 class LlamaCppProvider(LLMProvider):
     def __init__(self, model_path: str, n_ctx: int = 4096):
         cpu_threads = max(1, (os.cpu_count() or 8) // 2)
@@ -129,12 +138,11 @@ class LlamaCppProvider(LLMProvider):
                     return len(self.llm.tokenize(text.encode("utf-8"), add_bos=False))
                 finally:
                     self._lock.release()
-            else:
-                # Fallback to estimate if the model is busy
-                return len(text) // 4
+            # Fallback to estimate if the model is busy
+            return _fallback_token_estimate(text)
         except Exception as e:
             logger.warning("LlamaCpp tokenization failed: %s — using fallback.", e)
-            return len(text) // 4
+            return _fallback_token_estimate(text)
 
     def _prepare_stream_params(
         self,
@@ -161,6 +169,79 @@ class LlamaCppProvider(LLMProvider):
             ]
         return params
 
+    def _start_generation_session(self) -> LLMObservedSession:
+        return LLMObservedSession(model_name=self.model_path, task="generation").start()
+
+    def _stream_completion(
+        self,
+        messages: list[dict[str, str]],
+        schema: dict[str, Any] | None,
+        max_tokens: int,
+        temperature: float,
+        cancel_event: threading.Event,
+    ) -> Iterator[Any]:
+        params = self._prepare_stream_params(messages, schema, max_tokens, temperature, cancel_event)
+        return cast(Iterator[Any], self.llm.create_chat_completion(**cast(Any, params)))
+
+    def _extract_stream_token(self, chunk: Any) -> str:
+        if not isinstance(chunk, dict):
+            logger.warning("Ignoring unexpected llama.cpp stream chunk type: %s", type(chunk).__name__)
+            return ""
+        try:
+            delta = chunk["choices"][0].get("delta", {})
+        except (KeyError, IndexError, TypeError) as exc:
+            logger.warning("Ignoring malformed llama.cpp stream chunk: %s", exc)
+            return ""
+        content = delta.get("content", "")
+        return content if isinstance(content, str) else ""
+
+    def _publish_stream_token(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        queue: asyncio.Queue[str | None],
+        session: LLMObservedSession,
+        token: str,
+    ) -> None:
+        session.report_first_token()
+        session.report_token(self.count_tokens(token))
+        loop.call_soon_threadsafe(queue.put_nowait, token)
+
+    def _run_stream_producer(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        queue: asyncio.Queue[str | None],
+        messages: list[dict[str, str]],
+        schema: dict[str, Any] | None,
+        max_tokens: int,
+        temperature: float,
+        cancel_event: threading.Event,
+    ) -> None:
+        session: LLMObservedSession | None = None
+        success = False
+        try:
+            session = self._start_generation_session()
+            if cancel_event.is_set():
+                return
+
+            with self._lock:
+                if cancel_event.is_set():
+                    return
+                for chunk in self._stream_completion(
+                    messages, schema, max_tokens, temperature, cancel_event
+                ):
+                    if cancel_event.is_set():
+                        break
+                    token = self._extract_stream_token(chunk)
+                    if token:
+                        self._publish_stream_token(loop, queue, session, token)
+            success = not cancel_event.is_set()
+        except Exception as exc:
+            logger.exception("Error in LlamaCppProvider stream producer: %s", exc)
+        finally:
+            if session is not None:
+                session.end(success=success)
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
     async def _run_cancellable_stream(
         self,
         messages: list[dict[str, str]],
@@ -168,47 +249,21 @@ class LlamaCppProvider(LLMProvider):
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> AsyncIterator[str]:
-        import asyncio
-
         loop = asyncio.get_running_loop()
         q: asyncio.Queue[str | None] = asyncio.Queue()
         cancel_event = threading.Event()
 
-        def producer() -> None:
-            session = None
-            try:
-                session = LLMObservedSession(model_name=self.model_path, task="generation").start()
-                if cancel_event.is_set():
-                    session.end(success=False)
-                    return
-
-                with self._lock:
-                    if cancel_event.is_set():
-                        session.end(success=False)
-                        return
-
-                    params = self._prepare_stream_params(
-                        messages, schema, max_tokens, temperature, cancel_event
-                    )
-                    stream = self.llm.create_chat_completion(**cast(Any, params))
-                    for chunk in cast(Iterator[Any], stream):
-                        if cancel_event.is_set():
-                            break
-                        delta = chunk["choices"][0].get("delta", {})
-                        token = delta.get("content", "")
-                        if token:
-                            session.report_first_token()
-                            session.report_token(self.count_tokens(token))
-                            loop.call_soon_threadsafe(q.put_nowait, token)
-                session.end(success=True)
-            except Exception as e:
-                logger.error("Error in LlamaCppProvider stream producer: %s", e)
-                if session:
-                    session.end(success=False)
-            finally:
-                loop.call_soon_threadsafe(q.put_nowait, None)
-
-        loop.run_in_executor(None, producer)
+        loop.run_in_executor(
+            None,
+            self._run_stream_producer,
+            loop,
+            q,
+            messages,
+            schema,
+            max_tokens,
+            temperature,
+            cancel_event,
+        )
 
         try:
             while True:
@@ -266,7 +321,6 @@ class LlamaCppProvider(LLMProvider):
 
     async def save_state(self) -> Any:
         """Save the current KV-cache state of the LLM."""
-        import asyncio
 
         def _run() -> Any:
             with self._lock:
@@ -280,8 +334,6 @@ class LlamaCppProvider(LLMProvider):
 
     async def load_state(self, state: Any) -> None:
         """Load a previously saved KV-cache state."""
-        import asyncio
-
         def _run() -> None:
             with self._lock:
                 self.llm.load_state(state)
@@ -330,7 +382,88 @@ class OllamaProvider(LLMProvider):
         if self.tokenizer:
             return len(self.tokenizer.encode(text))
         # Fallback to rough estimate if tiktoken is missing
-        return len(text) // 4
+        return _fallback_token_estimate(text)
+
+    def _build_payload(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        stream: bool,
+        schema: dict[str, Any] | None,
+        max_tokens: int,
+        temperature: float,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": stream,
+            "options": {
+                "num_predict": max_tokens,
+                "temperature": temperature,
+            },
+        }
+        if schema is not None:
+            payload["format"] = schema
+        return payload
+
+    def _extract_ollama_content(self, data: dict[str, Any]) -> str:
+        try:
+            content = data["message"]["content"]
+        except KeyError as exc:
+            raise ProviderResponseError("Ollama response missing message content") from exc
+        if not isinstance(content, str):
+            raise ProviderResponseError("Ollama response content must be a string")
+        return content
+
+    async def _post_json(
+        self,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(self.base_url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+        if not isinstance(data, dict):
+            raise ProviderResponseError("Ollama response body must be a JSON object")
+        return data
+
+    async def _generate_non_streaming(
+        self,
+        task: str,
+        messages: list[dict[str, str]],
+        schema: dict[str, Any] | None,
+        max_tokens: int,
+        temperature: float,
+    ) -> str:
+        session = LLMObservedSession(model_name=self.model, task=task).start()
+        try:
+            payload = self._build_payload(
+                messages,
+                stream=False,
+                schema=schema,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            data = await self._post_json(payload)
+            content = self._extract_ollama_content(data)
+        except (httpx.HTTPError, ValueError, ProviderResponseError):
+            session.end(success=False)
+            raise
+
+        session.report_first_token()
+        session.report_token(self.count_tokens(content))
+        session.end(success=True)
+        return content
+
+    def _parse_stream_line(self, line: str) -> dict[str, Any] | None:
+        try:
+            chunk = json.loads(line)
+        except json.JSONDecodeError:
+            logger.warning("Failed to decode Ollama stream chunk: %s", line)
+            return None
+        if not isinstance(chunk, dict):
+            raise ProviderResponseError("Ollama stream chunk must decode to a JSON object")
+        return chunk
 
     async def generate_text(
         self,
@@ -338,31 +471,13 @@ class OllamaProvider(LLMProvider):
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> str:
-        session = LLMObservedSession(model_name=self.model, task="generate_text").start()
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                payload = {
-                    "model": self.model,
-                    "messages": messages,
-                    "stream": False,
-                    "options": {
-                        "num_predict": max_tokens,
-                        "temperature": temperature,
-                    },
-                }
-                response = await client.post(self.base_url, json=payload)
-                response.raise_for_status()
-                data = response.json()
-                content = str(data["message"]["content"])
-
-                # For non-streaming, TTFT is the same as total time in this simplistic view
-                session.report_first_token()
-                session.report_token(self.count_tokens(content))
-                session.end(success=True)
-                return content
-        except Exception:
-            session.end(success=False)
-            raise
+        return await self._generate_non_streaming(
+            "generate_text",
+            messages,
+            None,
+            max_tokens,
+            temperature,
+        )
 
     async def generate_json(
         self,
@@ -371,31 +486,13 @@ class OllamaProvider(LLMProvider):
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> str:
-        session = LLMObservedSession(model_name=self.model, task="generate_json").start()
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                payload = {
-                    "model": self.model,
-                    "messages": messages,
-                    "stream": False,
-                    "format": schema,
-                    "options": {
-                        "num_predict": max_tokens,
-                        "temperature": temperature,
-                    },
-                }
-                response = await client.post(self.base_url, json=payload)
-                response.raise_for_status()
-                data = response.json()
-                content = str(data["message"]["content"])
-
-                session.report_first_token()
-                session.report_token(self.count_tokens(content))
-                session.end(success=True)
-                return content
-        except Exception:
-            session.end(success=False)
-            raise
+        return await self._generate_non_streaming(
+            "generate_json",
+            messages,
+            schema,
+            max_tokens,
+            temperature,
+        )
 
     async def stream_json(
         self,
@@ -406,36 +503,30 @@ class OllamaProvider(LLMProvider):
     ) -> AsyncIterator[str]:
         session = LLMObservedSession(model_name=self.model, task="stream_json").start()
         try:
+            payload = self._build_payload(
+                messages,
+                stream=True,
+                schema=schema,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
             async with httpx.AsyncClient(timeout=120.0) as client:
-                payload = {
-                    "model": self.model,
-                    "messages": messages,
-                    "stream": True,
-                    "format": schema,
-                    "options": {
-                        "num_predict": max_tokens,
-                        "temperature": temperature,
-                    },
-                }
                 async with client.stream("POST", self.base_url, json=payload) as response:
                     response.raise_for_status()
                     async for line in response.aiter_lines():
                         if not line:
                             continue
-                        try:
-                            chunk = json.loads(line)
-                            if "message" in chunk and "content" in chunk["message"]:
-                                session.report_first_token()
-                                content = chunk["message"]["content"]
-                                session.report_token(self.count_tokens(content))
-                                yield content
-                            if chunk.get("done", False):
-                                break
-                        except json.JSONDecodeError:
-                            logger.warning("Failed to decode Ollama stream chunk: %s", line)
+                        chunk = self._parse_stream_line(line)
+                        if chunk is None:
                             continue
+                        if chunk.get("done", False):
+                            break
+                        content = self._extract_ollama_content(chunk)
+                        session.report_first_token()
+                        session.report_token(self.count_tokens(content))
+                        yield content
             session.end(success=True)
-        except Exception:
+        except (httpx.HTTPError, ValueError, ProviderResponseError):
             session.end(success=False)
             raise
 
@@ -449,7 +540,7 @@ class MockProvider(LLMProvider):
         self.model_name = model_name
 
     def count_tokens(self, text: str) -> int:
-        return len(text) // 4
+        return _fallback_token_estimate(text)
 
     async def generate_text(
         self,
