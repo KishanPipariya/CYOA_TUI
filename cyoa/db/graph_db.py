@@ -26,6 +26,13 @@ class StoryTreeNode(TypedDict):
 
 
 class CYOAGraphDB:
+    SCHEMA_MIGRATION_STATEMENTS: tuple[str, ...] = (
+        "CREATE CONSTRAINT story_id_unique IF NOT EXISTS FOR (s:Story) REQUIRE s.id IS UNIQUE;",
+        "CREATE CONSTRAINT story_title_unique IF NOT EXISTS FOR (s:Story) REQUIRE s.title IS UNIQUE;",
+        "CREATE CONSTRAINT scene_id_unique IF NOT EXISTS FOR (s:Scene) REQUIRE s.id IS UNIQUE;",
+        "CREATE INDEX scene_story_title IF NOT EXISTS FOR (s:Scene) ON (s.story_title);",
+    )
+
     def __init__(
         self,
         uri: str | None = None,
@@ -136,6 +143,21 @@ class CYOAGraphDB:
         return next(iter(nodes), None)
 
     @staticmethod
+    def _append_unique_edge(
+        raw_edges: dict[str, list[StoryTreeEdge]],
+        scene_id: str,
+        edge: StoryTreeEdge,
+    ) -> None:
+        existing_edges = raw_edges.setdefault(scene_id, [])
+        if edge not in existing_edges:
+            existing_edges.append(edge)
+
+    @classmethod
+    def schema_migration_statements(cls) -> tuple[str, ...]:
+        """Return the recommended Neo4j schema hardening statements."""
+        return cls.SCHEMA_MIGRATION_STATEMENTS
+
+    @staticmethod
     def _build_story_tree_payload(records: Iterable[Any]) -> dict[str, Any]:
         nodes: dict[str, StoryTreeNode] = {}
         raw_edges: dict[str, list[StoryTreeEdge]] = {}
@@ -158,8 +180,15 @@ class CYOAGraphDB:
             if not next_id:
                 continue
 
-            raw_edges[scene_id].append({"target_id": next_id, "choice": record["choice"]})
+            CYOAGraphDB._append_unique_edge(
+                raw_edges,
+                scene_id,
+                {"target_id": next_id, "choice": record["choice"]},
+            )
             has_incoming.add(next_id)
+
+        for scene_edges in raw_edges.values():
+            scene_edges.sort(key=lambda edge: ((edge["choice"] or ""), edge["target_id"]))
 
         root_id = CYOAGraphDB._pick_story_root(nodes, has_incoming)
         if root_id is None:
@@ -191,6 +220,45 @@ class CYOAGraphDB:
 
         walk(root_id, set())
         return {"root_id": root_id, "nodes": nodes, "edges": edges}
+
+    @classmethod
+    def _build_linear_story_path(cls, records: Iterable[Any]) -> list[dict[str, Any]]:
+        payload = cls._build_story_tree_payload(records)
+        root_id = payload.get("root_id")
+        nodes = cast(dict[str, StoryTreeNode], payload.get("nodes", {}))
+        edges = cast(dict[str, list[StoryTreeEdge]], payload.get("edges", {}))
+        if not root_id or root_id not in nodes:
+            return []
+
+        path: list[dict[str, Any]] = []
+        current_id = root_id
+        visited: set[str] = set()
+
+        while current_id not in visited and current_id in nodes:
+            visited.add(current_id)
+            node = nodes[current_id]
+            outgoing = edges.get(current_id, [])
+            path.append(
+                {
+                    "id": node["id"],
+                    "narrative": node["narrative"],
+                    "choice_taken": outgoing[0]["choice"] if outgoing else None,
+                }
+            )
+            if not outgoing:
+                break
+
+            next_id = outgoing[0]["target_id"]
+            if next_id in visited:
+                logger.warning(
+                    "Stopping linear story traversal at cyclic edge %s -> %s",
+                    current_id,
+                    next_id,
+                )
+                break
+            current_id = next_id
+
+        return path
 
     def _require_driver(self) -> Any:
         assert self.driver is not None
@@ -305,7 +373,7 @@ class CYOAGraphDB:
             query = """
             MATCH (source:Scene {id: $source_id})
             MATCH (target:Scene {id: $target_id})
-            CREATE (source)-[r:LEADS_TO {action_text: $choice_text}]->(target)
+            MERGE (source)-[r:LEADS_TO {action_text: $choice_text}]->(target)
             """
             with DBObservedSession("neo4j", "create_choice_edge"):
                 with self._require_driver().session() as session:
@@ -368,7 +436,9 @@ class CYOAGraphDB:
             query = (
                 "MATCH path = (start:Scene)-[:LEADS_TO*.." + str(max_depth) + "]->(current:Scene {id: $current_id})\n"
                 "WHERE NOT ()-[:LEADS_TO]->(start)\n"
-                "RETURN nodes(path) AS scenes, relationships(path) AS choices"
+                "RETURN nodes(path) AS scenes, relationships(path) AS choices\n"
+                "ORDER BY length(path) DESC\n"
+                "LIMIT 1"
             )
             with self._require_driver().session() as session:
                 result = session.run(query, current_id=current_scene_id)
@@ -413,31 +483,21 @@ class CYOAGraphDB:
             return []
 
         def _work() -> list[dict[str, Any]]:
-            # Single Cypher path query — one round-trip instead of N+1.
-            # The OPTIONAL MATCH on the outgoing edge lets us capture
-            # choice_taken for every node including the last (leaf) one.
             query = """
-            MATCH (story:Story {title: $story_title})<-[:BELONGS_TO]-(root:Scene)
-            WHERE NOT ()-[:LEADS_TO]->(root)
-            MATCH path = (root)-[:LEADS_TO*0..]->(scene:Scene)
-            OPTIONAL MATCH (scene)-[edge:LEADS_TO]->(next:Scene)
+            MATCH (story:Story {title: $story_title})<-[:BELONGS_TO]-(scene:Scene)
+            OPTIONAL MATCH (scene)-[r:LEADS_TO]->(next:Scene)
             RETURN scene.id AS id,
                    scene.narrative AS narrative,
-                   edge.action_text AS choice_taken
-            ORDER BY length(path)
+                   scene.mood AS mood,
+                   next.id AS next_id,
+                   r.action_text AS choice
+            ORDER BY scene.id, choice, next_id
             """
             with DBObservedSession("neo4j", "get_all_story_scenes"):
                 with self._require_driver().session() as session:
                     try:
                         result = session.run(query, story_title=story_title)
-                        return [
-                            {
-                                "id": record["id"],
-                                "narrative": record["narrative"],
-                                "choice_taken": record["choice_taken"],
-                            }
-                            for record in result
-                        ]
+                        return self._build_linear_story_path(result)
                     except Exception as e:  # noqa: BLE001
                         logger.warning("get_all_story_scenes query failed: %s", e)
                         return []

@@ -111,3 +111,19 @@ uv run python main.py
 *   **Tests**: `uv run pytest`
 *   **Linting**: `uv run ruff check .`
 *   **Type Check**: `uv run mypy .`
+
+## Neo4j Schema Hardening
+
+Apply these once per database to keep Story and Scene identity stable and to
+speed up story-scoped scene lookups:
+
+```cypher
+CREATE CONSTRAINT story_id_unique IF NOT EXISTS FOR (s:Story) REQUIRE s.id IS UNIQUE;
+CREATE CONSTRAINT story_title_unique IF NOT EXISTS FOR (s:Story) REQUIRE s.title IS UNIQUE;
+CREATE CONSTRAINT scene_id_unique IF NOT EXISTS FOR (s:Scene) REQUIRE s.id IS UNIQUE;
+CREATE INDEX scene_story_title IF NOT EXISTS FOR (s:Scene) ON (s.story_title);
+```
+
+These constraints back the retrieval assumptions in `cyoa/db/graph_db.py`:
+one canonical Story per title, one Scene per ID, and efficient filtering of
+scenes by `story_title`.

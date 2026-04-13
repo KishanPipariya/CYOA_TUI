@@ -104,7 +104,7 @@ def test_db_create_choice_edge(mock_neo4j):
 
         query = mock_neo4j.run.call_args[0][0]
         assert "MATCH (source:Scene {id: $source_id})" in query
-        assert "CREATE (source)-[r:LEADS_TO" in query
+        assert "MERGE (source)-[r:LEADS_TO" in query
         assert "action_text: $choice_text" in query
 
 
@@ -178,3 +178,139 @@ def test_get_story_tree_uses_fallback_root_when_every_node_has_incoming(mock_neo
         assert tree["root_id"] == "a"
         assert tree["edges"]["a"] == [{"target_id": "b", "choice": "A to B"}]
         assert tree["edges"]["b"] == []
+
+
+def test_schema_migration_statements_cover_story_and_scene_identity():
+    statements = CYOAGraphDB.schema_migration_statements()
+
+    assert any("story_id_unique" in statement for statement in statements)
+    assert any("story_title_unique" in statement for statement in statements)
+    assert any("scene_id_unique" in statement for statement in statements)
+    assert any("scene_story_title" in statement for statement in statements)
+
+
+def test_get_scene_history_path_returns_longest_root_path(mock_neo4j):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+
+        mock_result = MagicMock()
+        mock_result.single.return_value = {
+            "scenes": [
+                {
+                    "id": "root",
+                    "narrative": "Start",
+                    "available_choices": ["Left", "Right"],
+                    "player_stats": {"health": 100, "gold": 2},
+                    "inventory": ["Lantern"],
+                },
+                {
+                    "id": "mid",
+                    "narrative": "Middle",
+                    "available_choices": ["Forward"],
+                    "player_stats": {"health": 90, "gold": 2},
+                    "inventory": ["Lantern", "Map"],
+                },
+                {
+                    "id": "leaf",
+                    "narrative": "Leaf",
+                    "available_choices": [],
+                    "player_stats": {"health": 90, "gold": 3},
+                    "inventory": ["Lantern", "Map"],
+                },
+            ],
+            "choices": [{"action_text": "Left"}, {"action_text": "Forward"}],
+        }
+        mock_neo4j.run.return_value = mock_result
+
+        history = db.get_scene_history_path("leaf", max_depth=7)
+
+        assert history == {
+            "scenes": [
+                {
+                    "id": "root",
+                    "narrative": "Start",
+                    "available_choices": ["Left", "Right"],
+                    "player_stats": {"health": 100, "gold": 2},
+                    "inventory": ["Lantern"],
+                },
+                {
+                    "id": "mid",
+                    "narrative": "Middle",
+                    "available_choices": ["Forward"],
+                    "player_stats": {"health": 90, "gold": 2},
+                    "inventory": ["Lantern", "Map"],
+                },
+                {
+                    "id": "leaf",
+                    "narrative": "Leaf",
+                    "available_choices": [],
+                    "player_stats": {"health": 90, "gold": 3},
+                    "inventory": ["Lantern", "Map"],
+                },
+            ],
+            "choices": ["Left", "Forward"],
+        }
+        query = mock_neo4j.run.call_args.args[0]
+        assert "ORDER BY length(path) DESC" in query
+        assert "LIMIT 1" in query
+        assert mock_neo4j.run.call_args.kwargs["current_id"] == "leaf"
+
+
+def test_get_all_story_scenes_returns_deduped_deterministic_linear_path(mock_neo4j):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+
+        mock_neo4j.run.return_value = [
+            {
+                "id": "root",
+                "narrative": "Start",
+                "mood": "default",
+                "next_id": "b",
+                "choice": "Z path",
+            },
+            {
+                "id": "root",
+                "narrative": "Start",
+                "mood": "default",
+                "next_id": "a",
+                "choice": "A path",
+            },
+            {
+                "id": "root",
+                "narrative": "Start",
+                "mood": "default",
+                "next_id": "a",
+                "choice": "A path",
+            },
+            {
+                "id": "a",
+                "narrative": "Branch A",
+                "mood": "heroic",
+                "next_id": "leaf",
+                "choice": "Finish",
+            },
+            {
+                "id": "b",
+                "narrative": "Branch B",
+                "mood": "combat",
+                "next_id": None,
+                "choice": None,
+            },
+            {
+                "id": "leaf",
+                "narrative": "Ending",
+                "mood": "default",
+                "next_id": None,
+                "choice": None,
+            },
+        ]
+
+        scenes = db.get_all_story_scenes("Adventure")
+
+        assert scenes == [
+            {"id": "root", "narrative": "Start", "choice_taken": "A path"},
+            {"id": "a", "narrative": "Branch A", "choice_taken": "Finish"},
+            {"id": "leaf", "narrative": "Ending", "choice_taken": None},
+        ]
