@@ -58,6 +58,92 @@ async def test_engine_generate_next_emits_error_event_on_failure():
     assert errors == ["boom"]
 
 
+@pytest.mark.asyncio
+async def test_engine_generate_next_uses_cached_node_without_generation():
+    broker, _provider = _make_broker_with_mock_provider()
+    broker.generate_next_node_async = AsyncMock()  # type: ignore[method-assign]
+    broker.save_state_async = AsyncMock(return_value=b"kv-state")  # type: ignore[method-assign]
+
+    engine = StoryEngine(broker=broker, starting_prompt="Start")
+    engine.story_context = StoryContext("Start", token_counter=lambda _x: 1)
+    engine.state.current_scene_id = "scene-1"
+    engine.state.turn_count = 2
+    engine.rag.retrieve_memories = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    engine.rag.index_node = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    cached_node = StoryNode(
+        narrative="Cached path",
+        choices=[Choice(text="Go"), Choice(text="Wait")],
+    )
+    engine.speculation_cache.set_node("scene-1", "Open door", cached_node)
+
+    statuses: list[str] = []
+    completions: list[str] = []
+    bus.subscribe(Events.STATUS_MESSAGE, lambda message: statuses.append(message))
+    bus.subscribe(Events.NODE_COMPLETED, lambda node: completions.append(node.narrative))
+
+    await engine._generate_next(choice_text="Open door")
+
+    broker.generate_next_node_async.assert_not_awaited()
+    broker.save_state_async.assert_awaited_once()
+    engine.rag.index_node.assert_awaited_once_with("scene-1", cached_node)
+    assert engine.speculation_cache.get_state("scene-1") == b"kv-state"
+    assert statuses == ["✨ Recalling future memories..."]
+    assert completions == ["Cached path"]
+    assert engine.state.current_node == cached_node
+    assert engine.state.current_scene_id == "scene-1"
+
+
+@pytest.mark.asyncio
+async def test_engine_generate_next_first_turn_persists_title_and_scene():
+    broker, _provider = _make_broker_with_mock_provider()
+    broker.generate_next_node_async = AsyncMock(  # type: ignore[method-assign]
+        return_value=StoryNode(
+            narrative="Opening scene",
+            choices=[Choice(text="Enter"), Choice(text="Leave")],
+            title="Fresh Adventure",
+        )
+    )
+    broker.save_state_async = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    db = MagicMock()
+    db.create_story_node_and_get_title.return_value = "Fresh Adventure"
+    db.save_scene_async = AsyncMock(return_value="scene-db-1")
+
+    engine = StoryEngine(broker=broker, starting_prompt="Start", db=db)
+    engine.story_context = StoryContext("Start", token_counter=lambda _x: 1)
+    engine.rag.retrieve_memories = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    engine.rag.index_node = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    titles: list[str | None] = []
+    completions: list[str] = []
+    bus.subscribe(Events.STORY_TITLE_GENERATED, lambda title: titles.append(title))
+    bus.subscribe(Events.NODE_COMPLETED, lambda node: completions.append(node.narrative))
+
+    await engine._generate_next()
+
+    db.create_story_node_and_get_title.assert_called_once_with("Fresh Adventure")
+    engine.rag.index_node.assert_awaited_once()
+    indexed_scene_id, indexed_node = engine.rag.index_node.await_args.args
+    assert isinstance(indexed_scene_id, str)
+    assert indexed_scene_id
+    assert indexed_node.narrative == "Opening scene"
+    db.save_scene_async.assert_awaited_once_with(
+        narrative="Opening scene",
+        available_choices=["Enter", "Leave"],
+        story_title="Fresh Adventure",
+        source_scene_id=None,
+        choice_text=None,
+        player_stats=engine.state.player_stats,
+        inventory=engine.state.inventory,
+        mood="default",
+    )
+    assert titles == ["Fresh Adventure"]
+    assert completions == ["Opening scene"]
+    assert engine.state.story_title == "Fresh Adventure"
+    assert engine.state.current_scene_id == "scene-db-1"
+
+
 def test_engine_save_and_load_roundtrip():
     broker, _provider = _make_broker_with_mock_provider()
     engine = StoryEngine(broker=broker, starting_prompt="Start")

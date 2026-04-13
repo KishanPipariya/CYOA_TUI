@@ -58,7 +58,6 @@ ignore = [
 known-first-party = ["cyoa"]
 
 [tool.ruff.lint.per-file-ignores]
-"cyoa/core/engine.py" = ["C901"]
 "cyoa/db/graph_db.py" = ["C901"]
 "cyoa/llm/providers.py" = ["C901"]
 

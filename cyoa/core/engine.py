@@ -103,93 +103,114 @@ class StoryEngine:
         with EngineObservedSession("retry"):
             await self._generate_next(choice_text=self.state.last_choice_text)
 
-    async def _generate_next(self, choice_text: str | None = None) -> None:
-        """Orchestrate the generation of the next story node, including RAG and DB saving."""
+    async def _prepare_generation_context(self) -> None:
+        """Refresh retrieved memories and trigger non-blocking summarization when needed."""
         if not self.story_context:
             return
 
-        bus.emit(Events.NODE_GENERATING)
-
-        # 1. RAG: Retrieve relevant memories using the manager
         await self.rag.retrieve_memories(self.state.current_node, self.story_context)
 
-        # 2. Summarization check — fire-and-forget as a background task so it
-        #    runs concurrently with (or just before) node generation instead of
-        #    blocking Time-to-First-Token for the current turn.
-        #    The updated summary will be injected into the context for the NEXT turn.
         if self.story_context.needs_summarization():
             bus.emit(Events.SUMMARIZATION_STARTED)
             self._pending_summarization_task = asyncio.create_task(
                 self._run_summarization_in_background(self.story_context)
             )
 
-        # 3. Speculation Cache check
-        cached_node = None
-        if choice_text and self.state.current_scene_id:
-            cached_node = self.speculation_cache.get_node(self.state.current_scene_id, choice_text)
+    def _get_cached_node(self, choice_text: str | None) -> StoryNode | None:
+        """Look up a speculative node for the current scene and choice."""
+        if not choice_text or not self.state.current_scene_id:
+            return None
+        return self.speculation_cache.get_node(self.state.current_scene_id, choice_text)
+
+    async def _resolve_next_node(
+        self,
+        choice_text: str | None,
+        on_token: Any,
+        session: EngineObservedSession,
+    ) -> StoryNode:
+        """Use speculative cache when available, otherwise generate a fresh node."""
+        cached_node = self._get_cached_node(choice_text)
+        if cached_node:
+            bus.emit(Events.STATUS_MESSAGE, message="✨ Recalling future memories...")
+            await asyncio.sleep(0.1)
+            if session.span:
+                session.span.set_attribute("engine.cache_hit", True)
+            return cached_node
+
+        node = await self.broker.generate_next_node_async(
+            self.story_context, on_token_chunk=on_token
+        )
+        if session.span:
+            session.span.set_attribute("engine.cache_hit", False)
+        return node
+
+    async def _set_story_title(self, node: StoryNode) -> None:
+        """Create or derive the story title for the first generated node."""
+        generated_title = node.title if node.title else "Untitled Adventure"
+        if self.db:
+            self.state.story_title = await asyncio.to_thread(
+                self.db.create_story_node_and_get_title, generated_title
+            )
+        else:
+            self.state.story_title = generated_title
+        bus.emit(Events.STORY_TITLE_GENERATED, title=self.state.story_title)
+
+    async def _persist_generated_node(
+        self,
+        node: StoryNode,
+        choice_text: str | None,
+    ) -> None:
+        """Save provider state, update local state, and persist/index the node."""
+        state = await self.broker.save_state_async()
+        if state and self.state.current_scene_id:
+            self.speculation_cache.set_state(self.state.current_scene_id, state)
+
+        self.state.apply_node_updates(node)
+
+        if self.state.turn_count == 1:
+            await self._set_story_title(node)
+
+        previous_scene_id = self.state.current_scene_id
+        new_id = previous_scene_id or str(uuid.uuid4())
+        await self.rag.index_node(new_id, node)
+
+        if self.db and self.state.story_title:
+            self.state.current_scene_id = await self.db.save_scene_async(
+                narrative=node.narrative,
+                available_choices=[choice.text for choice in node.choices],
+                story_title=self.state.story_title,
+                source_scene_id=previous_scene_id,
+                choice_text=choice_text,
+                player_stats=self.state.player_stats,
+                inventory=self.state.inventory,
+                mood=node.mood,
+            )
+            return
+
+        self.state.current_scene_id = new_id
+
+    def _emit_generation_events(self, node: StoryNode) -> None:
+        """Emit post-generation events in the established UI order."""
+        bus.emit(Events.NODE_COMPLETED, node=node)
+        if node.is_ending:
+            bus.emit(Events.ENDING_REACHED, node=node)
+
+    async def _generate_next(self, choice_text: str | None = None) -> None:
+        """Orchestrate the generation of the next story node, including RAG and DB saving."""
+        if not self.story_context:
+            return
+
+        bus.emit(Events.NODE_GENERATING)
+        await self._prepare_generation_context()
 
         def on_token(token: str) -> None:
             bus.emit(Events.TOKEN_STREAMED, token=token)
 
         try:
             with EngineObservedSession("process_turn") as session:
-                if cached_node:
-                    # Indicate cache hit via status message instead of polluting the narrative stream
-                    bus.emit(Events.STATUS_MESSAGE, message="✨ Recalling future memories...")
-                    await asyncio.sleep(0.1)
-                    node = cached_node
-                    if session.span:
-                        session.span.set_attribute("engine.cache_hit", True)
-                else:
-                    node = await self.broker.generate_next_node_async(
-                        self.story_context, on_token_chunk=on_token
-                    )
-                    if session.span:
-                        session.span.set_attribute("engine.cache_hit", False)
-
-                # 4. Save State (KV cache) if available
-                state = await self.broker.save_state_async()
-                if state and self.state.current_scene_id:
-                    self.speculation_cache.set_state(self.state.current_scene_id, state)
-
-                # 5. Apply updates via GameState
-                self.state.apply_node_updates(node)
-
-                # 6. First node check (Title)
-                if self.state.turn_count == 1:
-                    generated_title = node.title if node.title else "Untitled Adventure"
-                    if self.db:
-                        self.state.story_title = await asyncio.to_thread(
-                            self.db.create_story_node_and_get_title, generated_title
-                        )
-                    else:
-                        self.state.story_title = generated_title
-                    bus.emit(Events.STORY_TITLE_GENERATED, title=self.state.story_title)
-
-                # 7. Persistence and Indexing using RAGManager
-                new_id = self.state.current_scene_id or str(uuid.uuid4())
-                await self.rag.index_node(new_id, node)
-
-                # 8. Database save
-                if self.db and self.state.story_title:
-                    choices_text = [choice.text for choice in node.choices]
-                    self.state.current_scene_id = await self.db.save_scene_async(
-                        narrative=node.narrative,
-                        available_choices=choices_text,
-                        story_title=self.state.story_title,
-                        source_scene_id=self.state.current_scene_id,
-                        choice_text=choice_text,
-                        player_stats=self.state.player_stats,
-                        inventory=self.state.inventory,
-                        mood=node.mood,
-                    )
-                else:
-                    self.state.current_scene_id = new_id
-
-                bus.emit(Events.NODE_COMPLETED, node=node)
-
-                if node.is_ending:
-                    bus.emit(Events.ENDING_REACHED, node=node)
+                node = await self._resolve_next_node(choice_text, on_token, session)
+                await self._persist_generated_node(node, choice_text)
+                self._emit_generation_events(node)
 
         except Exception as e:
             logger.error(f"Story Engine error: {e}", exc_info=True)
