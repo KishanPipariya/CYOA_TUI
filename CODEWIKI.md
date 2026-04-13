@@ -1,302 +1,397 @@
 # CYOA TUI CodeWiki
 
-This document is a local developer wiki for the `CYOA_TUI` repository.  
-It focuses on architecture, runtime flow, module responsibilities, key data contracts, and extension points.
+This document reflects the repository as it exists now.
+It is a developer-facing status wiki, not an aspirational design doc.
 
 ## 1) Project Snapshot
 
-- App type: terminal UI (`Textual`) for AI-generated choose-your-own-adventure gameplay.
+- App type: terminal choose-your-own-adventure game built with `Textual`.
 - Language/runtime: Python `>=3.13`.
-- Primary entrypoint: `main.py`.
+- Entrypoint: `main.py`.
 - Core package: `cyoa/`.
-- Persistence:
-  - Graph persistence and branching history: Neo4j (`cyoa/db/graph_db.py`)
-  - Semantic memory: ChromaDB (`cyoa/db/rag_memory.py`)
-- LLM backends:
-  - `llama-cpp-python` (local GGUF)
+- Story generation backends:
+  - `llama-cpp-python`
   - Ollama HTTP API
-  - mock provider for degraded/dev mode
-- Observability: OpenTelemetry traces/metrics + optional Jaeger/Prometheus/Grafana stack.
+  - `MockProvider` fallback
+- Persistence and memory:
+  - Neo4j graph persistence in [`cyoa/db/graph_db.py`](/Users/kishan/CYOA_TUI/cyoa/db/graph_db.py)
+  - Chroma-backed narrative/NPC memory with in-memory fallback in [`cyoa/db/rag_memory.py`](/Users/kishan/CYOA_TUI/cyoa/db/rag_memory.py)
+- Observability: OpenTelemetry spans and metrics in [`cyoa/core/observability.py`](/Users/kishan/CYOA_TUI/cyoa/core/observability.py)
 
-## 2) Repository Map
+## 2) Current Repository Map
 
-### Core code
+### Runtime entry and config
 
-- `main.py`: app bootstrap, arg parsing, theme/prompt resolution, observability init.
-- `cyoa/core/`: engine, state, event bus, models, constants, circuit breaker, observability.
-- `cyoa/llm/`: prompt/context pipeline, model broker/orchestration, providers.
-- `cyoa/ui/`: `Textual` app and mixins (rendering, navigation, persistence, theme, events, typewriter), UI components, styles.
-- `cyoa/db/`: Neo4j adapter + RAG memory adapters + story logger.
+- [`main.py`](/Users/kishan/CYOA_TUI/main.py)
+  - loads `.env` early
+  - validates startup config
+  - resolves theme or direct `--prompt`
+  - initializes observability
+  - instantiates `StoryLogger` and `CYOAApp`
 
-### Supporting assets
+### Core engine
 
-- `themes/*.toml` + `themes/themes.json`: starting prompt themes and mood configuration.
-- `cyoa/llm/templates/system_prompt.j2`: system prompt template.
-- `loading_art.md`, `cyoa/ui/ascii_art.py`: visual flavor.
+- [`cyoa/core/constants.py`](/Users/kishan/CYOA_TUI/cyoa/core/constants.py): default prompt, UI constants, save/log file locations, LLM defaults.
+- [`cyoa/core/models.py`](/Users/kishan/CYOA_TUI/cyoa/core/models.py): `Choice`, `StoryNode`, `NarratorNode`, `ExtractionNode`.
+- [`cyoa/core/events.py`](/Users/kishan/CYOA_TUI/cyoa/core/events.py): global event bus plus namespaced event constants.
+- [`cyoa/core/state.py`](/Users/kishan/CYOA_TUI/cyoa/core/state.py): mutable game state, save/load serialization, one-level undo.
+- [`cyoa/core/engine.py`](/Users/kishan/CYOA_TUI/cyoa/core/engine.py): orchestration for generation, persistence, restore, retry, branching.
+- [`cyoa/core/rag.py`](/Users/kishan/CYOA_TUI/cyoa/core/rag.py): bridge between engine and memory backends.
+- [`cyoa/core/circuit_breaker.py`](/Users/kishan/CYOA_TUI/cyoa/core/circuit_breaker.py): DB availability guard.
+- [`cyoa/core/theme_loader.py`](/Users/kishan/CYOA_TUI/cyoa/core/theme_loader.py): loads theme TOML plus mood config from `themes.json`.
 
-### Infra and tooling
+### LLM layer
 
-- `docker-compose.yml`: Neo4j + observability stack.
-- `monitoring/`: OTEL collector, Prometheus, Grafana provisioning.
-- `download_model.py`: GGUF model bootstrap utility.
+- [`cyoa/llm/broker.py`](/Users/kishan/CYOA_TUI/cyoa/llm/broker.py)
+  - `StoryContext`
+  - `SpeculationCache`
+  - `ModelBroker`
+- [`cyoa/llm/pipeline.py`](/Users/kishan/CYOA_TUI/cyoa/llm/pipeline.py): prompt component pipeline.
+- [`cyoa/llm/providers.py`](/Users/kishan/CYOA_TUI/cyoa/llm/providers.py): provider interface plus `LlamaCppProvider`, `OllamaProvider`, `MockProvider`.
+- [`cyoa/llm/templates/system_prompt.j2`](/Users/kishan/CYOA_TUI/cyoa/llm/templates/system_prompt.j2): system prompt template.
+
+### UI layer
+
+- [`cyoa/ui/app.py`](/Users/kishan/CYOA_TUI/cyoa/ui/app.py): top-level `Textual` app, workers, event subscriptions, speculation.
+- Mixins under [`cyoa/ui/mixins/`](/Users/kishan/CYOA_TUI/cyoa/ui/mixins):
+  - `events.py`
+  - `rendering.py`
+  - `navigation.py`
+  - `persistence.py`
+  - `theme.py`
+  - `typewriter.py`
+- [`cyoa/ui/components.py`](/Users/kishan/CYOA_TUI/cyoa/ui/components.py): modal screens, spinner, reactive status bar, journal/tree item types.
+- [`cyoa/ui/styles.tcss`](/Users/kishan/CYOA_TUI/cyoa/ui/styles.tcss): layout and visual styling.
+- [`cyoa/ui/ascii_art.py`](/Users/kishan/CYOA_TUI/cyoa/ui/ascii_art.py): per-scene ASCII art library.
+
+### Data and infra
+
+- [`themes/`](/Users/kishan/CYOA_TUI/themes): theme prompts, accents, spinner frames, mood mapping.
+- [`monitoring/`](/Users/kishan/CYOA_TUI/monitoring): OTEL collector, Prometheus, Grafana provisioning.
+- [`docker-compose.yml`](/Users/kishan/CYOA_TUI/docker-compose.yml): Neo4j + observability stack.
+- [`download_model.py`](/Users/kishan/CYOA_TUI/download_model.py): local model bootstrap helper.
 
 ### Tests
 
-- `tests/`: unit/integration-style tests for models, context/broker logic, DB behavior, TUI flows, providers, circuit breaker, streaming interruption, perf sanity.
+- [`tests/`](/Users/kishan/CYOA_TUI/tests): core, UI, provider, DB, observability, performance, and regression coverage.
 
-## 3) Runtime Flow (End-to-End)
+## 3) Runtime Flow
 
 ```mermaid
 flowchart TD
-    A[main.py] --> B[setup_observability]
-    A --> C[load theme/prompt + create CYOAApp]
-    C --> D[on_mount: subscribe EventBus + start workers]
-    D --> E[initialize_and_start]
-    E --> F[ModelBroker + StoryEngine]
-    E --> G[db.verify_connectivity_async]
-    E --> H[engine.initialize]
-    H --> I[engine._generate_next]
-    I --> J[RAG retrieval]
-    I --> K[broker.generate_next_node_async]
-    K --> L[provider stream/generate JSON]
-    I --> M[state.apply_node_updates]
-    I --> N[RAG index + save scene to Neo4j]
-    I --> O[emit NODE_COMPLETED]
-    O --> P[UI render + choices + speculation worker]
-    P --> Q[user makes choice]
-    Q --> I
+    A[main.py] --> B[load .env]
+    A --> C[setup_observability]
+    A --> D[validate CLI/env config]
+    D --> E[load theme or direct prompt]
+    E --> F[create StoryLogger]
+    E --> G[create CYOAApp]
+    G --> H[on_mount]
+    H --> I[subscribe to EventBus]
+    H --> J[start typewriter worker]
+    H --> K[initialize_and_start]
+    K --> L[construct ModelBroker]
+    K --> M[construct StoryEngine]
+    K --> N[verify Neo4j connectivity]
+    K --> O[engine.initialize]
+    O --> P[_generate_next]
+    P --> Q[retrieve memories]
+    P --> R[maybe launch background summarization]
+    P --> S[generate or use speculative cache]
+    S --> T[apply state updates]
+    T --> U[index memory + persist scene]
+    U --> V[emit NODE_COMPLETED]
+    V --> W[UI renders node, choices, status, journal]
+    W --> X[user selects choice]
+    X --> P
 ```
 
-## 4) Main Modules and Responsibilities
+## 4) What Is Actually Implemented
 
-## 4.1 `cyoa/core`
+### 4.1 Startup and configuration
 
-- `constants.py`
-  - Story defaults, UI/typewriter tuning, model defaults, file locations, scene keyword mapping.
-- `models.py`
-  - Pydantic contracts:
-    - `Choice`
-    - `StoryNode` (full turn payload)
-    - `NarratorNode` (phase 1)
-    - `ExtractionNode` (phase 2)
-  - Enforces `2..4` choices for non-ending `StoryNode`.
-- `events.py`
-  - Lightweight global pub/sub bus (`bus`) with named `Events` constants.
-- `state.py`
-  - Owns mutable game state (turn, node, stats, inventory, scene ID, title, undo snapshot).
-  - Emits stat/inventory update events on mutation.
-- `engine.py` (`StoryEngine`)
-  - Central orchestrator:
-    1. retrieves memories
-    2. triggers non-blocking background summarization when needed
-    3. resolves speculation cache or calls broker
-    4. updates state
-    5. writes RAG + Neo4j
-    6. emits events for UI
-  - Also handles retry, undo, save/load data hydration, and branching restore.
-- `rag.py` (`RAGManager`)
-  - Bridges engine and memory backends; retrieval + indexing + rebuild.
-- `circuit_breaker.py`
-  - Thread-safe + async-safe circuit breaker used by DB adapter.
-- `observability.py`
-  - OTEL setup plus helper sessions (`DBObservedSession`, `EngineObservedSession`, `LLMObservedSession`).
+- `main.py` now performs explicit validation before the UI starts.
+- `LLM_PROVIDER` must be one of `llama_cpp`, `ollama`, or `mock`.
+- Numeric env vars such as `LLM_N_CTX`, `LLM_MAX_TOKENS`, and `LLM_TOKEN_BUDGET` are rejected early if malformed.
+- `llama_cpp` requires a model path.
+- `ollama` and `mock` do not require a local GGUF path.
+- `--prompt` overrides `--theme`.
+- Theme loading comes from `themes/<name>.toml`; available themes are shown in parser help.
 
-## 4.2 `cyoa/llm`
+### 4.2 Engine behavior
 
-- `pipeline.py`
-  - Prompt assembly is composable:
-    - `PersonaComponent`
-    - `GoalComponent`
-    - `DirectiveComponent`
-    - `PlayerSheetComponent`
-    - `MemoryComponent`
-    - `SummarizationComponent`
-    - `HistoryComponent`
-- `broker.py`
-  - `StoryContext`: rolling history, memories, summaries, inventory/stats, token budgeting, pruning.
-  - `SpeculationCache`: LRU cache for predicted next node + provider state.
-  - `ModelBroker`:
-    - chooses provider via env/model path
-    - unified mode (`StoryNode` in one call) or judge pattern (narrator + extraction)
-    - JSON repair loop
-    - partial JSON narrative streaming via `jiter`
-    - hierarchical summarization (scene -> chapter -> arc) in background lock
-- `providers.py`
-  - `LLMProvider` interface:
-    - token counting
-    - text/json generation
-    - streaming
-    - optional save/load state
-  - Implementations:
-    - `LlamaCppProvider`
-    - `OllamaProvider`
-    - `MockProvider`
+`StoryEngine` is the central coordinator.
 
-## 4.3 `cyoa/db`
+Implemented responsibilities:
 
-- `graph_db.py` (`CYOAGraphDB`)
-  - Creates/links story scenes in Neo4j.
-  - Retrieves linear history path and full branching tree for UI map.
-  - Uses circuit breaker and offline-safe fallbacks.
-- `rag_memory.py`
-  - `NarrativeMemory`: semantic memory with lazy Chroma init + fallback deque.
-  - `NPCMemory`: per-NPC semantic memory collections + fallback buffers.
-- `story_logger.py`
-  - Event-driven story markdown logger scaffold.
+- initialize a fresh `StoryContext`
+- reset `GameState`
+- retrieve RAG memories before generation
+- trigger summarization in a background task when token usage crosses threshold
+- use speculative cache when a predicted node exists
+- call `ModelBroker.generate_next_node_async` otherwise
+- save provider state into `SpeculationCache` when available
+- apply stat/inventory changes through `GameState`
+- create the story title on first turn
+- index generated narrative into memory
+- persist scene data to Neo4j when DB is online
+- emit events for UI refresh and endings
+- support retry, one-level undo, save/load, and branch restore
 
-## 4.4 `cyoa/ui`
+### 4.3 Story context and prompt assembly
 
-- `app.py` (`CYOAApp`)
-  - Top-level Textual app and widget composition.
-  - Subscribes to engine events and starts workers on mount.
-  - Owns restart/init/speculation/click/button/choice actions.
-- Mixins:
-  - `events.py`: event handlers from engine -> UI updates.
-  - `rendering.py`: streaming behavior, node render, scene art, choice mounting.
-  - `navigation.py`: undo, branch, restart/quit confirms, story map.
-  - `persistence.py`: save/load JSON snapshots.
-  - `typewriter.py`: queue-driven reveal worker and skip/speed controls.
-  - `theme.py`: dark mode, mood class + accent/spinner adaptation.
-- `components.py`
-  - Modal screens (`ConfirmScreen`, `HelpScreen`, `LoadGameScreen`, `BranchScreen`)
-  - `ThemeSpinner`
-  - `StatusDisplay`
-- `styles.tcss`
-  - Layout and mood classes; panel transitions; status/choices visuals.
+`StoryContext` currently stores:
+
+- opening prompt in `history[0]`
+- alternating assistant/user turn history
+- inventory and player stats
+- retrieved memories
+- three hierarchical summaries:
+  - `scene_summary`
+  - `chapter_summary`
+  - `arc_summary`
+- optional goals/directives
+
+Prompt assembly is component-based via `PromptPipeline`. The final message stack comes from `StoryContext.get_messages()`.
+
+### 4.4 Generation modes
+
+`ModelBroker` supports two modes:
+
+- Unified mode:
+  - one JSON generation pass into full `StoryNode`
+  - optional streaming of partial narrative extracted from partial JSON via `jiter`
+- Judge pattern:
+  - narrator pass into `NarratorNode`
+  - extraction pass into `ExtractionNode`
+  - merged into final `StoryNode`
+
+Selection is controlled by `LLM_UNIFIED_MODE` and defaults to unified mode.
+
+### 4.5 Provider behavior
+
+- `LlamaCppProvider`
+  - uses local GGUF via `llama_cpp.Llama`
+  - supports token counting, JSON streaming, and provider state save/load
+  - uses a cancellable logits processor for interruption
+- `OllamaProvider`
+  - uses `httpx` against `/api/chat`
+  - supports plain text, JSON, and JSON streaming
+  - token counting uses `tiktoken` if present, otherwise rough estimate
+- `MockProvider`
+  - returns canned narrative/JSON
+  - used directly for tests/dev, and indirectly when local GGUF path is missing for `llama_cpp`
+
+### 4.6 UI behavior
+
+The UI is a `Textual` app composed from mixins. Current user-facing features include:
+
+- streaming narrative render with optional typewriter effect
+- skip current narration with `space`
+- typewriter speed cycling with `v`
+- dark/light toggle with `d`
+- journal side panel
+- story map side panel
+- branch selection from a past scene
+- one-level undo
+- save/load JSON snapshots
+- restart and quit confirmation modals
+- reactive stats/inventory status bar
+- mood-driven styling plus scene ASCII art
+- background speculation for the first available choice only
+
+### 4.7 Persistence and degraded operation
+
+Neo4j:
+
+- `CYOAGraphDB.verify_connectivity_async()` disables graph persistence if connection fails.
+- All graph write/read paths are wrapped with a circuit breaker and safe fallbacks.
+- When offline, the game continues with in-memory state and generated UUID scene IDs.
+
+RAG / Chroma:
+
+- `NarrativeMemory` and `NPCMemory` lazy-initialize Chroma collections.
+- On failure or missing dependency, they degrade to recent-history fallback buffers.
+- Retry/backoff logic avoids repeated blocking failures.
 
 ## 5) Core Data Contracts
 
-## 5.1 `StoryNode` schema (runtime payload)
+### 5.1 `StoryNode`
 
-Expected fields (engine-facing):
+Runtime fields:
 
 - `narrative: str`
 - `title: str | None`
-- `choices: list[Choice]`
-- `is_ending: bool`
-- `mood: str`
 - `items_gained: list[str]`
 - `items_lost: list[str]`
 - `npcs_present: list[str]`
 - `stat_updates: dict[str, int]`
+- `choices: list[Choice]`
+- `is_ending: bool`
+- `mood: str`
 
 Validation rule:
 
-- If `is_ending == False`, choice count must be between `2` and `4`.
+- non-ending nodes must have between `2` and `4` choices
+- ending nodes may have `0` choices
 
-## 5.2 Save file shape (from `StoryEngine.get_save_data`)
+### 5.2 Save-file shape
 
-Not strict-schema-enforced, but includes:
+Engine-level save data from `StoryEngine.get_save_data()` includes:
 
-- engine context:
-  - `version`
-  - `starting_prompt`
-  - `context_history`
-- state snapshot:
-  - `story_title`
-  - `turn_count`
-  - `inventory`
-  - `player_stats`
-  - `current_node` (serialized `StoryNode`)
-  - `current_scene_id`
-  - `last_choice_text`
-- UI adds:
-  - `current_story_text`
+- `version`
+- `starting_prompt`
+- `context_history`
+- `story_title`
+- `turn_count`
+- `inventory`
+- `player_stats`
+- `current_node`
+- `current_scene_id`
+- `last_choice_text`
 
-## 6) Event-Driven Contracts
+UI save/load adds:
 
-`StoryEngine` emits:
+- `current_story_text`
 
-- lifecycle: `ENGINE_STARTED`, `ENGINE_RESTARTED`
-- generation: `NODE_GENERATING`, `TOKEN_STREAMED`, `NODE_COMPLETED`, `SUMMARIZATION_STARTED`
-- state: `STATS_UPDATED`, `INVENTORY_UPDATED`, `STORY_TITLE_GENERATED`
-- outcomes: `ENDING_REACHED`, `ERROR_OCCURRED`, `STATUS_MESSAGE`
+Save files live under `saves/`.
 
-`CYOAApp` subscribes in `on_mount` and translates these into:
+### 5.3 Neo4j scene payload
 
-- spinner/status notifications
-- markdown narrative updates
-- stats/inventory widget updates
-- story map refresh
+When online, scene writes include:
 
-## 7) Configuration and Runtime Knobs
+- `narrative`
+- `available_choices`
+- `story_title`
+- `player_stats`
+- `inventory`
+- `mood`
+- link to source scene through a `LEADS_TO` edge when applicable
 
-Key env variables used across modules:
+## 6) Event Contracts
 
-- LLM selection:
-  - `LLM_PROVIDER` = `llama_cpp | ollama | mock`
-  - `LLM_MODEL_PATH`
-  - `LLM_MODEL` (ollama model id)
-  - `OLLAMA_BASE_URL`
-- generation behavior:
-  - `LLM_UNIFIED_MODE` (default true)
-  - `LLM_N_CTX`
-  - `LLM_TEMPERATURE`
-  - `LLM_MAX_TOKENS`
-  - `LLM_TOKEN_BUDGET`
-  - `LLM_SUMMARY_THRESHOLD`
-  - `LLM_SUMMARY_MAX_TOKENS`
-  - `LLM_REPAIR_ATTEMPTS`
-- persistence:
-  - `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`
-- observability:
-  - `OTEL_EXPORTER_OTLP_ENDPOINT`
-  - `GRAFANA_PASSWORD` (compose)
+Engine and state emit namespaced events through the global `bus`.
 
-Local runtime files:
+Defined events:
 
-- `.config.json`: UI prefs (dark mode, typewriter settings)
-- `saves/*.json`: save slots
-- `story.md`: logger target
+- lifecycle:
+  - `engine.started`
+  - `engine.restarted`
+- narrative flow:
+  - `engine.choice_made`
+  - `engine.node_generating`
+  - `engine.token_streamed`
+  - `engine.summarization_started`
+  - `engine.node_completed`
+- state:
+  - `engine.stats_updated`
+  - `engine.inventory_updated`
+  - `engine.story_title_generated`
+- outcomes:
+  - `engine.ending_reached`
+  - `engine.error_occurred`
+  - `engine.status_message`
+
+`CYOAApp.on_mount()` subscribes to these and updates the UI.
+
+## 7) Configuration Surface
+
+### 7.1 LLM selection
+
+- `LLM_PROVIDER`
+- `LLM_MODEL_PATH`
+- `LLM_MODEL`
+- `OLLAMA_BASE_URL`
+
+### 7.2 Generation and context
+
+- `LLM_UNIFIED_MODE`
+- `LLM_N_CTX`
+- `LLM_TEMPERATURE`
+- `LLM_MAX_TOKENS`
+- `LLM_TOKEN_BUDGET`
+- `LLM_SUMMARY_THRESHOLD`
+- `LLM_SUMMARY_MAX_TOKENS`
+- `LLM_REPAIR_ATTEMPTS`
+
+### 7.3 Persistence and telemetry
+
+- `NEO4J_URI`
+- `NEO4J_USER`
+- `NEO4J_PASSWORD`
+- `OTEL_EXPORTER_OTLP_ENDPOINT`
+
+### 7.4 Local runtime files
+
+- `.config.json`: UI preferences
+- `saves/*.json`: save files
+- `story.md`: story log target
 
 ## 8) Test Coverage Map
 
-- `tests/test_models.py`: Pydantic model validation rules.
-- `tests/test_story.py`: large coverage of context pruning/summaries, broker repair/fallback, engine non-blocking summarization, memory, branching restore, streaming extraction.
-- `tests/test_tui.py`: high-level Textual behavior (startup, choices, restart, dialogs, undo, save/load).
-- `tests/test_llm_providers.py`: provider integration behavior with mocks.
-- `tests/test_speculative_interruption.py`: cancellation/logits interruption path.
-- `tests/test_db_integration.py`: Neo4j query/creation behavior with mocked driver.
-- `tests/test_circuit_breaker.py`: sync/async failure and reset behavior.
-- `tests/test_themes.py`: theme file contract.
-- `tests/test_perf.py`: typewriter queue population sanity.
+High-signal tests currently present:
 
-## 9) Extension Guide
+- [`tests/test_main.py`](/Users/kishan/CYOA_TUI/tests/test_main.py): startup config validation and main lifecycle.
+- [`tests/test_story.py`](/Users/kishan/CYOA_TUI/tests/test_story.py): story context, summarization, repair loop, fallback generation.
+- [`tests/test_engine_state.py`](/Users/kishan/CYOA_TUI/tests/test_engine_state.py): retry, cache hits, persistence hooks, save/load, branching, event emission.
+- [`tests/test_tui.py`](/Users/kishan/CYOA_TUI/tests/test_tui.py): Textual startup, choices, panels, inventory/stats behavior.
+- [`tests/test_llm_providers.py`](/Users/kishan/CYOA_TUI/tests/test_llm_providers.py): provider JSON/text/stream behavior and provider selection.
+- [`tests/test_db_integration.py`](/Users/kishan/CYOA_TUI/tests/test_db_integration.py): graph write/read behavior, cycle pruning, schema statements.
+- [`tests/test_observability.py`](/Users/kishan/CYOA_TUI/tests/test_observability.py): metrics/span helper behavior.
+- Additional targeted coverage:
+  - `test_circuit_breaker.py`
+  - `test_speculative_interruption.py`
+  - `test_themes.py`
+  - `test_perf.py`
+  - `test_broker_cache.py`
+  - `test_debug.py`
 
-## 9.1 Add a new theme
+## 9) Known Mismatches and Caveats
 
-1. Create `themes/<name>.toml` with required keys (`name`, `description`, `prompt`, `spinner_frames`, `accent_color`).
-2. Optionally map moods in `themes/themes.json`.
-3. Verify with `tests/test_themes.py`.
+- `StoryLogger` is instantiated from `main.py`, but it subscribes to legacy event names:
+  - `"story_started"`
+  - `"choice_made"`
+  - `"scene_generated"`
+  The current engine emits `engine.*` names from `Events`, so logger callbacks are effectively not wired to current runtime behavior.
 
-## 9.2 Add a new LLM provider
+- `story.md` should be treated as a dormant target for now, not a reliable live transcript.
 
-1. Implement `LLMProvider` in `cyoa/llm/providers.py`.
-2. Add resolver branch in `ModelBroker._create_provider_from_env`.
-3. Ensure token counting and streaming semantics are consistent.
-4. Add provider tests in `tests/test_llm_providers.py`.
+- `themes/themes.json` is used for mood-to-style mapping, but starting prompt/theme selection comes from individual TOML theme files.
 
-## 9.3 Add new player stats
+- `ModelBroker._create_provider_from_env()` will fall back to `MockProvider` if `LLM_PROVIDER=llama_cpp` and the model file path does not exist. That is useful for development, but it also means a misconfigured local model can silently degrade into mock generation after startup validation passes.
 
-1. Add default in `GameState._DEFAULT_STATS`.
-2. Ensure prompt injection (`PlayerSheetComponent`) includes it.
-3. Update UI rendering in `StatusDisplay` if needed.
-4. Extend tests for state mutation and render behavior.
+- Neo4j and Chroma are both optional at runtime. The app is designed to keep running in degraded mode, so “feature available in code” does not always mean “feature active in this session.”
 
-## 9.4 Add engine/UI events
+## 10) Extension Notes
 
-1. Define constant in `Events`.
-2. Emit from engine/state path.
-3. Subscribe/handle in `CYOAApp` or mixin.
-4. Add tests to avoid silent regressions.
+### Add a theme
 
-## 10) Known Caveats (Current State)
+1. Add `themes/<name>.toml`.
+2. Include prompt, spinner frames, and optional accent color.
+3. Update `themes/themes.json` if the new mood should affect runtime styling.
+4. Run `tests/test_themes.py`.
 
-- `StoryLogger` subscribes to legacy event names (`"story_started"`, `"choice_made"`, `"scene_generated"`), while the engine emits namespaced constants (for example `engine.choice_made`). As-is, logger callbacks are not aligned with current event emissions.
-- `main.py` currently hard-requires `--model` or `LLM_MODEL_PATH`, even when `LLM_PROVIDER=ollama` could run without a local GGUF path.
-- The repository contains a very large GGUF artifact at project root; this affects repo size and local operations.
+### Add an LLM provider
 
-## 11) Quick Developer Commands
+1. Implement `LLMProvider` in [`cyoa/llm/providers.py`](/Users/kishan/CYOA_TUI/cyoa/llm/providers.py).
+2. Add provider selection logic in `ModelBroker._create_provider_from_env()`.
+3. Match the existing text, JSON, and streaming contract.
+4. Add coverage in `tests/test_llm_providers.py`.
+
+### Add player stats
+
+1. Extend `GameState._DEFAULT_STATS`.
+2. Ensure prompt rendering includes the stat.
+3. Update `StatusDisplay` and any delta notifications.
+4. Extend state and UI tests.
+
+### Add events
+
+1. Define the constant in `Events`.
+2. Emit it from engine/state/UI code.
+3. Subscribe in the relevant mixin or service.
+4. Add regression tests so silent breakage is visible.
+
+## 11) Developer Commands
 
 ```bash
 uv sync
@@ -304,11 +399,10 @@ docker-compose up -d
 uv run python main.py --theme dark_dungeon
 ```
 
-Quality checks:
+Quality checks used by the repo:
 
 ```bash
-uv run pytest
+uv run pytest -q
 uv run ruff check .
-uv run mypy .
+uv run mypy cyoa
 ```
-
