@@ -1,5 +1,6 @@
 import logging
 
+from textual.containers import Container
 from textual.theme import BUILTIN_THEMES, Theme
 
 from cyoa.core import theme_loader, utils
@@ -16,7 +17,7 @@ class ThemeMixin:
         app = as_textual_app(self)
         host = as_mixin_host(self)
         try:
-            container = app.query_one("#main-container")
+            container = app.query_one("#main-container", Container)
             container.remove_class(f"mood-{old_mood}")
             container.add_class(f"mood-{new_mood}")
 
@@ -30,6 +31,7 @@ class ThemeMixin:
                     if "spinner_frames" in mood_config:
                         spinner.frames = mood_config["spinner_frames"]
                         spinner._frame_idx = 0
+                        spinner.update(spinner.frames[0])
                 except Exception as e:
                     logger.debug("Failed to update spinner frames for mood %s: %s", new_mood, e)
 

@@ -3,6 +3,7 @@ import logging
 from typing import Any
 
 from textual import work
+from textual.containers import Container, VerticalScroll
 from textual.widgets import Label, ListView, Markdown, Static, Tree
 
 from cyoa.core import constants
@@ -25,7 +26,7 @@ class NavigationMixin:
         host._current_story = constants.LOADING_ART
         host._current_turn_text = constants.LOADING_ART
 
-        container = app.query_one("#story-container")
+        container = app.query_one("#story-container", VerticalScroll)
         await container.query(Markdown).remove()
 
         new_turn = Markdown(constants.LOADING_ART, classes="story-turn", id="initial-turn")
@@ -34,7 +35,7 @@ class NavigationMixin:
 
         app.query_one("#scene-art", Static).update("")
         app.query_one("#scene-art", Static).add_class("hidden")
-        app.query_one("#choices-container").remove_children()
+        app.query_one("#choices-container", Container).remove_children()
         app.query_one("#journal-list", ListView).clear()
 
         try:
@@ -118,7 +119,6 @@ class NavigationMixin:
             host._current_turn_widget.update(host._current_turn_text)
 
         # U5 Fix: Re-mount choice buttons for the restored node
-        from textual.containers import Container
         choices_container = app.query_one("#choices-container", Container)
         choices_container.remove_children()
         if host.engine.state.current_node:
@@ -128,7 +128,7 @@ class NavigationMixin:
                 is_error=False,
             )
 
-        app.query_one("#loading").add_class("hidden")
+        app.query_one("#loading", Static).add_class("hidden")
         host._scroll_to_bottom()
 
         # Remove the last journal entry
@@ -145,7 +145,6 @@ class NavigationMixin:
     def action_toggle_journal(self) -> None:
         """Slide the journal panel in/out."""
         app = as_textual_app(self)
-        from textual.containers import Container
         panel = app.query_one("#journal-panel", Container)
         if as_mixin_host(self).compact_layout and panel.has_class("panel-collapsed"):
             # In compact mode, keep only one side panel open at a time.
@@ -158,8 +157,6 @@ class NavigationMixin:
     def action_toggle_story_map(self) -> None:
         """Toggle the visibility of the story map panel."""
         app = as_textual_app(self)
-        from textual.containers import Container
-
         panel = app.query_one("#story-map-panel", Container)
         if as_mixin_host(self).compact_layout and panel.has_class("panel-collapsed"):
             # In compact mode, keep only one side panel open at a time.
@@ -197,13 +194,13 @@ class NavigationMixin:
             return
 
         # 1. UI Preparation
-        app.query_one("#choices-container").remove_children()
-        app.query_one("#loading").remove_class("hidden")
+        app.query_one("#choices-container", Container).remove_children()
+        app.query_one("#loading", Static).remove_class("hidden")
 
         fracture_msg = f"\n\n***\n\n**[Time fractures... you return to Turn {idx + 1}]**"
         host._current_story += fracture_msg
 
-        container = app.query_one("#story-container")
+        container = app.query_one("#story-container", VerticalScroll)
         frac_md = Markdown(f"**[Time fractures... you return to Turn {idx + 1}]**", classes="player-choice")
         container.mount(frac_md, before="#scene-art")
 

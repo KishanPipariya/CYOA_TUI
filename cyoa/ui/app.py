@@ -146,8 +146,8 @@ class CYOAApp(
         self.sub_title = f"Turn {count}" if count > 0 else ""
 
     async def on_mount(self) -> None:
-        self.query_one("#choices-container").border_title = "Choices"
-        self.query_one("#story-container").border_title = "Story"
+        self.query_one("#choices-container", Container).border_title = "Choices"
+        self.query_one("#story-container", VerticalScroll).border_title = "Story"
 
         self._current_turn_widget = self.query_one("#initial-turn", Markdown)
         self._set_compact_layout(self.size.width)
@@ -265,7 +265,7 @@ class CYOAApp(
 
         except Exception as e:
             self.notify(f"Initial setup failed: {e}", severity="error", timeout=5)
-            self.query_one("#loading").add_class("hidden")
+            self.query_one("#loading", ThemeSpinner).add_class("hidden")
             raise
 
     # ------------------------------------------------------------------
@@ -327,7 +327,7 @@ class CYOAApp(
         """Typewriter skip shortcut on clicking the story area."""
         try:
             # U1 Fix: Only skip if clicking within the story container
-            story = self.query_one("#story-container")
+            story = self.query_one("#story-container", VerticalScroll)
             current = event.control
             while current is not None:
                 if current is story:

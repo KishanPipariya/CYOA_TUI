@@ -2,7 +2,7 @@ import json
 import logging
 import os
 
-from textual.containers import Container
+from textual.containers import Container, VerticalScroll
 from textual.widgets import Button, ListView, Markdown
 
 from cyoa.core import constants
@@ -89,7 +89,7 @@ class PersistenceMixin:
         host.engine.load_save_data(data)
 
         # Sync UI
-        container = app.query_one("#story-container")
+        container = app.query_one("#story-container", VerticalScroll)
         for md in container.query(Markdown):
             md.remove()
 

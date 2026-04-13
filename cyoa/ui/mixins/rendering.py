@@ -1,7 +1,7 @@
 import logging
 from uuid import uuid4
 
-from textual.containers import Container
+from textual.containers import Container, VerticalScroll
 from textual.widgets import Button, Markdown, Static
 
 from cyoa.core import constants
@@ -30,7 +30,7 @@ class RenderingMixin:
         if host._loading_suffix_shown:
             # First token batch arrived — loading state is visual-only (spinner).
             host._loading_suffix_shown = False
-            app.query_one("#loading").add_class("hidden")
+            app.query_one("#loading", Static).add_class("hidden")
 
             if host._current_story == constants.LOADING_ART:
                 host._current_story = ""
@@ -49,7 +49,7 @@ class RenderingMixin:
         """Clear choice buttons and show spinner while generation is in progress."""
         app = as_textual_app(self)
         host = as_mixin_host(self)
-        choices_container = app.query_one("#choices-container")
+        choices_container = app.query_one("#choices-container", Container)
         if selected_button_id is not None:
             # Keep only the selected button, disable and dim it
             for btn in list(choices_container.query(Button)):
@@ -60,7 +60,7 @@ class RenderingMixin:
                     btn.variant = "default"
         else:
             choices_container.remove_children()
-        app.query_one("#loading").remove_class("hidden")
+        app.query_one("#loading", Static).remove_class("hidden")
 
         host._loading_suffix_shown = True
 
@@ -68,8 +68,8 @@ class RenderingMixin:
         """Return True if the story container is near its bottom edge."""
         app = as_textual_app(self)
         try:
-            container = app.query_one("#story-container")
-            return container.scroll_y >= container.max_scroll_y - 8
+            container = app.query_one("#story-container", VerticalScroll)
+            return bool(container.scroll_y >= container.max_scroll_y - 8)
         except Exception as e:
             logger.debug("Failed to check if at bottom: %s", e)
             return True
@@ -78,7 +78,7 @@ class RenderingMixin:
         """Scroll the story container to the end after the next refresh."""
         app = as_textual_app(self)
         try:
-            container = app.query_one("#story-container")
+            container = app.query_one("#story-container", VerticalScroll)
             app.call_after_refresh(lambda: container.scroll_end(animate=animate))
         except Exception as e:
             logger.debug("Failed to scroll to bottom: %s", e)
@@ -87,7 +87,7 @@ class RenderingMixin:
         """Render a newly generated StoryNode to the UI (after streaming completes)."""
         app = as_textual_app(self)
         host = as_mixin_host(self)
-        app.query_one("#loading").add_class("hidden")
+        app.query_one("#loading", Static).add_class("hidden")
         host.mood = getattr(node, "mood", "default")
 
         is_error = node.narrative.startswith(constants.ERROR_NARRATIVE_PREFIX)
@@ -231,7 +231,7 @@ class RenderingMixin:
         host._current_story += f"\n\n> **You chose:** {choice_text}"
         host._current_story += "\n\n---\n\n"
 
-        container = app.query_one("#story-container")
+        container = app.query_one("#story-container", VerticalScroll)
         choice_md = Markdown(f"**You chose:** {choice_text}", classes="player-choice")
         container.mount(choice_md, before="#scene-art")
 

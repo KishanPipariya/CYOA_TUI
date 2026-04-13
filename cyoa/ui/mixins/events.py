@@ -1,7 +1,8 @@
 import logging
 from typing import Literal
 
-from textual.widgets import ListView
+from textual.containers import Container
+from textual.widgets import ListView, Static
 
 from cyoa.core.models import StoryNode
 from cyoa.ui.components import StatusDisplay
@@ -40,7 +41,7 @@ class EventsMixin:
         host.display_node(node)
         try:
             # Avoid DB/UI work when the panel is hidden.
-            story_map_panel = app.query_one("#story-map-panel")
+            story_map_panel = app.query_one("#story-map-panel", Container)
             if not story_map_panel.has_class("panel-collapsed"):
                 host.update_story_map()
         except Exception as e:
@@ -101,7 +102,7 @@ class EventsMixin:
     def _handle_error(self, error: str) -> None:
         app = as_textual_app(self)
         app.notify(f"Error: {error}", severity="error", timeout=5)
-        app.query_one("#loading").add_class("hidden")
+        app.query_one("#loading", Static).add_class("hidden")
 
     def _handle_status_message(self, message: str) -> None:
         as_textual_app(self).notify(message, severity="information", timeout=4)
