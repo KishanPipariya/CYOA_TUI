@@ -26,6 +26,7 @@ class CYOAAppMixinContract(Protocol):
     _current_story: str
     _current_turn_text: str
     _loading_suffix_shown: bool
+    _is_shutting_down: bool
     _current_turn_widget: Markdown
     _typewriter_queue: asyncio.Queue[str]
     _typewriter_active_chunk: list[str]

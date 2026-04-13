@@ -168,15 +168,13 @@ class RenderingMixin:
         """Update UI stats from engine state."""
         app = as_textual_app(self)
         host = as_mixin_host(self)
-        if host.engine:
-            try:
-                status = app.query_one(StatusDisplay)
-                status.health = host.engine.state.player_stats.get("health", 100)
-                status.gold = host.engine.state.player_stats.get("gold", 0)
-                status.reputation = host.engine.state.player_stats.get("reputation", 0)
-                status.inventory = list(host.engine.state.inventory)
-            except Exception as e:
-                logger.debug("Failed to update status display from engine: %s", e)
+        if not host.engine or host._is_shutting_down:
+            return
+        status = app.query_one(StatusDisplay)
+        status.health = host.engine.state.player_stats.get("health", 100)
+        status.gold = host.engine.state.player_stats.get("gold", 0)
+        status.reputation = host.engine.state.player_stats.get("reputation", 0)
+        status.inventory = list(host.engine.state.inventory)
 
     def _mount_choice_buttons(
         self, node: StoryNode, choices_container: Container, is_error: bool

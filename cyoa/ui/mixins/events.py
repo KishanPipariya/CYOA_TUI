@@ -1,4 +1,3 @@
-import logging
 from typing import Literal
 
 from textual.containers import Container
@@ -8,7 +7,6 @@ from cyoa.core.models import StoryNode
 from cyoa.ui.components import StatusDisplay
 from cyoa.ui.mixins.contracts import as_mixin_host, as_textual_app
 
-logger = logging.getLogger(__name__)
 
 class EventsMixin:
     """Mixin for handling engine and UI events."""
@@ -39,59 +37,57 @@ class EventsMixin:
         if host.engine:
             host.turn_count = host.engine.state.turn_count
         host.display_node(node)
-        try:
-            # Avoid DB/UI work when the panel is hidden.
-            story_map_panel = app.query_one("#story-map-panel", Container)
-            if not story_map_panel.has_class("panel-collapsed"):
-                host.update_story_map()
-        except Exception as e:
-            logger.debug("Failed to conditionally update story map: %s", e)
+        if host._is_shutting_down:
+            return
+        # Avoid DB/UI work when the panel is hidden.
+        story_map_panel = app.query_one("#story-map-panel", Container)
+        if not story_map_panel.has_class("panel-collapsed"):
+            host.update_story_map()
 
     def _handle_stats_updated(self, stats: dict[str, int]) -> None:
         app = as_textual_app(self)
         host = as_mixin_host(self)
-        try:
-            status = app.query_one(StatusDisplay)
-            status.health = stats.get("health", 100)
-            status.gold = stats.get("gold", 0)
-            status.reputation = stats.get("reputation", 0)
+        if host._is_shutting_down:
+            return
 
-            previous = host._last_stats_snapshot
-            if previous is not None:
-                deltas: list[str] = []
+        status = app.query_one(StatusDisplay)
+        status.health = stats.get("health", 100)
+        status.gold = stats.get("gold", 0)
+        status.reputation = stats.get("reputation", 0)
 
-                health_delta = stats.get("health", 100) - previous.get("health", 100)
-                if health_delta:
-                    deltas.append(f"{health_delta:+d} HP")
+        previous = host._last_stats_snapshot
+        if previous is not None:
+            deltas: list[str] = []
 
-                gold_delta = stats.get("gold", 0) - previous.get("gold", 0)
-                if gold_delta:
-                    deltas.append(f"{gold_delta:+d} Gold")
+            health_delta = stats.get("health", 100) - previous.get("health", 100)
+            if health_delta:
+                deltas.append(f"{health_delta:+d} HP")
 
-                rep_delta = stats.get("reputation", 0) - previous.get("reputation", 0)
-                if rep_delta:
-                    deltas.append(f"{rep_delta:+d} Rep")
+            gold_delta = stats.get("gold", 0) - previous.get("gold", 0)
+            if gold_delta:
+                deltas.append(f"{gold_delta:+d} Gold")
 
-                if deltas:
-                    severity: Literal["information", "warning", "error"] = (
-                        "warning" if health_delta < 0 else "information"
-                    )
-                    app.notify(" | ".join(deltas), severity=severity, timeout=2)
+            rep_delta = stats.get("reputation", 0) - previous.get("reputation", 0)
+            if rep_delta:
+                deltas.append(f"{rep_delta:+d} Rep")
 
-            host._last_stats_snapshot = {
-                "health": stats.get("health", 100),
-                "gold": stats.get("gold", 0),
-                "reputation": stats.get("reputation", 0),
-            }
-        except Exception as e:
-            logger.debug("Failed to update status display stats: %s", e)
+            if deltas:
+                severity: Literal["information", "warning", "error"] = (
+                    "warning" if health_delta < 0 else "information"
+                )
+                app.notify(" | ".join(deltas), severity=severity, timeout=2)
+
+        host._last_stats_snapshot = {
+            "health": stats.get("health", 100),
+            "gold": stats.get("gold", 0),
+            "reputation": stats.get("reputation", 0),
+        }
 
     def _handle_inventory_updated(self, inventory: list[str]) -> None:
         app = as_textual_app(self)
-        try:
-            app.query_one(StatusDisplay).inventory = list(inventory)
-        except Exception as e:
-            logger.debug("Failed to update status display inventory: %s", e)
+        if as_mixin_host(self)._is_shutting_down:
+            return
+        app.query_one(StatusDisplay).inventory = list(inventory)
 
     def _handle_title_generated(self, title: str) -> None:
         as_textual_app(self).notify(f"New Chapter: {title}", severity="information", timeout=5)

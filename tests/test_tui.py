@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from textual.containers import Container
 from textual.widgets import Button, Label, ListView
+from textual.worker import WorkerFailed
 
+from cyoa.core.events import EventBus, EventDispatchError, Events, bus
 from cyoa.core.models import Choice, StoryNode
 from cyoa.ui.app import CYOAApp
 from cyoa.ui.components import ConfirmScreen, HelpScreen
@@ -102,6 +104,48 @@ async def test_app_startup_and_loading_state(mock_app_dependencies):
         inventory_label = app.query_one("#inventory-label", Label)
         inventory_text = str(inventory_label.render())
         assert "Broken Sword" in inventory_text
+
+
+def test_event_bus_prevents_duplicate_subscriptions() -> None:
+    event_bus = EventBus()
+    received: list[str] = []
+
+    def callback(message: str) -> None:
+        received.append(message)
+
+    unsubscribe_first = event_bus.subscribe("status", callback)
+    unsubscribe_second = event_bus.subscribe("status", callback)
+
+    assert event_bus.subscriber_count("status") == 1
+
+    event_bus.emit("status", message="ready")
+    assert received == ["ready"]
+
+    unsubscribe_first()
+    unsubscribe_second()
+    assert event_bus.subscriber_count("status") == 0
+
+
+def test_event_bus_removes_failing_callbacks_after_dispatch_error() -> None:
+    event_bus = EventBus()
+    received: list[int] = []
+
+    def broken(value: int) -> None:
+        raise RuntimeError("boom")
+
+    def healthy(value: int) -> None:
+        received.append(value)
+
+    event_bus.subscribe("tick", broken)
+    event_bus.subscribe("tick", healthy)
+
+    with pytest.raises(EventDispatchError, match="tick"):
+        event_bus.emit("tick", value=1)
+
+    assert event_bus.subscriber_count("tick") == 1
+
+    event_bus.emit("tick", value=2)
+    assert received == [1, 2]
 
 
 @pytest.mark.asyncio
@@ -341,6 +385,52 @@ async def test_app_restart_via_keyboard(mock_app_dependencies):
 
 
 @pytest.mark.asyncio
+async def test_app_mount_does_not_duplicate_event_subscriptions(mock_app_dependencies):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.2)
+
+        initial_unsubscribers = len(app._unsubscribers)
+        app._subscribe_engine_events()
+
+        assert len(app._unsubscribers) == initial_unsubscribers
+        assert bus.subscriber_count(Events.ENGINE_STARTED) == 1
+        assert bus.subscriber_count(Events.NODE_COMPLETED) == 1
+
+
+@pytest.mark.asyncio
+async def test_startup_failure_closes_runtime_resources() -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+    app.set_timer = MagicMock()
+    app.notify = MagicMock()
+
+    generator = MagicMock()
+    db = MagicMock()
+    db.verify_connectivity_async = AsyncMock(return_value=True)
+    engine = MagicMock()
+    engine.db = db
+    engine.rag.memory.is_online = True
+    engine.initialize = AsyncMock(side_effect=RuntimeError("boom"))
+
+    with (
+        patch("cyoa.ui.app.ModelBroker", return_value=generator),
+        patch("cyoa.ui.app.StoryEngine", return_value=engine),
+    ):
+        with pytest.raises(WorkerFailed, match="boom"):
+            async with app.run_test() as pilot:
+                await pilot.pause(0.1)
+                app.initialize_and_start("dummy_path.gguf")
+                await pilot.pause(0.3)
+
+    app.notify.assert_called()
+    generator.close.assert_called_once_with()
+    db.close.assert_called_once_with()
+    assert app.generator is None
+    assert app.engine is None
+
+
+@pytest.mark.asyncio
 async def test_restart_confirmation_dialog(mock_app_dependencies):
     """Test that pressing 'r' shows a confirmation dialog instead of immediately restarting."""
     app = CYOAApp(model_path="dummy_path.gguf")
@@ -399,6 +489,36 @@ async def test_help_screen(mock_app_dependencies):
         await pilot.press("escape")
         await pilot.pause(0.2)
         assert not isinstance(app.screen, HelpScreen)
+
+
+@pytest.mark.asyncio
+async def test_on_unmount_cancels_workers_and_unsubscribes(mock_app_dependencies):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.2)
+
+        app.workers.cancel_group = MagicMock()
+        app.workers.cancel_all = MagicMock()
+        generator = MagicMock()
+        db = MagicMock()
+        engine = MagicMock()
+        engine.db = db
+        app.generator = generator
+        app.engine = engine
+
+        app.on_unmount()
+
+        assert app._is_shutting_down is True
+        app.workers.cancel_group.assert_any_call(app, "speculation")
+        app.workers.cancel_group.assert_any_call(app, "typewriter")
+        app.workers.cancel_all.assert_called_once_with()
+        generator.close.assert_called_once_with()
+        db.close.assert_called_once_with()
+        assert app.generator is None
+        assert app.engine is None
+        assert app._unsubscribers == []
+        assert bus.subscriber_count(Events.ENGINE_STARTED) == 0
 
 
 @pytest.mark.asyncio

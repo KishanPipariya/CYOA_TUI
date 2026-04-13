@@ -5,6 +5,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+class EventDispatchError(RuntimeError):
+    """Raised when one or more event subscribers fail."""
+
+
 class EventBus:
     """A minimal dictionary-based Pub/Sub Event Bus for decoupling modules."""
 
@@ -29,17 +33,31 @@ class EventBus:
         """Broadcast an event, calling all registered callbacks with kwargs."""
         # Snapshot the list so callbacks that unsubscribe themselves during
         # emit cannot cause RuntimeError or silently skip other callbacks.
+        failed_callbacks: list[Callable[..., None]] = []
         for callback in list(self._subscribers.get(event_name, [])):
             try:
                 callback(**kwargs)
-            except Exception as e:  # noqa: BLE001
-                logger.error(
-                    f"Error executing callback {callback.__name__} for event {event_name}: {e}"
+            except Exception:  # noqa: BLE001
+                failed_callbacks.append(callback)
+                logger.exception(
+                    "Error executing callback %s for event %s",
+                    getattr(callback, "__name__", repr(callback)),
+                    event_name,
                 )
+        for callback in failed_callbacks:
+            self.unsubscribe(event_name, callback)
+        if failed_callbacks:
+            raise EventDispatchError(
+                f"{len(failed_callbacks)} callback(s) failed while dispatching {event_name!r}."
+            )
 
     def clear(self) -> None:
         """Clear all subscribers (mainly useful for isolating test environments)."""
         self._subscribers.clear()
+
+    def subscriber_count(self, event_name: str) -> int:
+        """Return the number of subscribers registered for an event."""
+        return len(self._subscribers.get(event_name, []))
 
 
 # Global Singleton Event Bus instance

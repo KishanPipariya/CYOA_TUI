@@ -104,6 +104,8 @@ class CYOAApp(
         self._current_turn_text: str = constants.LOADING_ART
         self._loading_suffix_shown: bool = False
         self._unsubscribers: list[Callable[[], None]] = []
+        self._subscriptions_active: bool = False
+        self._is_shutting_down: bool = False
 
         # Typewriter Narrator state
         self._typewriter_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -146,29 +148,14 @@ class CYOAApp(
         self.sub_title = f"Turn {count}" if count > 0 else ""
 
     async def on_mount(self) -> None:
+        self._is_shutting_down = False
         self.query_one("#choices-container", Container).border_title = "Choices"
         self.query_one("#story-container", VerticalScroll).border_title = "Story"
 
         self._current_turn_widget = self.query_one("#initial-turn", Markdown)
         self._set_compact_layout(self.size.width)
 
-        # Subscribe to Engine Events
-        self._unsubscribers.extend(
-            [
-                bus.subscribe(Events.ENGINE_STARTED, self._handle_engine_started),
-                bus.subscribe(Events.ENGINE_RESTARTED, self._handle_engine_restarted),
-                bus.subscribe(Events.CHOICE_MADE, self._handle_choice_made),
-                bus.subscribe(Events.NODE_GENERATING, self._handle_node_generating),
-                bus.subscribe(Events.TOKEN_STREAMED, self._handle_token_streamed),
-                bus.subscribe(Events.NODE_COMPLETED, self._handle_node_completed),
-                bus.subscribe(Events.STATS_UPDATED, self._handle_stats_updated),
-                bus.subscribe(Events.INVENTORY_UPDATED, self._handle_inventory_updated),
-                bus.subscribe(Events.STORY_TITLE_GENERATED, self._handle_title_generated),
-                bus.subscribe(Events.ENDING_REACHED, self._handle_ending_reached),
-                bus.subscribe(Events.ERROR_OCCURRED, self._handle_error),
-                bus.subscribe(Events.STATUS_MESSAGE, self._handle_status_message),
-            ]
-        )
+        self._subscribe_engine_events()
 
         # Start loading indicator immediately
         self.show_loading()
@@ -188,16 +175,55 @@ class CYOAApp(
 
     def on_unmount(self) -> None:
         """Cancel all background work and release resources."""
-        self.workers.cancel_all()
-        if self.generator:
-            self.generator.close()
-        if self.engine and self.engine.db:
-            self.engine.db.close()
+        self._is_shutting_down = True
+        self._cancel_background_workers()
+        self._close_runtime_resources()
+        self._unsubscribe_engine_events()
 
-        # Clean up EventBus subscriptions
+    def _subscribe_engine_events(self) -> None:
+        """Register event bus subscriptions exactly once per mounted app instance."""
+        if self._subscriptions_active:
+            return
+
+        self._unsubscribers.extend(
+            [
+                bus.subscribe(Events.ENGINE_STARTED, self._handle_engine_started),
+                bus.subscribe(Events.ENGINE_RESTARTED, self._handle_engine_restarted),
+                bus.subscribe(Events.CHOICE_MADE, self._handle_choice_made),
+                bus.subscribe(Events.NODE_GENERATING, self._handle_node_generating),
+                bus.subscribe(Events.TOKEN_STREAMED, self._handle_token_streamed),
+                bus.subscribe(Events.NODE_COMPLETED, self._handle_node_completed),
+                bus.subscribe(Events.STATS_UPDATED, self._handle_stats_updated),
+                bus.subscribe(Events.INVENTORY_UPDATED, self._handle_inventory_updated),
+                bus.subscribe(Events.STORY_TITLE_GENERATED, self._handle_title_generated),
+                bus.subscribe(Events.ENDING_REACHED, self._handle_ending_reached),
+                bus.subscribe(Events.ERROR_OCCURRED, self._handle_error),
+                bus.subscribe(Events.STATUS_MESSAGE, self._handle_status_message),
+            ]
+        )
+        self._subscriptions_active = True
+
+    def _unsubscribe_engine_events(self) -> None:
+        """Release all event bus subscriptions owned by the app."""
         for unsub in self._unsubscribers:
             unsub()
         self._unsubscribers.clear()
+        self._subscriptions_active = False
+
+    def _cancel_background_workers(self) -> None:
+        """Cancel worker groups owned by the app before teardown."""
+        self.workers.cancel_group(self, "speculation")
+        self.workers.cancel_group(self, "typewriter")
+        self.workers.cancel_all()
+
+    def _close_runtime_resources(self) -> None:
+        """Close external resources and clear references."""
+        if self.generator:
+            self.generator.close()
+            self.generator = None
+        if self.engine and self.engine.db:
+            self.engine.db.close()
+        self.engine = None
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle journal selection: jump to and highlight the corresponding turn."""
@@ -266,6 +292,7 @@ class CYOAApp(
         except Exception as e:
             self.notify(f"Initial setup failed: {e}", severity="error", timeout=5)
             self.query_one("#loading", ThemeSpinner).add_class("hidden")
+            self._close_runtime_resources()
             raise
 
     # ------------------------------------------------------------------
