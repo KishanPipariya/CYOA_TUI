@@ -2,7 +2,7 @@ import json
 import logging
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +48,9 @@ def get_moods_config() -> dict[str, Any]:
             with open(themes_path, encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict):
-                    _themes_cached_config = data
-                    return data
+                    typed_data = cast(dict[str, Any], data)
+                    _themes_cached_config = typed_data
+                    return typed_data
         except Exception as e:
             logger.debug("Failed to load themes.json: %s", e)
     return {}
@@ -58,4 +59,7 @@ def get_moods_config() -> dict[str, Any]:
 def get_config_for_mood(mood: str) -> dict[str, Any]:
     """Get the configuration for a specific mood, falling back to 'default'."""
     themes_config = get_moods_config()
-    return themes_config.get(mood, themes_config.get("default", {}))
+    config = themes_config.get(mood, themes_config.get("default", {}))
+    if isinstance(config, dict):
+        return cast(dict[str, Any], config)
+    return {}

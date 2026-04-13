@@ -108,9 +108,11 @@ uv run python main.py
 
 ## Development
 
-*   **Tests**: `uv run pytest`
+These are the local quality-gate commands mirrored by CI:
+
+*   **Tests**: `uv run pytest -q`
 *   **Linting**: `uv run ruff check .`
-*   **Type Check**: `uv run mypy .`
+*   **Type Check**: `uv run mypy cyoa`
 
 ## Neo4j Schema Hardening
 

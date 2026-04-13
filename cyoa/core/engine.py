@@ -137,8 +137,12 @@ class StoryEngine:
                 session.span.set_attribute("engine.cache_hit", True)
             return cached_node
 
+        story_context = self.story_context
+        if story_context is None:
+            raise RuntimeError("Story context is not initialized.")
+
         node = await self.broker.generate_next_node_async(
-            self.story_context, on_token_chunk=on_token
+            story_context, on_token_chunk=on_token
         )
         if session.span:
             session.span.set_attribute("engine.cache_hit", False)

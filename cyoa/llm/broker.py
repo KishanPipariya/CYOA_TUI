@@ -589,7 +589,7 @@ class ModelBroker:
 
         while attempts < max_attempts:
             try:
-                if attempts == 0 and stream:
+                if attempts == 0 and stream and on_token_chunk is not None:
                     content = await self._stream_with_callback_async(messages, on_token_chunk, self._schema)
                 else:
                     content = await self.provider.generate_json(
@@ -749,7 +749,7 @@ class ModelBroker:
                         new_chunk = current_narrative[len(last_yielded_narrative):]
                         on_token_chunk(new_chunk)
                         last_yielded_narrative = current_narrative
-            except (jiter.JiterError, ValueError):
+            except ValueError:
                 # Expected when buffer is incomplete or malformed (e.g. mid-escape)
                 continue
 
