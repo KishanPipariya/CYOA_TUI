@@ -39,9 +39,16 @@ class SaveListItem(ListItem):
 class JournalListItem(ListItem):
     """ListItem that points to a narrative turn in the story pane."""
 
-    def __init__(self, *args: Any, scene_index: int = 0, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        scene_index: int = 0,
+        entry_kind: str = "choice",
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self.scene_index = scene_index
+        self.entry_kind = entry_kind
 
 
 class BranchScreen(ModalScreen[int]):

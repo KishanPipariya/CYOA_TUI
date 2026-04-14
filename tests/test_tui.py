@@ -651,6 +651,8 @@ async def test_save_and_load_game(mock_app_dependencies, tmp_path, monkeypatch):
         assert "ui_state" in payload
         assert payload["ui_state"]["current_story_text"]
         assert len(payload["ui_state"]["journal_entries"]) == 1
+        assert payload["ui_state"]["current_turn_text"]
+        assert payload["ui_state"]["journal_entries"][0]["entry_kind"] == "choice"
 
         # Restart the game
         await pilot.press("r")
@@ -712,5 +714,82 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
             assert app2.engine.state.player_stats["gold"] == 123
             # After restore, _current_story should contain the narrative
             assert "unique story" in app2._current_story
+            assert app2._current_turn_text == "A unique story begins."
             stats_label2_text = app2.query_one("#stats-text").render().plain
             assert "88%" in stats_label2_text
+
+
+@pytest.mark.asyncio
+async def test_restore_from_save_handles_malformed_ui_state(mock_app_dependencies, tmp_path):
+    save_path = tmp_path / "broken-ui-save.json"
+    save_path.write_text(
+        json.dumps(
+            {
+                "starting_prompt": "Start",
+                "context_history": [],
+                "turn_count": 2,
+                "inventory": ["Torch"],
+                "player_stats": {"health": 77, "gold": 3, "reputation": 1},
+                "current_node": {
+                    "narrative": "Recovered scene",
+                    "choices": [{"text": "Continue"}, {"text": "Wait"}],
+                },
+                "ui_state": {
+                    "current_story_text": 99,
+                    "current_turn_text": None,
+                    "journal_entries": ["bad", {"label": 55, "scene_index": "oops", "entry_kind": 8}],
+                    "journal_panel_collapsed": False,
+                    "story_map_panel_collapsed": "invalid",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+
+        app._restore_from_save(str(save_path))
+        await pilot.pause(0.1)
+
+        assert app._current_story
+        assert app._current_story == app._current_turn_text
+        journal_panel = app.query_one("#journal-panel", Container)
+        map_panel = app.query_one("#story-map-panel", Container)
+        assert not journal_panel.has_class("panel-collapsed")
+        assert map_panel.has_class("panel-collapsed")
+        journal_items = list(app.query_one("#journal-list", ListView).children)
+        assert len(journal_items) == 1
+        assert "Unknown Turn" in journal_items[0].query_one(Label).render().plain
+
+
+@pytest.mark.asyncio
+async def test_restore_from_save_accepts_partial_payload(mock_app_dependencies, tmp_path):
+    save_path = tmp_path / "partial-save.json"
+    save_path.write_text(
+        json.dumps(
+            {
+                "story_title": "Partial Adventure",
+                "current_node": {
+                    "narrative": "Partial scene",
+                    "choices": [{"text": "Push on"}, {"text": "Hide"}],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+
+        app._restore_from_save(str(save_path))
+        await pilot.pause(0.1)
+
+        assert app.engine.state.story_title == "Partial Adventure"
+        assert app.engine.state.turn_count == 1
+        assert app.engine.state.inventory == []
+        assert app._current_story
+        buttons = list(app.query_one("#choices-container", Container).query(Button))
+        assert len(buttons) == 2

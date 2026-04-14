@@ -213,6 +213,32 @@ def test_engine_load_save_data_accepts_versionless_payload():
     assert loaded.state.inventory == ["Coin"]
 
 
+def test_engine_load_save_data_ignores_malformed_optional_payloads():
+    broker, _provider = _make_broker_with_mock_provider()
+    loaded = StoryEngine(broker=broker, starting_prompt="Fallback")
+
+    loaded.load_save_data(
+        {
+            "starting_prompt": 123,
+            "context_history": "not-a-list",
+            "turn_count": "bad",
+            "inventory": "Coin",
+            "player_stats": {"health": "oops", "gold": 4},
+            "current_node": {"choices": "broken"},
+            "timeline_metadata": ["bad", {"kind": "branch_restore", "restored_turn": "3"}],
+        }
+    )
+
+    assert loaded.story_context is not None
+    assert loaded.story_context.starting_prompt == "Fallback"
+    assert loaded.story_context.history == []
+    assert loaded.state.turn_count == 1
+    assert loaded.state.inventory == []
+    assert loaded.state.player_stats == {"health": 100, "gold": 4, "reputation": 0}
+    assert loaded.state.current_node is None
+    assert loaded.state.timeline_metadata == [{"kind": "branch_restore", "restored_turn": 3}]
+
+
 @pytest.mark.asyncio
 async def test_engine_branch_to_scene_uses_cached_provider_state():
     broker, _provider = _make_broker_with_mock_provider()
@@ -254,6 +280,14 @@ async def test_engine_branch_to_scene_uses_cached_provider_state():
     assert engine.state.player_stats["health"] == 80
     assert engine.state.current_node is not None
     assert [c.text for c in engine.state.current_node.choices] == ["C", "D"]
+    assert engine.state.timeline_metadata == [
+        {
+            "kind": "branch_restore",
+            "source_scene_id": None,
+            "target_scene_id": "scene-2",
+            "restored_turn": 2,
+        }
+    ]
     assert node_events == ["Second"]
 
 

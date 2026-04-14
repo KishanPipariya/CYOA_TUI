@@ -215,6 +215,7 @@ __marimo__/
 models/
 
 tasks.md
+REMAINING_PLAN.md
 
 # Secrets — never commit the actual .env, only .env.example
 .envsaves/

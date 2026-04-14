@@ -264,15 +264,22 @@ class StoryEngine:
         self.state.load_save_data(data)
 
         # Hydrate engine-level LLM context
+        starting_prompt = data.get("starting_prompt")
+        if not isinstance(starting_prompt, str) or not starting_prompt:
+            starting_prompt = self.starting_prompt
+
         self.story_context = StoryContext(
-            starting_prompt=data.get("starting_prompt", self.starting_prompt),
+            starting_prompt=starting_prompt,
             token_budget=self.broker.token_budget,
             token_counter=self.broker.provider.count_tokens,
         )
-        self.story_context.history = data.get("context_history", [])
+        context_history = data.get("context_history")
+        self.story_context.history = context_history if isinstance(context_history, list) else []
 
     async def branch_to_scene(self, idx: int, history: dict[str, Any]) -> None:
         """Restore the engine state to a specific scene from the history."""
+        source_scene_id = self.state.current_scene_id
+
         # 1. Rebuild user-facing context history
         self.story_context = StoryContext(
             starting_prompt=self.starting_prompt,
@@ -290,6 +297,14 @@ class StoryEngine:
         self.state.inventory = list(target_scene.get("inventory", []))
         self.state.player_stats = dict(
             target_scene.get("player_stats", {"health": 100, "gold": 0, "reputation": 0})
+        )
+        self.state.timeline_metadata.append(
+            {
+                "kind": "branch_restore",
+                "source_scene_id": source_scene_id,
+                "target_scene_id": self.state.current_scene_id,
+                "restored_turn": idx + 1,
+            }
         )
 
         # 3. Rebuild memory

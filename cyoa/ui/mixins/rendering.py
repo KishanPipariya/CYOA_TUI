@@ -263,6 +263,7 @@ class RenderingMixin:
             JournalListItem(
                 Label(journal_entry),
                 scene_index=max(0, host.engine.state.turn_count - 1),
+                entry_kind="choice",
             )
         )
         # U2 Fix: Scroll after refresh to ensure layout size is updated

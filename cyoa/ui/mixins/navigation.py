@@ -219,8 +219,16 @@ class NavigationMixin:
                 JournalListItem(
                     Label(f"Turn {i + 1}: {history['choices'][i]}"),
                     scene_index=i,
+                    entry_kind="choice",
                 )
             )
+        journal_list.append(
+            JournalListItem(
+                Label(f"Timeline fracture → resumed from Turn {idx + 1}"),
+                scene_index=idx,
+                entry_kind="branch",
+            )
+        )
         journal_list.scroll_end(animate=False)
 
         # 3. Hand off the core logic to the engine

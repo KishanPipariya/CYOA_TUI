@@ -14,6 +14,31 @@ logger = logging.getLogger(__name__)
 class PersistenceMixin:
     """Mixin for save/load game persistence."""
 
+    @staticmethod
+    def _coerce_ui_state(payload: object) -> dict[str, object]:
+        """Normalize optional UI save data so partial files still restore safely."""
+        if not isinstance(payload, dict):
+            return {}
+        return payload
+
+    @staticmethod
+    def _coerce_journal_entries(payload: object) -> list[dict[str, object]]:
+        """Return only well-formed journal entry objects from a save payload."""
+        if not isinstance(payload, list):
+            return []
+        return [entry for entry in payload if isinstance(entry, dict)]
+
+    @staticmethod
+    def _coerce_scene_index(value: object) -> int:
+        """Clamp scene indexes from save files to a safe non-negative int."""
+        if isinstance(value, bool):
+            return 0
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return 0
+        return max(0, parsed)
+
     def action_save_game(self) -> None:
         """Serialize the current game state to a JSON save file."""
         app = as_textual_app(self)
@@ -33,15 +58,25 @@ class PersistenceMixin:
 
         save_data = host.engine.get_save_data()
         journal_list = app.query_one("#journal-list", ListView)
+        current_turn_text = (
+            host.engine.state.current_node.narrative
+            if host.engine.state.current_node is not None
+            else host._current_turn_text
+        )
         save_data["ui_state"] = {
             "current_story_text": host._current_story,
             "journal_entries": [
                 {
                     "label": str(item.query_one(Label).render().plain),
                     "scene_index": item.scene_index,
+                    "entry_kind": getattr(item, "entry_kind", "choice"),
                 }
                 for item in journal_list.query(JournalListItem)
             ],
+            "current_turn_text": current_turn_text,
+            "mood": host.mood,
+            "journal_panel_collapsed": app.query_one("#journal-panel", Container).has_class("panel-collapsed"),
+            "story_map_panel_collapsed": app.query_one("#story-map-panel", Container).has_class("panel-collapsed"),
         }
 
         try:
@@ -92,12 +127,20 @@ class PersistenceMixin:
         # Cancel speculative generation before hydrating; keep core UI workers alive.
         app.workers.cancel_group(app, "speculation")
 
-        ui_state = data.get("ui_state", {})
+        ui_state = self._coerce_ui_state(data.get("ui_state"))
         host.engine.load_save_data(data)
 
-        host._current_story = ui_state.get("current_story_text", constants.LOADING_ART)
-        host._current_turn_text = host._current_story
+        current_story_text = ui_state.get("current_story_text")
+        host._current_story = (
+            current_story_text if isinstance(current_story_text, str) and current_story_text else constants.LOADING_ART
+        )
+        current_turn_text = ui_state.get("current_turn_text")
+        host._current_turn_text = (
+            current_turn_text if isinstance(current_turn_text, str) else host._current_story
+        )
         host._loading_suffix_shown = False
+        mood = ui_state.get("mood")
+        host.mood = mood if isinstance(mood, str) else "default"
 
         # Sync UI
         container = app.query_one("#story-container", VerticalScroll)
@@ -120,13 +163,26 @@ class PersistenceMixin:
 
         journal_list = app.query_one("#journal-list", ListView)
         journal_list.clear()
-        for entry in ui_state.get("journal_entries", []):
+        for entry in self._coerce_journal_entries(ui_state.get("journal_entries")):
+            label = entry.get("label")
             journal_list.append(
                 JournalListItem(
-                    Label(entry.get("label", "Unknown Turn")),
-                    scene_index=int(entry.get("scene_index", 0)),
+                    Label(label if isinstance(label, str) and label else "Unknown Turn"),
+                    scene_index=self._coerce_scene_index(entry.get("scene_index", 0)),
+                    entry_kind=(
+                        entry.get("entry_kind")
+                        if isinstance(entry.get("entry_kind"), str)
+                        else "choice"
+                    ),
                 )
             )
+
+        journal_panel = app.query_one("#journal-panel", Container)
+        story_map_panel = app.query_one("#story-map-panel", Container)
+        journal_collapsed = ui_state.get("journal_panel_collapsed")
+        story_map_collapsed = ui_state.get("story_map_panel_collapsed")
+        journal_panel.set_class(journal_collapsed is not False, "panel-collapsed")
+        story_map_panel.set_class(story_map_collapsed is not False, "panel-collapsed")
 
         app.notify(
             f"Loaded save from Turn {host.engine.state.turn_count}.",

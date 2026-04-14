@@ -29,6 +29,7 @@ class GameState:
         self.story_title: str | None = None
         self.current_scene_id: str | None = None
         self.last_choice_text: str | None = None
+        self.timeline_metadata: list[dict[str, Any]] = []
 
         # Snapshot for one-level undo
         self._undo_snapshot: dict[str, Any] | None = None
@@ -42,6 +43,7 @@ class GameState:
         self.story_title = None
         self.current_scene_id = None
         self.last_choice_text = None
+        self.timeline_metadata = []
         self._undo_snapshot = None
 
     def apply_node_updates(self, node: StoryNode) -> None:
@@ -83,6 +85,7 @@ class GameState:
             "story_title": self.story_title,
             "current_scene_id": self.current_scene_id,
             "last_choice_text": self.last_choice_text,
+            "timeline_metadata": [entry.copy() for entry in self.timeline_metadata],
         }
         if extra_data:
             snapshot.update(extra_data)
@@ -101,6 +104,7 @@ class GameState:
         self.story_title = snap["story_title"]
         self.current_scene_id = snap["current_scene_id"]
         self.last_choice_text = snap["last_choice_text"]
+        self.timeline_metadata = [entry.copy() for entry in snap.get("timeline_metadata", [])]
 
         # Snapshot used; clear it
         self._undo_snapshot = None
@@ -125,22 +129,32 @@ class GameState:
             "current_node": self.current_node.model_dump() if self.current_node else None,
             "current_scene_id": self.current_scene_id,
             "last_choice_text": self.last_choice_text,
+            "timeline_metadata": [entry.copy() for entry in self.timeline_metadata],
         }
 
     def load_save_data(self, data: dict[str, Any]) -> None:
         """Hydrate state from dictionary data."""
-        self.story_title = data.get("story_title")
-        self.turn_count = data.get("turn_count", 1)
-        self.inventory = data.get("inventory", [])
-        self.player_stats = data.get("player_stats", {"health": 100, "gold": 0, "reputation": 0})
-        self.current_scene_id = data.get("current_scene_id")
-        self.last_choice_text = data.get("last_choice_text")
+        self.story_title = data.get("story_title") if isinstance(data.get("story_title"), str) else None
+        self.turn_count = self._coerce_positive_int(data.get("turn_count"), default=1)
+        self.inventory = self._coerce_inventory(data.get("inventory"))
+        self.player_stats = self._coerce_player_stats(data.get("player_stats"))
+        self.current_scene_id = (
+            data.get("current_scene_id") if isinstance(data.get("current_scene_id"), str) else None
+        )
+        self.last_choice_text = (
+            data.get("last_choice_text") if isinstance(data.get("last_choice_text"), str) else None
+        )
+        self.timeline_metadata = self._coerce_timeline_metadata(data.get("timeline_metadata"))
 
         node_data = data.get("current_node")
-        if node_data:
-            self.current_node = StoryNode(**node_data)
-        else:
+        if not isinstance(node_data, dict):
             self.current_node = None
+        else:
+            try:
+                self.current_node = StoryNode(**node_data)
+            except Exception:
+                logger.warning("Ignoring malformed current_node in save payload.")
+                self.current_node = None
 
         bus.emit(Events.STATS_UPDATED, stats=dict(self.player_stats))
         bus.emit(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
@@ -148,3 +162,62 @@ class GameState:
             bus.emit(Events.NODE_COMPLETED, node=self.current_node)
 
         bus.emit(Events.STORY_TITLE_GENERATED, title=self.story_title)
+
+    def _coerce_positive_int(self, value: Any, *, default: int) -> int:
+        """Return a positive integer fallback when save data is malformed."""
+        if isinstance(value, bool):
+            return default
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return default
+        return parsed if parsed > 0 else default
+
+    def _coerce_inventory(self, value: Any) -> list[str]:
+        """Normalize inventory data to a simple list of strings."""
+        if not isinstance(value, list):
+            return []
+        return [item for item in value if isinstance(item, str)]
+
+    def _coerce_player_stats(self, value: Any) -> dict[str, int]:
+        """Merge saved stat values onto the default stat set."""
+        stats = dict(self._DEFAULT_STATS)
+        if not isinstance(value, dict):
+            return stats
+        for key, raw in value.items():
+            if not isinstance(key, str) or isinstance(raw, bool):
+                continue
+            try:
+                stats[key] = int(raw)
+            except (TypeError, ValueError):
+                continue
+        return stats
+
+    def _coerce_timeline_metadata(self, value: Any) -> list[dict[str, Any]]:
+        """Normalize saved timeline metadata into a predictable structure."""
+        if not isinstance(value, list):
+            return []
+
+        normalized: list[dict[str, Any]] = []
+        for entry in value:
+            if not isinstance(entry, dict):
+                continue
+
+            kind = entry.get("kind")
+            restored_turn = entry.get("restored_turn")
+            if not isinstance(kind, str):
+                continue
+
+            normalized_entry: dict[str, Any] = {"kind": kind}
+            if isinstance(entry.get("source_scene_id"), str):
+                normalized_entry["source_scene_id"] = entry["source_scene_id"]
+            if isinstance(entry.get("target_scene_id"), str):
+                normalized_entry["target_scene_id"] = entry["target_scene_id"]
+            if not isinstance(restored_turn, bool):
+                try:
+                    normalized_entry["restored_turn"] = int(restored_turn)
+                except (TypeError, ValueError):
+                    pass
+            normalized.append(normalized_entry)
+
+        return normalized
