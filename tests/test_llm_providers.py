@@ -1,11 +1,44 @@
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
-from cyoa.llm.providers import LlamaCppProvider, OllamaProvider, ProviderResponseError
+from cyoa.llm.pipeline import (
+    DirectiveComponent,
+    GoalComponent,
+    HistoryComponent,
+    MemoryComponent,
+    PersonaComponent,
+    PlayerSheetComponent,
+    PromptComponent,
+    PromptComponentMixin,
+    PromptPipeline,
+    SummarizationComponent,
+    SystemMessageComponent,
+)
+from cyoa.llm.providers import (
+    LlamaCppProvider,
+    OllamaProvider,
+    ProviderResponseError,
+    count_messages_tokens,
+)
+
+
+class _InjectHarness(PromptComponentMixin):
+    pass
+
+
+class _AppendComponent(PromptComponent):
+    def __init__(self, role: str, content: str):
+        self.role = role
+        self.content = content
+
+    def transform(self, context, messages):
+        return messages + [{"role": self.role, "content": self.content}]
 
 # ── LlamaCppProvider Tests ───────────────────────────────────────────────────
 
@@ -30,6 +63,52 @@ def test_llama_cpp_token_count(mock_llama):
     count = provider.count_tokens("Hello world")
     assert count == 3
     mock_llama.return_value.tokenize.assert_called_once()
+
+
+def test_count_messages_tokens_handles_missing_keys() -> None:
+    messages = [{"role": "system"}, {"content": "hello"}, {}]
+    assert count_messages_tokens(messages, lambda text: len(text)) == len("system") + len("hello")
+
+
+def test_mock_provider_count_tokens_in_messages_uses_base_helper() -> None:
+    from cyoa.llm.providers import MockProvider
+
+    provider = MockProvider()
+    messages = [{"role": "user", "content": "abcd1234"}]
+    assert provider.count_tokens_in_messages(messages) == (len("user") // 4) + (len("abcd1234") // 4)
+
+
+def test_llama_cpp_token_count_returns_zero_for_empty_text(mock_llama) -> None:
+    provider = LlamaCppProvider(model_path="dummy.gguf")
+    assert provider.count_tokens("") == 0
+    mock_llama.return_value.tokenize.assert_not_called()
+
+
+def test_llama_cpp_token_count_falls_back_when_tokenizer_errors(mock_llama) -> None:
+    provider = LlamaCppProvider(model_path="dummy.gguf")
+    mock_llama.return_value.tokenize.side_effect = RuntimeError("boom")
+
+    text = "tokenizer failed"
+    assert provider.count_tokens(text) == len(text) // 4
+
+
+def test_llama_cpp_extract_stream_token_handles_malformed_chunks(mock_llama) -> None:
+    provider = LlamaCppProvider(model_path="dummy.gguf")
+
+    assert provider._extract_stream_token("bad") == ""
+    assert provider._extract_stream_token({"choices": []}) == ""
+    assert provider._extract_stream_token({"choices": [{"delta": {"content": 123}}]}) == ""
+
+
+def test_llama_cpp_prepare_stream_params_omits_optional_fields(mock_llama) -> None:
+    provider = LlamaCppProvider(model_path="dummy.gguf")
+    params = provider._prepare_stream_params([{"role": "user", "content": "hi"}], None, 12, 0.3)
+    assert params == {
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 12,
+        "temperature": 0.3,
+        "stream": True,
+    }
 
 @pytest.mark.asyncio
 async def test_llama_cpp_generate_json(mock_llama):
@@ -64,7 +143,80 @@ async def test_llama_cpp_stream_json(mock_llama):
     # Combined chunks should result in '{"narrative": "Test"}'
     assert "".join(chunks) == '{"narrative": "Test"}'
 
+
+@pytest.mark.asyncio
+async def test_llama_cpp_generate_text(mock_llama) -> None:
+    provider = LlamaCppProvider(model_path="dummy.gguf")
+    text = await provider.generate_text([{"role": "user", "content": "hi"}], max_tokens=10, temperature=0.2)
+    assert text == '{"narrative": "Test"}'
+
+
+@pytest.mark.asyncio
+async def test_llama_cpp_save_and_load_state(mock_llama) -> None:
+    provider = LlamaCppProvider(model_path="dummy.gguf")
+    mock_llama.return_value.save_state.return_value = b"kv-state"
+
+    assert await provider.save_state() == b"kv-state"
+    await provider.load_state(b"kv-state")
+
+    mock_llama.return_value.save_state.assert_called_once()
+    mock_llama.return_value.load_state.assert_called_once_with(b"kv-state")
+
+
+@pytest.mark.asyncio
+async def test_llama_cpp_state_operations_swallow_failures(mock_llama) -> None:
+    provider = LlamaCppProvider(model_path="dummy.gguf")
+    mock_llama.return_value.save_state.side_effect = RuntimeError("save failed")
+    mock_llama.return_value.load_state.side_effect = RuntimeError("load failed")
+
+    assert await provider.save_state() is None
+    await provider.load_state(b"bad-state")
+
+
+def test_llama_cpp_close_releases_model_when_idle(mock_llama) -> None:
+    provider = LlamaCppProvider(model_path="dummy.gguf")
+    provider.close()
+    assert not hasattr(provider, "llm")
+
+
+def test_llama_cpp_close_skips_cleanup_when_lock_is_held(mock_llama) -> None:
+    provider = LlamaCppProvider(model_path="dummy.gguf")
+    provider._lock.acquire()
+    try:
+        provider.close()
+        assert hasattr(provider, "llm")
+    finally:
+        provider._lock.release()
+
 # ── OllamaProvider Tests ─────────────────────────────────────────────────────
+
+
+def test_ollama_count_tokens_handles_empty_and_fallback_estimate() -> None:
+    provider = OllamaProvider(model="llama3")
+    provider.tokenizer = None
+
+    assert provider.count_tokens("") == 0
+    assert provider.count_tokens("abcdefgh") == 2
+
+
+def test_ollama_extract_content_rejects_non_string() -> None:
+    provider = OllamaProvider(model="llama3")
+    with pytest.raises(ProviderResponseError, match="must be a string"):
+        provider._extract_ollama_content({"message": {"content": 123}})
+
+
+@pytest.mark.asyncio
+async def test_ollama_post_json_rejects_non_object_body() -> None:
+    mock_response = MagicMock()
+    mock_response.json.return_value = ["bad"]
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+        provider = OllamaProvider(model="llama3")
+
+        with pytest.raises(ProviderResponseError, match="JSON object"):
+            await provider._post_json({"model": "llama3"})
 
 @pytest.mark.asyncio
 async def test_ollama_generate_json():
@@ -91,6 +243,28 @@ async def test_ollama_generate_json():
 
 
 @pytest.mark.asyncio
+async def test_ollama_generate_text_uses_non_streaming_payload() -> None:
+    messages = [{"role": "user", "content": "summarize"}]
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"message": {"content": "plain text"}}
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+
+        provider = OllamaProvider(model="llama3")
+        result = await provider.generate_text(messages, max_tokens=17, temperature=0.1)
+
+        assert result == "plain text"
+        _, kwargs = mock_post.call_args
+        payload = kwargs["json"]
+        assert payload["stream"] is False
+        assert "format" not in payload
+        assert payload["options"] == {"num_predict": 17, "temperature": 0.1}
+
+
+@pytest.mark.asyncio
 async def test_ollama_generate_json_rejects_missing_message_content():
     messages = [{"role": "user", "content": "hi"}]
     schema = {"type": "object"}
@@ -105,6 +279,16 @@ async def test_ollama_generate_json_rejects_missing_message_content():
         provider = OllamaProvider(model="llama3")
         with pytest.raises(ProviderResponseError, match="missing message content"):
             await provider.generate_json(messages, schema)
+
+
+@pytest.mark.asyncio
+async def test_ollama_generate_json_propagates_http_errors() -> None:
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.side_effect = httpx.HTTPError("network")
+        provider = OllamaProvider(model="llama3")
+
+        with pytest.raises(httpx.HTTPError):
+            await provider.generate_json([{"role": "user", "content": "hi"}], {"type": "object"})
 
 @pytest.mark.asyncio
 async def test_ollama_stream_json():
@@ -135,6 +319,34 @@ async def test_ollama_stream_json():
             chunks.append(chunk)
 
         assert "".join(chunks) == '{"narrative": "Ollama"}'
+
+
+@pytest.mark.asyncio
+async def test_ollama_stream_json_skips_blank_lines() -> None:
+    async def async_iter(items):
+        for item in items:
+            yield item
+
+    mock_response = MagicMock()
+    mock_response.aiter_lines.return_value = async_iter(
+        [
+            "",
+            json.dumps({"message": {"content": "A"}}),
+            json.dumps({"done": True}),
+        ]
+    )
+    mock_response.raise_for_status = MagicMock()
+
+    mock_context = MagicMock()
+    mock_context.__aenter__ = AsyncMock(return_value=mock_response)
+
+    with patch("httpx.AsyncClient.stream", return_value=mock_context):
+        provider = OllamaProvider(model="llama3")
+        chunks = []
+        async for chunk in provider.stream_json([{"role": "user", "content": "hi"}], {}):
+            chunks.append(chunk)
+
+    assert "".join(chunks) == "A"
 
 
 @pytest.mark.asyncio
@@ -185,7 +397,38 @@ async def test_ollama_stream_json_rejects_non_object_chunks():
                 pass
 
 
+@pytest.mark.asyncio
+async def test_ollama_stream_json_propagates_http_errors() -> None:
+    mock_context = MagicMock()
+    mock_context.__aenter__ = AsyncMock(side_effect=httpx.HTTPError("stream failed"))
+
+    with patch("httpx.AsyncClient.stream", return_value=mock_context):
+        provider = OllamaProvider(model="llama3")
+        with pytest.raises(httpx.HTTPError):
+            async for _ in provider.stream_json([{"role": "user", "content": "hi"}], {}):
+                pass
+
+
 # ── MockProvider Tests ───────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_mock_provider_generate_text_summary_branch() -> None:
+    from cyoa.llm.providers import MockProvider
+
+    provider = MockProvider()
+    result = await provider.generate_text([{"role": "user", "content": "Please summarize this arc"}])
+    assert "digital mists" in result
+
+
+@pytest.mark.asyncio
+async def test_mock_provider_generate_json_extraction_branch() -> None:
+    from cyoa.llm.providers import MockProvider
+
+    provider = MockProvider()
+    data = json.loads(await provider.generate_json([], {"required": ["stat_updates"]}))
+    assert data["stat_updates"] == {"reputation": 1}
+    assert data["items_gained"] == ["Static Spark"]
 
 
 @pytest.mark.asyncio
@@ -273,3 +516,112 @@ def test_llama_cpp_token_count_falls_back_when_lock_is_busy(mock_llama):
         assert provider.count_tokens(text) == len(text) // 4
     finally:
         provider._lock.release()
+
+
+# ── Prompt Pipeline Tests ────────────────────────────────────────────────────
+
+
+def test_prompt_pipeline_processes_components_in_order() -> None:
+    pipeline = PromptPipeline()
+    pipeline.add_component(_AppendComponent("system", "one"))
+    pipeline.add_component(_AppendComponent("user", "two"))
+
+    result = pipeline.process(context=None)
+    assert result == [
+        {"role": "system", "content": "one"},
+        {"role": "user", "content": "two"},
+    ]
+
+
+def test_system_message_component_supports_static_and_template_modes() -> None:
+    static_component = SystemMessageComponent(static_content="Static system")
+    messages = static_component.transform(None, [{"role": "user", "content": "start"}])
+    assert messages[0] == {"role": "system", "content": "Static system"}
+
+    template = MagicMock()
+    template.render.return_value = "Rendered summary"
+    context = SimpleNamespace(
+        jinja_env=MagicMock(get_template=MagicMock(return_value=template)),
+        inventory=["Key"],
+        player_stats={"health": 5},
+        memories=["Seen before"],
+        scene_summary="scene",
+        chapter_summary="chapter",
+        arc_summary="arc",
+    )
+    component = SystemMessageComponent(template_name="system_prompt.j2")
+    appended = component.transform(context, [{"role": "system", "content": "Base"}])
+
+    assert appended[0]["content"] == "Base\n\nRendered summary"
+    context.jinja_env.get_template.assert_called_once_with("system_prompt.j2")
+
+
+def test_prompt_component_mixin_handles_empty_text_and_empty_system() -> None:
+    harness = _InjectHarness()
+    untouched = [{"role": "user", "content": "hello"}]
+    assert harness._inject_into_system(untouched, "") == untouched
+
+    messages = [{"role": "system", "content": "   "}]
+    updated = harness._inject_into_system(messages, " inserted ")
+    assert updated[0]["content"] == "inserted"
+
+
+def test_persona_component_injects_default_persona() -> None:
+    messages = PersonaComponent().transform(None, [])
+    assert messages[0]["role"] == "system"
+    assert "Narrative Persona" in messages[0]["content"]
+    assert "strictly valid JSON" in messages[0]["content"]
+
+
+def test_player_sheet_component_renders_empty_inventory_and_stats() -> None:
+    context = SimpleNamespace(inventory=[], player_stats={"gold": 7})
+    messages = PlayerSheetComponent().transform(context, [])
+    assert "Current Inventory: Empty" in messages[0]["content"]
+    assert '"gold": 7' in messages[0]["content"]
+
+
+def test_memory_component_formats_multiple_memories_and_noop_on_empty() -> None:
+    component = MemoryComponent()
+    original = [{"role": "user", "content": "hi"}]
+    assert component.transform(SimpleNamespace(memories=[]), list(original)) == original
+
+    rendered = component.transform(SimpleNamespace(memories=["m1", "m2"]), [])
+    assert "<memory_retrieval>" in rendered[0]["content"]
+    assert "\n---\n" in rendered[0]["content"]
+
+
+def test_summarization_component_renders_all_levels_and_noops_without_data() -> None:
+    component = SummarizationComponent()
+    messages = [{"role": "user", "content": "hi"}]
+    assert component.transform(SimpleNamespace(), list(messages)) == messages
+
+    rendered = component.transform(
+        SimpleNamespace(scene_summary="scene", chapter_summary="chapter", arc_summary="arc"),
+        [],
+    )
+    assert "<arc_summary>" in rendered[0]["content"]
+    assert "<chapter_summary>" in rendered[0]["content"]
+    assert "<scene_summary>" in rendered[0]["content"]
+
+
+def test_goal_and_directive_components_render_lists() -> None:
+    goal_messages = GoalComponent().transform(SimpleNamespace(goals=["Find relic"]), [])
+    directive_messages = DirectiveComponent().transform(
+        SimpleNamespace(directives=["No combat", "Favor stealth"]),
+        [],
+    )
+
+    assert "## Current Narrative Goals" in goal_messages[0]["content"]
+    assert "- Find relic" in goal_messages[0]["content"]
+    assert "## Active Directives" in directive_messages[0]["content"]
+    assert "! No combat" in directive_messages[0]["content"]
+
+
+def test_history_component_appends_history() -> None:
+    component = HistoryComponent()
+    messages = [{"role": "system", "content": "sys"}]
+    context = SimpleNamespace(history=[{"role": "user", "content": "u"}])
+    assert component.transform(context, messages) == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "u"},
+    ]
