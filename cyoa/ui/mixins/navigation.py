@@ -220,6 +220,7 @@ class NavigationMixin:
                     Label(f"Turn {i + 1}: {history['choices'][i]}"),
                     scene_index=i,
                     entry_kind="choice",
+                    label_text=f"Turn {i + 1}: {history['choices'][i]}",
                 )
             )
         journal_list.append(
@@ -227,6 +228,7 @@ class NavigationMixin:
                 Label(f"Timeline fracture → resumed from Turn {idx + 1}"),
                 scene_index=idx,
                 entry_kind="branch",
+                label_text=f"Timeline fracture → resumed from Turn {idx + 1}",
             )
         )
         journal_list.scroll_end(animate=False)

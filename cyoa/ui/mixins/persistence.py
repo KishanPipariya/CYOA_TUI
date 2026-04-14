@@ -33,11 +33,17 @@ class PersistenceMixin:
         """Clamp scene indexes from save files to a safe non-negative int."""
         if isinstance(value, bool):
             return 0
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return 0
-        return max(0, parsed)
+        if isinstance(value, int):
+            return max(0, value)
+        if isinstance(value, float):
+            return max(0, int(value))
+        if isinstance(value, (str, bytes, bytearray)):
+            try:
+                parsed = int(value)
+            except ValueError:
+                return 0
+            return max(0, parsed)
+        return 0
 
     def action_save_game(self) -> None:
         """Serialize the current game state to a JSON save file."""
@@ -67,7 +73,7 @@ class PersistenceMixin:
             "current_story_text": host._current_story,
             "journal_entries": [
                 {
-                    "label": str(item.query_one(Label).render().plain),
+                    "label": item.label_text,
                     "scene_index": item.scene_index,
                     "entry_kind": getattr(item, "entry_kind", "choice"),
                 }
@@ -165,15 +171,13 @@ class PersistenceMixin:
         journal_list.clear()
         for entry in self._coerce_journal_entries(ui_state.get("journal_entries")):
             label = entry.get("label")
+            entry_kind = entry.get("entry_kind")
             journal_list.append(
                 JournalListItem(
                     Label(label if isinstance(label, str) and label else "Unknown Turn"),
                     scene_index=self._coerce_scene_index(entry.get("scene_index", 0)),
-                    entry_kind=(
-                        entry.get("entry_kind")
-                        if isinstance(entry.get("entry_kind"), str)
-                        else "choice"
-                    ),
+                    entry_kind=entry_kind if isinstance(entry_kind, str) else "choice",
+                    label_text=label if isinstance(label, str) and label else "Unknown Turn",
                 )
             )
 

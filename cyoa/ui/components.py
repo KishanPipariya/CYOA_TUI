@@ -44,11 +44,13 @@ class JournalListItem(ListItem):
         *args: Any,
         scene_index: int = 0,
         entry_kind: str = "choice",
+        label_text: str = "",
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.scene_index = scene_index
         self.entry_kind = entry_kind
+        self.label_text = label_text
 
 
 class BranchScreen(ModalScreen[int]):

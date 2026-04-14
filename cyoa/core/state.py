@@ -213,10 +213,14 @@ class GameState:
                 normalized_entry["source_scene_id"] = entry["source_scene_id"]
             if isinstance(entry.get("target_scene_id"), str):
                 normalized_entry["target_scene_id"] = entry["target_scene_id"]
-            if not isinstance(restored_turn, bool):
+            if isinstance(restored_turn, int) and not isinstance(restored_turn, bool):
+                normalized_entry["restored_turn"] = restored_turn
+            elif isinstance(restored_turn, float):
+                normalized_entry["restored_turn"] = int(restored_turn)
+            elif isinstance(restored_turn, str):
                 try:
                     normalized_entry["restored_turn"] = int(restored_turn)
-                except (TypeError, ValueError):
+                except ValueError:
                     pass
             normalized.append(normalized_entry)
 
