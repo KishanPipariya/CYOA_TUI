@@ -7,6 +7,9 @@ on:
       - main
       - master
 
+permissions:
+  contents: write
+
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -32,6 +35,11 @@ jobs:
       - name: Run tests
         run: uv run pytest --cov=cyoa --cov-report=term-missing --cov-report=xml --cov-report=json -q
 
+      - name: Generate coverage badge
+        uses: tj-actions/coverage-badge-py@v2
+        with:
+          output: .github/badges/coverage.svg
+
       - name: Enforce package coverage floors
         run: uv run python scripts/check_coverage.py
 
@@ -42,6 +50,14 @@ jobs:
           path: |
             coverage.json
             coverage.xml
+            .github/badges/coverage.svg
+
+      - name: Commit coverage badge
+        if: github.event_name == 'push'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "ci: update coverage badge"
+          file_pattern: .github/badges/coverage.svg
 
       - name: Run Ruff
         run: uv run ruff check .
