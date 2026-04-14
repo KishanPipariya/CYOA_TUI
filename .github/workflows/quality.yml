@@ -36,9 +36,9 @@ jobs:
         run: uv run pytest --cov=cyoa --cov-report=term-missing --cov-report=xml --cov-report=json -q
 
       - name: Generate coverage badge
-        uses: tj-actions/coverage-badge-py@v2
-        with:
-          output: .github/badges/coverage.svg
+        run: |
+          python -m pip install --upgrade "setuptools<82" coverage-badge
+          coverage-badge -f -o .github/badges/coverage.svg
 
       - name: Enforce package coverage floors
         run: uv run python scripts/check_coverage.py
