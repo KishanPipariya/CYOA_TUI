@@ -1,6 +1,7 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from neo4j.exceptions import AuthError, ServiceUnavailable
 
 from cyoa.db.graph_db import CYOAGraphDB
 
@@ -120,6 +121,98 @@ def test_offline_fallback():
 
         scene_id = db.create_scene_node("Narrative", [], "Story")
         assert len(scene_id) > 10  # Should be a UUID string
+
+
+@pytest.mark.asyncio
+async def test_verify_connectivity_async_handles_no_driver():
+    db = CYOAGraphDB(uri="bolt://localhost:9999")
+
+    assert await db.verify_connectivity_async() is False
+
+
+@pytest.mark.asyncio
+async def test_verify_connectivity_async_success(mock_neo4j):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        driver = mock_driver_call.return_value
+        driver.session.return_value.__enter__.return_value = mock_neo4j
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+        db.driver.verify_connectivity = MagicMock()
+
+        assert await db.verify_connectivity_async() is True
+        db.driver.verify_connectivity.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_verify_connectivity_async_auth_failure_disables_driver(mock_neo4j):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        driver = mock_driver_call.return_value
+        driver.session.return_value.__enter__.return_value = mock_neo4j
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+        db.driver.verify_connectivity = MagicMock(side_effect=AuthError("bad auth"))
+
+        assert await db.verify_connectivity_async() is False
+        assert db.driver is None
+        assert db.cb.failure_count == 1
+
+
+@pytest.mark.asyncio
+async def test_verify_connectivity_async_service_unavailable_disables_driver(mock_neo4j):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        driver = mock_driver_call.return_value
+        driver.session.return_value.__enter__.return_value = mock_neo4j
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+        db.driver.verify_connectivity = MagicMock(side_effect=ServiceUnavailable("offline"))
+
+        assert await db.verify_connectivity_async() is False
+        assert db.driver is None
+        assert db.cb.failure_count == 1
+
+
+def test_close_noops_without_driver():
+    db = CYOAGraphDB(uri="bolt://localhost:9999")
+
+    db.close()
+
+
+def test_close_closes_driver(mock_neo4j):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        driver = mock_driver_call.return_value
+        driver.session.return_value.__enter__.return_value = mock_neo4j
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+
+        db.close()
+
+        driver.close.assert_called_once_with()
+
+
+def test_parse_title_modifier_rejects_non_matching_title():
+    assert CYOAGraphDB._parse_title_modifier("Another Story", "Adventure") is None
+
+
+def test_build_story_tree_payload_returns_empty_for_no_records():
+    assert CYOAGraphDB._build_story_tree_payload([]) == {}
+
+
+def test_build_linear_story_path_stops_on_missing_target():
+    path = CYOAGraphDB._build_linear_story_path(
+        [
+            {
+                "id": "root",
+                "narrative": "Start",
+                "mood": "default",
+                "next_id": "missing",
+                "choice": "Follow the broken trail",
+            }
+        ]
+    )
+
+    assert path == [
+        {
+            "id": "root",
+            "narrative": "Start",
+            "choice_taken": "Follow the broken trail",
+        }
+    ]
 
 
 def test_get_story_tree_prunes_cycles(mock_neo4j):
@@ -257,6 +350,28 @@ def test_get_scene_history_path_returns_longest_root_path(mock_neo4j):
         assert mock_neo4j.run.call_args.kwargs["current_id"] == "leaf"
 
 
+def test_get_scene_history_path_returns_none_when_no_path(mock_neo4j):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+
+        mock_result = MagicMock()
+        mock_result.single.return_value = None
+        mock_neo4j.run.return_value = mock_result
+
+        assert db.get_scene_history_path("missing-leaf") is None
+
+
+def test_get_scene_history_path_returns_none_on_query_error(mock_neo4j):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+
+        mock_neo4j.run.side_effect = RuntimeError("boom")
+
+        assert db.get_scene_history_path("leaf") is None
+
+
 def test_get_all_story_scenes_returns_deduped_deterministic_linear_path(mock_neo4j):
     with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
         mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
@@ -314,3 +429,52 @@ def test_get_all_story_scenes_returns_deduped_deterministic_linear_path(mock_neo
             {"id": "a", "narrative": "Branch A", "choice_taken": "Finish"},
             {"id": "leaf", "narrative": "Ending", "choice_taken": None},
         ]
+
+
+def test_create_scene_node_uses_defaults_when_optional_fields_missing(mock_neo4j):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+
+        mock_result = MagicMock()
+        mock_result.single.return_value = None
+        mock_neo4j.run.return_value = mock_result
+
+        scene_id = db.create_scene_node("Darkness...", ["Light lamp"], "Adventure 1")
+
+        assert scene_id
+        kwargs = mock_neo4j.run.call_args.kwargs
+        assert kwargs["player_stats"] == {"health": 100, "gold": 0, "reputation": 0}
+        assert kwargs["inventory"] == []
+
+
+@pytest.mark.asyncio
+async def test_save_scene_async_only_links_when_source_and_choice_present():
+    db = CYOAGraphDB(uri="bolt://localhost:9999")
+    db.create_scene_node = MagicMock(return_value="new-scene")
+    db.create_choice_edge = MagicMock()
+
+    scene_id = await db.save_scene_async("Narrative", ["Go"], "Story", None, "Go")
+
+    assert scene_id == "new-scene"
+    db.create_choice_edge.assert_not_called()
+
+
+def test_get_all_story_scenes_returns_empty_on_query_error(mock_neo4j):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+
+        mock_neo4j.run.side_effect = RuntimeError("boom")
+
+        assert db.get_all_story_scenes("Adventure") == []
+
+
+def test_get_story_tree_returns_empty_on_query_error(mock_neo4j):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+
+        mock_neo4j.run.side_effect = RuntimeError("boom")
+
+        assert db.get_story_tree("Adventure") == {}

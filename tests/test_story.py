@@ -5,6 +5,7 @@ Headless test harness that verifies core CYOA behaviour without loading the
 actual LLM model or requiring a Neo4j instance.
 """
 
+from collections import deque
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest  # type: ignore
@@ -597,6 +598,68 @@ class TestNarrativeMemory:
         assert mem._collection is not None
         assert await mem.query_async("recovered", n=1) == ["Recovered memory."]
 
+    def test_verify_availability_returns_false_when_unavailable(self):
+        mem = NarrativeMemory()
+        mem._available = False
+
+        assert mem.verify_availability() is False
+        assert mem.is_online is False
+
+    @pytest.mark.asyncio
+    async def test_query_uses_fallback_when_chroma_disabled(self):
+        mem = NarrativeMemory()
+        mem._available = False
+
+        await mem.add_async("scene-1", "Fallback one.")
+        await mem.add_async("scene-2", "Fallback two.")
+
+        assert await mem.query_async("anything", n=1) == ["Fallback two."]
+
+    @pytest.mark.asyncio
+    async def test_query_returns_fallback_when_collection_is_empty(self, monkeypatch):
+        fake_collection = self._FakeCollection()
+        monkeypatch.setattr(
+            "cyoa.db.rag_memory.chromadb.Client",
+            lambda: self._FakeClient(fake_collection),
+        )
+
+        mem = NarrativeMemory()
+        mem._fallback.extend(["Older memory", "Newest memory"])
+
+        assert await mem.query_async("anything", n=1) == ["Newest memory"]
+
+    @pytest.mark.asyncio
+    async def test_query_marks_failure_and_falls_back_on_query_error(self, monkeypatch):
+        fake_collection = self._FakeCollection()
+        fake_collection._docs["scene-1"] = "Stored memory"
+        fake_collection.query = MagicMock(side_effect=RuntimeError("query failed"))  # type: ignore[method-assign]
+        monkeypatch.setattr(
+            "cyoa.db.rag_memory.chromadb.Client",
+            lambda: self._FakeClient(fake_collection),
+        )
+
+        mem = NarrativeMemory()
+        mem._fallback.extend(["Older memory", "Newest memory"])
+
+        assert await mem.query_async("anything", n=1) == ["Newest memory"]
+        assert mem._collection is None
+        assert mem._retry_state.consecutive_failures == 1
+
+    def test_close_swallows_delete_errors(self, monkeypatch):
+        fake_collection = self._FakeCollection()
+        fake_client = self._FakeClient(fake_collection)
+        fake_client.delete_collection = MagicMock(side_effect=RuntimeError("cannot delete"))  # type: ignore[method-assign]
+        monkeypatch.setattr("cyoa.db.rag_memory.chromadb.Client", lambda: fake_client)
+
+        mem = NarrativeMemory()
+        assert mem.verify_availability() is True
+
+        mem.close()
+
+        assert mem._collection is None
+        assert mem._client is None
+        assert mem._retry_state.consecutive_failures == 0
+
 
 class TestNPCMemory:
     @pytest.mark.asyncio
@@ -664,6 +727,94 @@ class TestNPCMemory:
 
         assert mem._collections
         assert await mem.query_async("Elara", "anything", n=1) == ["Elara recovered memory."]
+
+    def test_verify_availability_returns_false_when_unavailable(self):
+        from cyoa.db.rag_memory import NPCMemory
+
+        mem = NPCMemory()
+        mem._available = False
+
+        assert mem.verify_availability() is False
+        assert mem.is_online is False
+
+    @pytest.mark.asyncio
+    async def test_query_uses_fallback_when_chroma_disabled(self):
+        from cyoa.db.rag_memory import NPCMemory
+
+        mem = NPCMemory()
+        mem._available = False
+
+        await mem.add_async("Elara", "scene-1", "Fallback one.")
+        await mem.add_async("Elara", "scene-2", "Fallback two.")
+
+        assert await mem.query_async("Elara", "anything", n=1) == ["Fallback two."]
+
+    @pytest.mark.asyncio
+    async def test_query_returns_fallback_when_collection_missing(self, monkeypatch):
+        from cyoa.db.rag_memory import NPCMemory
+
+        monkeypatch.setattr(
+            "cyoa.db.rag_memory.chromadb.Client",
+            lambda: TestNarrativeMemory._FakeClient(TestNarrativeMemory._FakeCollection()),
+        )
+
+        mem = NPCMemory()
+        mem._fallbacks["Elara"] = deque(["Older memory", "Newest memory"], maxlen=5)
+        mem._collections["elara"] = TestNarrativeMemory._FakeCollection()
+
+        assert mem.verify_availability() is True
+        mem._collections.clear()
+
+        assert await mem.query_async("Elara", "anything", n=1) == ["Newest memory"]
+
+    @pytest.mark.asyncio
+    async def test_query_returns_fallback_when_collection_empty(self, monkeypatch):
+        from cyoa.db.rag_memory import NPCMemory
+
+        monkeypatch.setattr(
+            "cyoa.db.rag_memory.chromadb.Client",
+            lambda: TestNarrativeMemory._FakeClient(TestNarrativeMemory._FakeCollection()),
+        )
+
+        mem = NPCMemory()
+        mem._fallbacks["Elara"] = deque(["Older memory", "Newest memory"], maxlen=5)
+
+        assert await mem.query_async("Elara", "anything", n=1) == ["Newest memory"]
+
+    @pytest.mark.asyncio
+    async def test_query_marks_failure_and_falls_back_on_query_error(self, monkeypatch):
+        from cyoa.db.rag_memory import NPCMemory
+
+        fake_collection = TestNarrativeMemory._FakeCollection()
+        fake_collection._docs["scene-1"] = "Stored memory"
+        fake_collection.query = MagicMock(side_effect=RuntimeError("query failed"))  # type: ignore[method-assign]
+        monkeypatch.setattr(
+            "cyoa.db.rag_memory.chromadb.Client",
+            lambda: TestNarrativeMemory._FakeClient(fake_collection),
+        )
+
+        mem = NPCMemory()
+        mem._fallbacks["Elara"] = deque(["Older memory", "Newest memory"], maxlen=5)
+
+        assert await mem.query_async("Elara", "anything", n=1) == ["Newest memory"]
+        assert mem._collections == {}
+        assert mem._retry_state.consecutive_failures == 1
+
+    def test_close_swallows_npc_delete_errors(self, monkeypatch):
+        from cyoa.db.rag_memory import NPCMemory
+
+        fake_client = TestNarrativeMemory._FakeClient(TestNarrativeMemory._FakeCollection())
+        fake_client.delete_collection = MagicMock(side_effect=RuntimeError("cannot delete"))  # type: ignore[method-assign]
+        monkeypatch.setattr("cyoa.db.rag_memory.chromadb.Client", lambda: fake_client)
+
+        mem = NPCMemory()
+        assert mem.verify_availability() is True
+
+        mem.close()
+
+        assert mem._collections == {}
+        assert mem._client is None
+        assert mem._retry_state.consecutive_failures == 0
 
 
 # ── 4. Streaming token callback ───────────────────────────────────────────────
