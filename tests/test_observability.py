@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from unittest.mock import MagicMock
 from typing import TypedDict
 
 import pytest
@@ -152,6 +153,18 @@ def test_db_observed_session_records_failure_path(
     assert span.status.status_code == obs.StatusCode.ERROR
 
 
+def test_db_observed_session_warns_when_elapsed_is_checked_before_enter(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    session = obs.DBObservedSession("neo4j", "query")
+
+    with caplog.at_level("WARNING"):
+        elapsed = session._elapsed_ms()
+
+    assert elapsed == 0.0
+    assert "DBObservedSession exited before start time was initialized" in caplog.text
+
+
 def test_engine_observed_session_tracks_process_turn_success(
     monkeypatch: pytest.MonkeyPatch,
     fake_telemetry: FakeTelemetry,
@@ -170,6 +183,18 @@ def test_engine_observed_session_tracks_process_turn_success(
     assert events.adds == [
         (1, {"engine.operation": "process_turn", "success": "True"})
     ]
+
+
+def test_engine_observed_session_warns_when_elapsed_is_checked_before_enter(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    session = obs.EngineObservedSession("process_turn")
+
+    with caplog.at_level("WARNING"):
+        elapsed = session._elapsed_ms()
+
+    assert elapsed == 0.0
+    assert "EngineObservedSession exited before start time was initialized" in caplog.text
 
 
 def test_llm_observed_session_records_success_metrics(
@@ -229,3 +254,127 @@ def test_llm_observed_session_records_failure_metrics(
     assert span.attributes["llm.tokens"] == 0
     assert span.attributes["llm.duration_s"] == pytest.approx(0.5)
     assert span.ended is True
+
+
+def test_llm_observed_session_ignores_first_token_without_start(
+    fake_telemetry: FakeTelemetry,
+) -> None:
+    session = obs.LLMObservedSession(model_name="mock-model", task="generation")
+
+    session.report_first_token()
+
+    assert fake_telemetry["ttft_histogram"].records == []
+
+
+def test_llm_observed_session_ignores_duplicate_first_token_reports(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_telemetry: FakeTelemetry,
+) -> None:
+    _patch_perf_counter(monkeypatch, [2.0, 2.2, 2.4])
+
+    session = obs.LLMObservedSession(model_name="mock-model", task="generation").start()
+    session.report_first_token()
+    session.report_first_token()
+
+    assert len(fake_telemetry["ttft_histogram"].records) == 1
+    assert fake_telemetry["tracer"].spans[0].events == [
+        ("first_token", {"ttft_ms": pytest.approx(200.0)})
+    ]
+
+
+def test_llm_observed_session_warns_when_end_called_before_start(
+    caplog: pytest.LogCaptureFixture,
+    fake_telemetry: FakeTelemetry,
+) -> None:
+    session = obs.LLMObservedSession(model_name="mock-model", task="generation")
+    session.span = FakeSpan(name="llm.generate.generation", attributes={})
+
+    with caplog.at_level("WARNING"):
+        session.end()
+
+    assert "LLMObservedSession ended before start time was initialized" in caplog.text
+    assert session.span.ended is True
+    assert fake_telemetry["success_counter"].adds == []
+    assert fake_telemetry["failure_counter"].adds == []
+
+
+def test_record_repair_attempt_increments_counter(fake_telemetry: FakeTelemetry) -> None:
+    obs.record_repair_attempt("mock-model", "JSONDecodeError")
+
+    assert fake_telemetry["repair_counter"].adds == [
+        (1, {"llm.model": "mock-model", "error_type": "JSONDecodeError"})
+    ]
+
+
+def test_setup_observability_without_otlp_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    tracer_provider = MagicMock()
+    meter_provider = MagicMock()
+    set_tracer_provider = MagicMock()
+    set_meter_provider = MagicMock()
+
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+    monkeypatch.setattr(obs.Resource, "create", MagicMock(return_value="resource"))
+    monkeypatch.setattr(obs, "TracerProvider", MagicMock(return_value=tracer_provider))
+    monkeypatch.setattr(obs, "MeterProvider", MagicMock(return_value=meter_provider))
+    monkeypatch.setattr(obs.trace, "set_tracer_provider", set_tracer_provider)
+    monkeypatch.setattr(obs.metrics, "set_meter_provider", set_meter_provider)
+
+    with caplog.at_level("INFO"):
+        obs.setup_observability()
+
+    obs.Resource.create.assert_called_once_with({"service.name": obs.SERVICE_NAME})
+    obs.TracerProvider.assert_called_once_with(resource="resource")
+    obs.MeterProvider.assert_called_once_with(resource="resource", metric_readers=[])
+    tracer_provider.add_span_processor.assert_not_called()
+    set_tracer_provider.assert_called_once_with(tracer_provider)
+    set_meter_provider.assert_called_once_with(meter_provider)
+    assert "No OTEL_EXPORTER_OTLP_ENDPOINT found" in caplog.text
+
+
+def test_setup_observability_with_otlp_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    tracer_provider = MagicMock()
+    meter_provider = MagicMock()
+    span_exporter = MagicMock()
+    metric_exporter = MagicMock()
+    span_processor = MagicMock()
+    metric_reader = MagicMock()
+    set_tracer_provider = MagicMock()
+    set_meter_provider = MagicMock()
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel:4318")
+    monkeypatch.setattr(obs.Resource, "create", MagicMock(return_value="resource"))
+    monkeypatch.setattr(obs, "TracerProvider", MagicMock(return_value=tracer_provider))
+    monkeypatch.setattr(obs, "MeterProvider", MagicMock(return_value=meter_provider))
+    monkeypatch.setattr(obs, "OTLPSpanExporter", MagicMock(return_value=span_exporter))
+    monkeypatch.setattr(obs, "BatchSpanProcessor", MagicMock(return_value=span_processor))
+    monkeypatch.setattr(obs, "OTLPMetricExporter", MagicMock(return_value=metric_exporter))
+    monkeypatch.setattr(
+        obs,
+        "PeriodicExportingMetricReader",
+        MagicMock(return_value=metric_reader),
+    )
+    monkeypatch.setattr(obs.trace, "set_tracer_provider", set_tracer_provider)
+    monkeypatch.setattr(obs.metrics, "set_meter_provider", set_meter_provider)
+
+    with caplog.at_level("INFO"):
+        obs.setup_observability()
+
+    obs.OTLPSpanExporter.assert_called_once_with()
+    obs.BatchSpanProcessor.assert_called_once_with(span_exporter)
+    tracer_provider.add_span_processor.assert_called_once_with(span_processor)
+    obs.OTLPMetricExporter.assert_called_once_with()
+    obs.PeriodicExportingMetricReader.assert_called_once_with(metric_exporter)
+    obs.MeterProvider.assert_called_once_with(
+        resource="resource",
+        metric_readers=[metric_reader],
+    )
+    set_tracer_provider.assert_called_once_with(tracer_provider)
+    set_meter_provider.assert_called_once_with(meter_provider)
+    assert "OTLP Trace Exporter initialized." in caplog.text
+    assert "OTLP Metric Exporter initialized." in caplog.text
