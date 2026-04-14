@@ -19,30 +19,53 @@ class TypewriterMixin:
         # Throttle Markdown re-renders to ~30fps max to avoid UI lag on long stories
         REFRESH_LIMIT = 0.033
 
-        while True:
-            # wait for text chunks
-            chunk = await host._typewriter_queue.get()
-            host._is_typing = True
-            host._typewriter_active_chunk = list(chunk)
+        try:
+            while True:
+                if host._is_shutting_down:
+                    host._is_typing = False
+                    return
 
-            while host._typewriter_active_chunk:
-                self._handle_typewriter_batch()
+                # wait for text chunks
+                chunk = await host._typewriter_queue.get()
+                if host._is_shutting_down:
+                    host._is_typing = False
+                    return
 
-                # Throttled UI update
-                now = asyncio.get_event_loop().time()
-                if now - last_refresh >= REFRESH_LIMIT or not host._typewriter_active_chunk:
-                    host._current_turn_widget.update(host._current_turn_text)
-                    if host._is_at_bottom():
-                        host._scroll_to_bottom(animate=False)
-                    last_refresh = now
+                host._is_typing = True
+                host._typewriter_active_chunk = list(chunk)
 
-                if host._typewriter_active_chunk:
-                    delay = constants.TYPEWRITER_SPEEDS.get(host.typewriter_speed, 0.02)
-                    if delay > 0:
-                        await asyncio.sleep(delay)
+                while host._typewriter_active_chunk:
+                    if host._is_shutting_down:
+                        host._is_typing = False
+                        host._typewriter_active_chunk.clear()
+                        return
 
-            if host._typewriter_queue.empty():
-                host._is_typing = False
+                    self._handle_typewriter_batch()
+
+                    # Throttled UI update
+                    now = asyncio.get_event_loop().time()
+                    if now - last_refresh >= REFRESH_LIMIT or not host._typewriter_active_chunk:
+                        try:
+                            host._current_turn_widget.update(host._current_turn_text)
+                            if host._is_at_bottom():
+                                host._scroll_to_bottom(animate=False)
+                        except Exception as e:  # noqa: BLE001
+                            logger.debug("Typewriter worker UI update failed: %s", e)
+                            host._is_typing = False
+                            return
+                        last_refresh = now
+
+                    if host._typewriter_active_chunk:
+                        delay = constants.TYPEWRITER_SPEEDS.get(host.typewriter_speed, 0.02)
+                        if delay > 0:
+                            await asyncio.sleep(delay)
+
+                if host._typewriter_queue.empty():
+                    host._is_typing = False
+        except asyncio.CancelledError:
+            host._is_typing = False
+            host._typewriter_active_chunk.clear()
+            raise
 
     def _handle_typewriter_batch(self) -> None:
         """Process a batch of characters from the active chunk, handling catchup."""

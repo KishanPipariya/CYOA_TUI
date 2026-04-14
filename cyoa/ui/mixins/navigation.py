@@ -20,7 +20,7 @@ class NavigationMixin:
         """Reset story state via the engine."""
         app = as_textual_app(self)
         host = as_mixin_host(self)
-        if not host.engine:
+        if not host.engine or host._is_shutting_down:
             return
 
         host._current_story = constants.LOADING_ART
@@ -190,7 +190,7 @@ class NavigationMixin:
         """Hand off restoration to the engine and update UI state."""
         app = as_textual_app(self)
         host = as_mixin_host(self)
-        if not host.engine:
+        if not host.engine or host._is_shutting_down:
             return
 
         # 1. UI Preparation
@@ -225,6 +225,8 @@ class NavigationMixin:
 
         # 3. Hand off the core logic to the engine
         # Engine events (STATS_UPDATED, INVENTORY_UPDATED, NODE_COMPLETED) will refresh the UI
+        if host._is_shutting_down:
+            return
         await host.engine.branch_to_scene(idx, history)
 
     @work(exclusive=True)

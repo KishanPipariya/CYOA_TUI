@@ -522,6 +522,47 @@ async def test_on_unmount_cancels_workers_and_unsubscribes(mock_app_dependencies
 
 
 @pytest.mark.asyncio
+async def test_late_engine_events_are_ignored_during_shutdown(mock_app_dependencies):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.5)
+        app._is_shutting_down = True
+
+        bus.emit(Events.ENGINE_STARTED)
+        bus.emit(Events.STATUS_MESSAGE, message="late status")
+        bus.emit(Events.ERROR_OCCURRED, error="late error")
+        bus.emit(
+            Events.NODE_COMPLETED,
+            node=StoryNode(
+                narrative="Late node",
+                choices=[Choice(text="Ignore"), Choice(text="Wait")],
+            ),
+        )
+
+        await pilot.pause(0.1)
+
+        assert app._current_story != "Late node"
+
+
+@pytest.mark.asyncio
+async def test_typewriter_worker_stops_cleanly_on_shutdown(mock_app_dependencies):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.5)
+        app._current_turn_text = ""
+        app._current_story = ""
+        app._typewriter_queue.put_nowait("queued after shutdown")
+        app._is_shutting_down = True
+
+        await pilot.pause(0.2)
+
+        assert app._is_typing is False
+        assert app._typewriter_active_chunk == []
+
+
+@pytest.mark.asyncio
 async def test_choice_buttons_have_number_labels(mock_app_dependencies):
     """Test that choice buttons display numbered labels like [1], [2], etc."""
     app = CYOAApp(model_path="dummy_path.gguf")

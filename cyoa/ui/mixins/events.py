@@ -14,12 +14,16 @@ class EventsMixin:
     def _handle_engine_started(self) -> None:
         app = as_textual_app(self)
         host = as_mixin_host(self)
+        if host._is_shutting_down:
+            return
         host.turn_count = 1
         host.mood = "default"
         host._last_stats_snapshot = None
         app.query_one("#journal-list", ListView).clear()
 
     def _handle_engine_restarted(self) -> None:
+        if as_mixin_host(self)._is_shutting_down:
+            return
         as_textual_app(self).notify("Adventure Reset.", severity="information", timeout=2)
 
     def _handle_choice_made(self, choice_text: str) -> None:
@@ -34,11 +38,11 @@ class EventsMixin:
     def _handle_node_completed(self, node: StoryNode) -> None:
         app = as_textual_app(self)
         host = as_mixin_host(self)
+        if host._is_shutting_down:
+            return
         if host.engine:
             host.turn_count = host.engine.state.turn_count
         host.display_node(node)
-        if host._is_shutting_down:
-            return
         # Avoid DB/UI work when the panel is hidden.
         story_map_panel = app.query_one("#story-map-panel", Container)
         if not story_map_panel.has_class("panel-collapsed"):
@@ -90,15 +94,23 @@ class EventsMixin:
         app.query_one(StatusDisplay).inventory = list(inventory)
 
     def _handle_title_generated(self, title: str) -> None:
+        if as_mixin_host(self)._is_shutting_down:
+            return
         as_textual_app(self).notify(f"New Chapter: {title}", severity="information", timeout=5)
 
     def _handle_ending_reached(self, node: StoryNode) -> None:
+        if as_mixin_host(self)._is_shutting_down:
+            return
         as_textual_app(self).notify("The Story Ends.", severity="information", timeout=10)
 
     def _handle_error(self, error: str) -> None:
         app = as_textual_app(self)
+        if as_mixin_host(self)._is_shutting_down:
+            return
         app.notify(f"Error: {error}", severity="error", timeout=5)
         app.query_one("#loading", Static).add_class("hidden")
 
     def _handle_status_message(self, message: str) -> None:
+        if as_mixin_host(self)._is_shutting_down:
+            return
         as_textual_app(self).notify(message, severity="information", timeout=4)
