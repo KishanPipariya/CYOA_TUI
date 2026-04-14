@@ -200,28 +200,44 @@ class GameState:
 
         normalized: list[dict[str, Any]] = []
         for entry in value:
-            if not isinstance(entry, dict):
-                continue
-
-            kind = entry.get("kind")
-            restored_turn = entry.get("restored_turn")
-            if not isinstance(kind, str):
-                continue
-
-            normalized_entry: dict[str, Any] = {"kind": kind}
-            if isinstance(entry.get("source_scene_id"), str):
-                normalized_entry["source_scene_id"] = entry["source_scene_id"]
-            if isinstance(entry.get("target_scene_id"), str):
-                normalized_entry["target_scene_id"] = entry["target_scene_id"]
-            if isinstance(restored_turn, int) and not isinstance(restored_turn, bool):
-                normalized_entry["restored_turn"] = restored_turn
-            elif isinstance(restored_turn, float):
-                normalized_entry["restored_turn"] = int(restored_turn)
-            elif isinstance(restored_turn, str):
-                try:
-                    normalized_entry["restored_turn"] = int(restored_turn)
-                except ValueError:
-                    pass
-            normalized.append(normalized_entry)
+            normalized_entry = self._normalize_timeline_entry(entry)
+            if normalized_entry is not None:
+                normalized.append(normalized_entry)
 
         return normalized
+
+    def _normalize_timeline_entry(self, entry: Any) -> dict[str, Any] | None:
+        """Normalize a single timeline metadata entry."""
+        if not isinstance(entry, dict):
+            return None
+
+        kind = entry.get("kind")
+        if not isinstance(kind, str):
+            return None
+
+        normalized_entry: dict[str, Any] = {"kind": kind}
+        for key in ("source_scene_id", "target_scene_id"):
+            value = entry.get(key)
+            if isinstance(value, str):
+                normalized_entry[key] = value
+
+        restored_turn = self._coerce_optional_int(entry.get("restored_turn"))
+        if restored_turn is not None:
+            normalized_entry["restored_turn"] = restored_turn
+
+        return normalized_entry
+
+    def _coerce_optional_int(self, value: Any) -> int | None:
+        """Parse optional integer values from save data."""
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                return None
+        return None
