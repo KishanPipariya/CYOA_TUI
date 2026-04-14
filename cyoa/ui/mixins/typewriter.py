@@ -11,6 +11,53 @@ logger = logging.getLogger(__name__)
 class TypewriterMixin:
     """Mixin for character-by-character text rendering."""
 
+    def _stop_typewriter(self) -> None:
+        host = as_mixin_host(self)
+        host._is_typing = False
+        host._typewriter_active_chunk.clear()
+
+    def _should_stop_typewriter(self) -> bool:
+        host = as_mixin_host(self)
+        if host.is_runtime_active():
+            return False
+        self._stop_typewriter()
+        return True
+
+    def _refresh_typewriter_ui(self) -> bool:
+        host = as_mixin_host(self)
+        try:
+            host._current_turn_widget.update(host._current_turn_text)
+            if host._is_at_bottom():
+                host._scroll_to_bottom(animate=False)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Typewriter worker UI update failed: %s", e)
+            self._stop_typewriter()
+            return False
+        return True
+
+    async def _drain_typewriter_chunk(self, refresh_limit: float, last_refresh: float) -> float | None:
+        host = as_mixin_host(self)
+        while host._typewriter_active_chunk:
+            if self._should_stop_typewriter():
+                return None
+
+            self._handle_typewriter_batch()
+
+            now = asyncio.get_event_loop().time()
+            if now - last_refresh >= refresh_limit or not host._typewriter_active_chunk:
+                if not self._refresh_typewriter_ui():
+                    return None
+                last_refresh = now
+
+            if host._typewriter_active_chunk:
+                delay = constants.TYPEWRITER_SPEEDS.get(host.typewriter_speed, 0.02)
+                if delay > 0:
+                    await asyncio.sleep(delay)
+
+        if host._typewriter_queue.empty():
+            host._is_typing = False
+        return last_refresh
+
     @work(group="typewriter", exclusive=True)
     async def _typewriter_worker(self) -> None:
         """Background worker that smoothly reveals narrative text from the queue."""
@@ -21,50 +68,22 @@ class TypewriterMixin:
 
         try:
             while True:
-                if host._is_shutting_down:
-                    host._is_typing = False
+                if self._should_stop_typewriter():
                     return
 
                 # wait for text chunks
                 chunk = await host._typewriter_queue.get()
-                if host._is_shutting_down:
-                    host._is_typing = False
+                if self._should_stop_typewriter():
                     return
 
                 host._is_typing = True
                 host._typewriter_active_chunk = list(chunk)
-
-                while host._typewriter_active_chunk:
-                    if host._is_shutting_down:
-                        host._is_typing = False
-                        host._typewriter_active_chunk.clear()
-                        return
-
-                    self._handle_typewriter_batch()
-
-                    # Throttled UI update
-                    now = asyncio.get_event_loop().time()
-                    if now - last_refresh >= REFRESH_LIMIT or not host._typewriter_active_chunk:
-                        try:
-                            host._current_turn_widget.update(host._current_turn_text)
-                            if host._is_at_bottom():
-                                host._scroll_to_bottom(animate=False)
-                        except Exception as e:  # noqa: BLE001
-                            logger.debug("Typewriter worker UI update failed: %s", e)
-                            host._is_typing = False
-                            return
-                        last_refresh = now
-
-                    if host._typewriter_active_chunk:
-                        delay = constants.TYPEWRITER_SPEEDS.get(host.typewriter_speed, 0.02)
-                        if delay > 0:
-                            await asyncio.sleep(delay)
-
-                if host._typewriter_queue.empty():
-                    host._is_typing = False
+                updated_refresh = await self._drain_typewriter_chunk(REFRESH_LIMIT, last_refresh)
+                if updated_refresh is None:
+                    return
+                last_refresh = updated_refresh
         except asyncio.CancelledError:
-            host._is_typing = False
-            host._typewriter_active_chunk.clear()
+            self._stop_typewriter()
             raise
 
     def _handle_typewriter_batch(self) -> None:

@@ -167,6 +167,10 @@ class CYOAApp(
     def on_resize(self, event: Resize) -> None:
         self._set_compact_layout(event.size.width)
 
+    def is_runtime_active(self) -> bool:
+        """Return whether UI workers and event handlers may still touch widgets."""
+        return not self._is_shutting_down
+
     def _set_compact_layout(self, width: int) -> None:
         """Enable compact mode on narrow terminals to preserve story readability."""
         is_compact = width < 140

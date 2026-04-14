@@ -117,7 +117,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Import after .env loading because graph_db reads env at import time.
     from cyoa.core.constants import DEFAULT_STARTING_PROMPT, STORY_LOG_FILE
     from cyoa.core.observability import setup_observability
-    from cyoa.core.theme_loader import list_themes, load_theme
+    from cyoa.core.theme_loader import ThemeValidationError, list_themes, load_theme
     from cyoa.db.story_logger import StoryLogger
     from cyoa.ui.app import CYOAApp
 
@@ -143,7 +143,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             starting_prompt = theme.get("prompt", DEFAULT_STARTING_PROMPT)
             spinner_frames = theme.get("spinner_frames", ["[-]", "[\\]", "[|]", "[/]"])
             accent_color = theme.get("accent_color")
-        except FileNotFoundError as e:
+        except (FileNotFoundError, ThemeValidationError) as e:
             print(f"Error: {e}", file=sys.stderr)
             return 2
 

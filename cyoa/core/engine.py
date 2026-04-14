@@ -252,7 +252,6 @@ class StoryEngine:
             return {}
 
         data = {
-            "version": 1,
             "starting_prompt": self.starting_prompt,
             "context_history": self.story_context.history,
         }

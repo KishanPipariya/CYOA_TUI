@@ -1,3 +1,4 @@
+import json
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -642,10 +643,14 @@ async def test_save_and_load_game(mock_app_dependencies, tmp_path, monkeypatch):
         await pilot.pause(1.0)
 
         # Verify a save file was created
-        import os
-
         save_files = [f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]
         assert len(save_files) == 1
+        with open(os.path.join(str(tmp_path), save_files[0]), encoding="utf-8") as f:
+            payload = json.load(f)
+        assert "version" not in payload
+        assert "ui_state" in payload
+        assert payload["ui_state"]["current_story_text"]
+        assert len(payload["ui_state"]["journal_entries"]) == 1
 
         # Restart the game
         await pilot.press("r")

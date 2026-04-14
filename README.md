@@ -120,6 +120,7 @@ If Neo4j or Chroma are unavailable, the app falls back gracefully instead of fai
 
 ```bash
 uv sync --group dev
+uv run python scripts/validate_themes.py
 bash scripts/run_smoke.sh
 uv run pytest -q
 uv run ruff check .

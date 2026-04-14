@@ -14,7 +14,7 @@ class EventsMixin:
     def _handle_engine_started(self) -> None:
         app = as_textual_app(self)
         host = as_mixin_host(self)
-        if host._is_shutting_down:
+        if not host.is_runtime_active():
             return
         host.turn_count = 1
         host.mood = "default"
@@ -22,7 +22,7 @@ class EventsMixin:
         app.query_one("#journal-list", ListView).clear()
 
     def _handle_engine_restarted(self) -> None:
-        if as_mixin_host(self)._is_shutting_down:
+        if not as_mixin_host(self).is_runtime_active():
             return
         as_textual_app(self).notify("Adventure Reset.", severity="information", timeout=2)
 
@@ -38,7 +38,7 @@ class EventsMixin:
     def _handle_node_completed(self, node: StoryNode) -> None:
         app = as_textual_app(self)
         host = as_mixin_host(self)
-        if host._is_shutting_down:
+        if not host.is_runtime_active():
             return
         if host.engine:
             host.turn_count = host.engine.state.turn_count
@@ -51,7 +51,7 @@ class EventsMixin:
     def _handle_stats_updated(self, stats: dict[str, int]) -> None:
         app = as_textual_app(self)
         host = as_mixin_host(self)
-        if host._is_shutting_down:
+        if not host.is_runtime_active():
             return
 
         status = app.query_one(StatusDisplay)
@@ -89,28 +89,28 @@ class EventsMixin:
 
     def _handle_inventory_updated(self, inventory: list[str]) -> None:
         app = as_textual_app(self)
-        if as_mixin_host(self)._is_shutting_down:
+        if not as_mixin_host(self).is_runtime_active():
             return
         app.query_one(StatusDisplay).inventory = list(inventory)
 
     def _handle_title_generated(self, title: str) -> None:
-        if as_mixin_host(self)._is_shutting_down:
+        if not as_mixin_host(self).is_runtime_active():
             return
         as_textual_app(self).notify(f"New Chapter: {title}", severity="information", timeout=5)
 
     def _handle_ending_reached(self, node: StoryNode) -> None:
-        if as_mixin_host(self)._is_shutting_down:
+        if not as_mixin_host(self).is_runtime_active():
             return
         as_textual_app(self).notify("The Story Ends.", severity="information", timeout=10)
 
     def _handle_error(self, error: str) -> None:
         app = as_textual_app(self)
-        if as_mixin_host(self)._is_shutting_down:
+        if not as_mixin_host(self).is_runtime_active():
             return
         app.notify(f"Error: {error}", severity="error", timeout=5)
         app.query_one("#loading", Static).add_class("hidden")
 
     def _handle_status_message(self, message: str) -> None:
-        if as_mixin_host(self)._is_shutting_down:
+        if not as_mixin_host(self).is_runtime_active():
             return
         as_textual_app(self).notify(message, severity="information", timeout=4)

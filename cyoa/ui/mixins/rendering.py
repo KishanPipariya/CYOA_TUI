@@ -27,6 +27,8 @@ class RenderingMixin:
         """Streaming callback: feeds the typewriter queue or updates UI immediately."""
         app = as_textual_app(self)
         host = as_mixin_host(self)
+        if not host.is_runtime_active():
+            return
         if host._loading_suffix_shown:
             # First token batch arrived — loading state is visual-only (spinner).
             host._loading_suffix_shown = False
@@ -49,6 +51,8 @@ class RenderingMixin:
         """Clear choice buttons and show spinner while generation is in progress."""
         app = as_textual_app(self)
         host = as_mixin_host(self)
+        if not host.is_runtime_active():
+            return
         choices_container = app.query_one("#choices-container", Container)
         if selected_button_id is not None:
             # Keep only the selected button, disable and dim it
@@ -87,6 +91,8 @@ class RenderingMixin:
         """Render a newly generated StoryNode to the UI (after streaming completes)."""
         app = as_textual_app(self)
         host = as_mixin_host(self)
+        if not host.is_runtime_active():
+            return
         app.query_one("#loading", Static).add_class("hidden")
         host.mood = getattr(node, "mood", "default")
 
@@ -168,7 +174,7 @@ class RenderingMixin:
         """Update UI stats from engine state."""
         app = as_textual_app(self)
         host = as_mixin_host(self)
-        if not host.engine or host._is_shutting_down:
+        if not host.engine or not host.is_runtime_active():
             return
         status = app.query_one(StatusDisplay)
         status.health = host.engine.state.player_stats.get("health", 100)
@@ -215,7 +221,8 @@ class RenderingMixin:
         app = as_textual_app(self)
         host = as_mixin_host(self)
         if (
-            not host.engine
+            not host.is_runtime_active()
+            or not host.engine
             or not host.engine.state.current_node
             or choice_idx >= len(host.engine.state.current_node.choices)
         ):

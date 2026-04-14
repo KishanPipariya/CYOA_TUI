@@ -1,44 +1,103 @@
-import os
+import json
 
 import pytest
 
-from cyoa.core.theme_loader import THEMES_DIR, list_themes, load_theme
+from cyoa.core.theme_loader import (
+    THEMES_DIR,
+    ThemeValidationError,
+    get_moods_config,
+    list_themes,
+    load_theme,
+    validate_all_themes,
+    validate_moods_config,
+    validate_theme,
+)
 
 
 def test_themes_directory_exists():
     """Verify that the themes directory exists and contains at least one theme."""
-    assert os.path.isdir(THEMES_DIR)
+    assert THEMES_DIR.is_dir()
     assert len(list_themes()) > 0
 
 
 @pytest.mark.parametrize("theme_name", list_themes())
-def test_valid_theme_structure(theme_name):
-    """Ensure every theme file in the directory has all required keys and valid types."""
+def test_load_theme_returns_validated_theme(theme_name: str):
+    """Each shipped theme should satisfy the strict runtime contract."""
     theme = load_theme(theme_name)
 
-    required_keys = {
-        "name": str,
-        "description": str,
-        "prompt": str,
-        "spinner_frames": list,
-        "accent_color": str,
-    }
+    assert theme["name"]
+    assert theme["description"]
+    assert theme["prompt"]
+    assert theme["accent_color"]
+    assert theme["spinner_frames"]
+    assert all(isinstance(frame, str) and frame for frame in theme["spinner_frames"])
 
-    for key, expected_type in required_keys.items():
-        assert key in theme, f"Theme '{theme_name}' is missing required key: '{key}'"
-        assert isinstance(theme[key], expected_type), (
-            f"Theme '{theme_name}' key '{key}' should be {expected_type.__name__}, but got {type(theme[key]).__name__}"
+
+def test_validate_theme_rejects_missing_required_field():
+    with pytest.raises(ThemeValidationError, match="prompt"):
+        validate_theme(
+            {
+                "name": "Broken",
+                "description": "Missing prompt",
+                "accent_color": "blue",
+                "spinner_frames": ["-"],
+            },
+            "broken",
         )
 
-    # Specifically check spinner_frames contents
-    if "spinner_frames" in theme:
-        assert len(theme["spinner_frames"]) > 0, (
-            f"Theme '{theme_name}' spinner_frames should not be empty."
+
+def test_validate_theme_rejects_empty_spinner_frames():
+    with pytest.raises(ThemeValidationError, match="spinner_frames"):
+        validate_theme(
+            {
+                "name": "Broken",
+                "description": "Empty frames",
+                "prompt": "Start",
+                "accent_color": "blue",
+                "spinner_frames": [],
+            },
+            "broken",
         )
-        for frame in theme["spinner_frames"]:
-            assert isinstance(frame, str), (
-                f"Theme '{theme_name}' spinner frame '{frame}' should be a string."
-            )
+
+
+def test_validate_moods_config_rejects_non_object_entry():
+    with pytest.raises(ThemeValidationError, match="must be an object"):
+        validate_moods_config({"default": "blue"})
+
+
+def test_get_moods_config_returns_empty_on_invalid_json(tmp_path, monkeypatch):
+    themes_dir = tmp_path / "themes"
+    themes_dir.mkdir()
+    (themes_dir / "themes.json").write_text(json.dumps({"default": "broken"}), encoding="utf-8")
+
+    monkeypatch.setattr("cyoa.core.theme_loader.THEMES_DIR", themes_dir)
+    monkeypatch.setattr("cyoa.core.theme_loader._themes_cached_config", None)
+
+    assert get_moods_config() == {}
+
+
+def test_validate_all_themes_rejects_invalid_themes_json(tmp_path, monkeypatch):
+    themes_dir = tmp_path / "themes"
+    themes_dir.mkdir()
+    (themes_dir / "demo.toml").write_text(
+        '\n'.join(
+            [
+                'name = "Demo"',
+                'description = "Demo theme"',
+                'accent_color = "blue"',
+                'spinner_frames = ["-", "|"]',
+                'prompt = "Start"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (themes_dir / "themes.json").write_text(json.dumps({"default": "broken"}), encoding="utf-8")
+
+    monkeypatch.setattr("cyoa.core.theme_loader.THEMES_DIR", themes_dir)
+    monkeypatch.setattr("cyoa.core.theme_loader._themes_cached_config", None)
+
+    with pytest.raises(ThemeValidationError, match="must be an object"):
+        validate_all_themes()
 
 
 def test_load_non_existent_theme():

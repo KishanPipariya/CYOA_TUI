@@ -3,9 +3,10 @@ import logging
 import os
 
 from textual.containers import Container, VerticalScroll
-from textual.widgets import Button, ListView, Markdown
+from textual.widgets import Button, Label, ListView, Markdown
 
 from cyoa.core import constants
+from cyoa.ui.components import JournalListItem
 from cyoa.ui.mixins.contracts import as_mixin_host, as_textual_app
 
 logger = logging.getLogger(__name__)
@@ -31,8 +32,17 @@ class PersistenceMixin:
         )
 
         save_data = host.engine.get_save_data()
-
-        save_data["current_story_text"] = host._current_story
+        journal_list = app.query_one("#journal-list", ListView)
+        save_data["ui_state"] = {
+            "current_story_text": host._current_story,
+            "journal_entries": [
+                {
+                    "label": str(item.query_one(Label).render().plain),
+                    "scene_index": item.scene_index,
+                }
+                for item in journal_list.query(JournalListItem)
+            ],
+        }
 
         try:
             with open(save_path, "w", encoding="utf-8") as f:
@@ -82,11 +92,12 @@ class PersistenceMixin:
         # Cancel speculative generation before hydrating; keep core UI workers alive.
         app.workers.cancel_group(app, "speculation")
 
-        host._current_story = data.get("current_story_text", constants.LOADING_ART)
+        ui_state = data.get("ui_state", {})
+        host.engine.load_save_data(data)
+
+        host._current_story = ui_state.get("current_story_text", constants.LOADING_ART)
         host._current_turn_text = host._current_story
         host._loading_suffix_shown = False
-
-        host.engine.load_save_data(data)
 
         # Sync UI
         container = app.query_one("#story-container", VerticalScroll)
@@ -107,7 +118,15 @@ class PersistenceMixin:
         else:
             choices_container.mount(Button("✦ Start a New Adventure", id="btn-new-adventure", variant="success"))
 
-        app.query_one("#journal-list", ListView).clear()
+        journal_list = app.query_one("#journal-list", ListView)
+        journal_list.clear()
+        for entry in ui_state.get("journal_entries", []):
+            journal_list.append(
+                JournalListItem(
+                    Label(entry.get("label", "Unknown Turn")),
+                    scene_index=int(entry.get("scene_index", 0)),
+                )
+            )
 
         app.notify(
             f"Loaded save from Turn {host.engine.state.turn_count}.",

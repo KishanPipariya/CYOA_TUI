@@ -177,6 +177,42 @@ def test_engine_save_and_load_roundtrip():
     assert loaded.state.last_choice_text == "Open door"
 
 
+def test_engine_save_payload_uses_current_ui_state_contract():
+    broker, _provider = _make_broker_with_mock_provider()
+    engine = StoryEngine(broker=broker, starting_prompt="Start")
+    engine.story_context = StoryContext("Start")
+    engine.state.current_node = _make_story_node("Node")
+
+    data = engine.get_save_data()
+
+    assert "version" not in data
+    assert "current_story_text" not in data
+
+
+def test_engine_load_save_data_accepts_versionless_payload():
+    broker, _provider = _make_broker_with_mock_provider()
+    loaded = StoryEngine(broker=broker, starting_prompt="IgnoreThis")
+
+    data = {
+        "starting_prompt": "Start",
+        "context_history": [{"role": "user", "content": "Start"}],
+        "story_title": "Versionless",
+        "turn_count": 2,
+        "inventory": ["Coin"],
+        "player_stats": {"health": 99, "gold": 1, "reputation": 0},
+        "current_scene_id": "scene-1",
+        "last_choice_text": "Look",
+    }
+
+    loaded.load_save_data(data)
+
+    assert loaded.story_context is not None
+    assert loaded.story_context.starting_prompt == "Start"
+    assert loaded.state.story_title == "Versionless"
+    assert loaded.state.turn_count == 2
+    assert loaded.state.inventory == ["Coin"]
+
+
 @pytest.mark.asyncio
 async def test_engine_branch_to_scene_uses_cached_provider_state():
     broker, _provider = _make_broker_with_mock_provider()

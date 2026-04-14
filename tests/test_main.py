@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import main
+from cyoa.core.theme_loader import ThemeValidationError
 
 
 def _args(**overrides: str | None) -> argparse.Namespace:
@@ -114,6 +115,26 @@ def test_main_returns_error_for_invalid_startup_config(monkeypatch: pytest.Monke
     with (
         patch("cyoa.core.observability.setup_observability"),
         patch("cyoa.core.theme_loader.list_themes", return_value=["dark_dungeon"]),
+        patch("cyoa.db.story_logger.StoryLogger") as logger_cls,
+        patch("cyoa.ui.app.CYOAApp") as app_cls,
+    ):
+        exit_code = main.main([])
+
+    assert exit_code == 2
+    logger_cls.assert_not_called()
+    app_cls.assert_not_called()
+
+
+def test_main_returns_error_for_invalid_theme_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+
+    with (
+        patch("cyoa.core.observability.setup_observability"),
+        patch("cyoa.core.theme_loader.list_themes", return_value=["dark_dungeon"]),
+        patch(
+            "cyoa.core.theme_loader.load_theme",
+            side_effect=ThemeValidationError("Theme 'dark_dungeon': prompt must be a non-empty string."),
+        ),
         patch("cyoa.db.story_logger.StoryLogger") as logger_cls,
         patch("cyoa.ui.app.CYOAApp") as app_cls,
     ):
