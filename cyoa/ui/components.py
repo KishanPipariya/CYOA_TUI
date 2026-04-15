@@ -83,6 +83,22 @@ class BranchScreen(ModalScreen[int]):
         self.scenes = scenes
         self.choices = choices
 
+    @staticmethod
+    def _build_scene_preview(scene: dict[str, Any], turn_index: int, choice_text: str) -> str:
+        """Build a compact but information-dense branch preview label."""
+        raw = str(scene.get("narrative", "")).replace("\n", " ").strip()
+        preview = (raw[:180].rsplit(" ", 1)[0] + "…") if len(raw) > 180 else raw
+        preview = preview or "No scene summary available."
+        available_choices = scene.get("available_choices")
+        branch_count = len(available_choices) if isinstance(available_choices, list) else 0
+        inventory = scene.get("inventory")
+        item_count = len(inventory) if isinstance(inventory, list) else 0
+        return (
+            f"[b]Turn {turn_index + 1}[/b]  [dim]Next choice: {choice_text}[/dim]\n"
+            f"{preview}\n"
+            f"[dim]{branch_count} future path(s) • {item_count} item(s) carried[/dim]"
+        )
+
     def compose(self) -> ComposeResult:
         with Container(id="branch-dialog"):
             yield Label(
@@ -96,12 +112,8 @@ class BranchScreen(ModalScreen[int]):
     def on_mount(self) -> None:
         list_view = self.query_one("#branch-list", ListView)
         for i, scene in enumerate(self.scenes):
-            # U7 Fix: Use a longer preview and snap to word boundaries
-            raw = scene["narrative"].replace("\n", " ")
-            preview = (raw[:180].rsplit(" ", 1)[0] + "…") if len(raw) > 180 else raw
-
             choice_text = self.choices[i] if i < len(self.choices) else "Current Scene"
-            label_text = f"Turn {i + 1}: {preview}\n[i]Choice made: {choice_text}[/i]"
+            label_text = self._build_scene_preview(scene, i, choice_text)
             item = SceneListItem(Label(label_text, classes="scene-preview"), scene_index=i)
             list_view.append(item)
 

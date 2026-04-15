@@ -10,7 +10,8 @@ from textual.worker import WorkerFailed
 from cyoa.core.events import EventBus, EventDispatchError, Events, bus
 from cyoa.core.models import Choice, StoryNode
 from cyoa.ui.app import CYOAApp
-from cyoa.ui.components import ConfirmScreen, HelpScreen
+from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen
+from cyoa.ui.mixins.navigation import NavigationMixin
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1008,3 +1009,46 @@ async def test_restore_from_save_ignores_branch_state_without_structured_timelin
         assert app._story_segments == [
             {"kind": "story_turn", "text": "Recovered branch scene"},
         ]
+
+
+def test_branch_screen_scene_preview_includes_choice_and_state_metadata() -> None:
+    preview = BranchScreen._build_scene_preview(
+        {
+            "narrative": "You return to the crossroads beneath a broken moon and count the paths ahead.",
+            "available_choices": ["Take the east road", "Camp", "Scout"],
+            "inventory": ["Compass", "Torch"],
+        },
+        turn_index=1,
+        choice_text="Take the east road",
+    )
+
+    assert "Turn 2" in preview
+    assert "Next choice: Take the east road" in preview
+    assert "3 future path(s)" in preview
+    assert "2 item(s) carried" in preview
+
+
+def test_story_map_label_marks_branch_restore_turns() -> None:
+    label = NavigationMixin._format_story_map_label(
+        scene_id="scene-2",
+        narrative="You return to the crossroads.",
+        mood="heroic",
+        current_scene_id="scene-3",
+        branch_targets={"scene-2": [2, 2, 4]},
+    )
+
+    assert "[H]" in label
+    assert "⟲ T2, 4" in label
+
+
+def test_story_map_label_marks_current_scene_restore_turns() -> None:
+    label = NavigationMixin._format_story_map_label(
+        scene_id="scene-2",
+        narrative="You return to the crossroads.",
+        mood="heroic",
+        current_scene_id="scene-2",
+        branch_targets={"scene-2": [2]},
+    )
+
+    assert "[reverse]" in label
+    assert "⟲ T2" in label

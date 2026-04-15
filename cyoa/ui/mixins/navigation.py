@@ -16,6 +16,36 @@ class NavigationMixin:
     """Mixin for app navigation and branching."""
 
     @staticmethod
+    def _format_story_map_label(
+        scene_id: str,
+        narrative: str,
+        mood: str,
+        current_scene_id: str | None,
+        branch_targets: dict[str, list[int]],
+    ) -> str:
+        """Render a map label with mood and branch restore markers."""
+        mood_map = {
+            "mysterious": ("M", "magenta"),
+            "heroic": ("H", "yellow"),
+            "combat": ("C", "red"),
+            "ethereal": ("E", "cyan"),
+            "dark": ("D", "gray"),
+            "grimy": ("G", "green"),
+            "default": ("N", "white"),
+        }
+        marker, color = mood_map.get(mood, mood_map["default"])
+        preview = narrative[:20].replace("\\n", " ").strip() + "..."
+        branch_marker = ""
+        restored_turns = branch_targets.get(scene_id, [])
+        if restored_turns:
+            unique_turns = ", ".join(str(turn) for turn in sorted(set(restored_turns)))
+            branch_marker = f" [cyan]⟲ T{unique_turns}[/cyan]"
+
+        if scene_id == current_scene_id:
+            return f"[b][reverse][{marker}] {preview}[/reverse][/b]{branch_marker}"
+        return f"[{color}][{marker}][/{color}] {preview}{branch_marker}"
+
+    @staticmethod
     def _trim_story_segments_for_undo(host: Any) -> None:
         """Drop the latest turn and its preceding branch/choice marker."""
         while host._story_segments and host._story_segments[-1].get("kind") == "story_turn":
@@ -282,31 +312,27 @@ class NavigationMixin:
         nodes = tree_data.get("nodes", {})
         edges = tree_data.get("edges", {})
         root_id = tree_data.get("root_id")
+        branch_targets: dict[str, list[int]] = {}
+        for entry in engine.state.timeline_metadata:
+            if entry.get("kind") != "branch_restore":
+                continue
+            target_scene_id = entry.get("target_scene_id")
+            restored_turn = entry.get("restored_turn")
+            if isinstance(target_scene_id, str) and isinstance(restored_turn, int):
+                branch_targets.setdefault(target_scene_id, []).append(restored_turn)
 
         if not root_id:
             return
 
         def add_children(parent_node: Any, scene_id: str) -> None:
             scene = nodes[scene_id]
-            mood = scene.get("mood", "default")
-
-            # Compact mood markers for consistent visual language.
-            mood_map = {
-                "mysterious": ("M", "magenta"),
-                "heroic": ("H", "yellow"),
-                "combat": ("C", "red"),
-                "ethereal": ("E", "cyan"),
-                "dark": ("D", "gray"),
-                "grimy": ("G", "green"),
-                "default": ("N", "white"),
-            }
-            marker, color = mood_map.get(mood, mood_map["default"])
-
-            preview = scene["narrative"][:20].replace("\\n", " ").strip() + "..."
-            if scene_id == engine.state.current_scene_id:
-                label = f"[b][reverse][{marker}] {preview}[/reverse][/b]"
-            else:
-                label = f"[{color}][{marker}][/{color}] {preview}"
+            label = self._format_story_map_label(
+                scene_id=scene_id,
+                narrative=scene["narrative"],
+                mood=scene.get("mood", "default"),
+                current_scene_id=engine.state.current_scene_id,
+                branch_targets=branch_targets,
+            )
 
             tree_node = parent_node.add(label, expand=True)
 
