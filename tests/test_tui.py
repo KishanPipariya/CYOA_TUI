@@ -1011,6 +1011,63 @@ async def test_restore_from_save_ignores_branch_state_without_structured_timelin
         ]
 
 
+@pytest.mark.asyncio
+async def test_branch_journal_entries_track_rendered_branch_turn(mock_app_dependencies):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    history = {
+        "scenes": [
+            {
+                "id": "scene-1",
+                "narrative": "You awaken in a test dungeon.",
+                "available_choices": ["Go North", "Go South"],
+                "inventory": ["Broken Sword"],
+                "player_stats": {"health": 100, "gold": 0, "reputation": 0},
+            },
+            {
+                "id": "scene-2",
+                "narrative": "You went North.",
+                "available_choices": ["Open Door", "Go Back"],
+                "inventory": ["Broken Sword", "Health Potion"],
+                "player_stats": {"health": 90, "gold": 50, "reputation": 0},
+            },
+        ],
+        "choices": ["Go North"],
+    }
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        app.action_skip_typewriter()
+
+        await pilot.press("1")
+        await pilot.pause(1.0)
+        app.action_skip_typewriter()
+
+        app.restore_to_scene(idx=1, history=history)
+        await pilot.pause(0.3)
+
+        journal_items = list(app.query_one("#journal-list", ListView).children)
+        assert len(journal_items) == 2
+        branch_item = journal_items[-1]
+        assert "Timeline fracture" in branch_item.query_one(Label).render().plain
+        assert branch_item.scene_index == 2
+
+        app._jump_to_story_turn(branch_item.scene_index)
+        await pilot.pause(0.1)
+
+        story_turns = list(app.query_one("#story-container").query(".story-turn"))
+        assert len(story_turns) == 3
+        assert app._current_turn_widget is story_turns[2]
+
+        await pilot.press("1")
+        await pilot.pause(1.0)
+        app.action_skip_typewriter()
+
+        journal_items = list(app.query_one("#journal-list", ListView).children)
+        latest_choice = journal_items[-1]
+        assert latest_choice.scene_index == 2
+
+
 def test_branch_screen_scene_preview_includes_choice_and_state_metadata() -> None:
     preview = BranchScreen._build_scene_preview(
         {

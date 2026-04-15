@@ -271,6 +271,14 @@ class CYOAApp(
                 return
         self._append_story_segment("story_turn", text)
 
+    def _current_story_turn_index(self) -> int:
+        """Return the rendered story-turn index for the active turn widget."""
+        story_turns = list(self.query_one("#story-container").query(".story-turn"))
+        try:
+            return max(0, story_turns.index(self._current_turn_widget))
+        except ValueError:
+            return max(0, len(story_turns) - 1)
+
     @work(exclusive=True)
     async def initialize_and_start(self, model_path: str) -> None:
         """Load model and start the story engine."""

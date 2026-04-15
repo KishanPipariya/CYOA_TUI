@@ -236,6 +236,7 @@ class RenderingMixin:
 
         choice = host.engine.state.current_node.choices[choice_idx]
         choice_text = choice.text
+        rendered_turn_index = host._current_story_turn_index()
 
         # 1. Instant UI feedback
         host.action_skip_typewriter()
@@ -270,7 +271,7 @@ class RenderingMixin:
         journal_list.append(
             JournalListItem(
                 Label(journal_entry),
-                scene_index=max(0, host.engine.state.turn_count - 1),
+                scene_index=rendered_turn_index,
                 entry_kind="choice",
                 label_text=journal_entry,
             )

@@ -16,6 +16,19 @@ class NavigationMixin:
     """Mixin for app navigation and branching."""
 
     @staticmethod
+    def _collect_branch_targets(timeline_metadata: list[dict[str, Any]]) -> dict[str, list[int]]:
+        """Group branch restore metadata by target scene id for story-map markers."""
+        branch_targets: dict[str, list[int]] = {}
+        for entry in timeline_metadata:
+            if entry.get("kind") != "branch_restore":
+                continue
+            target_scene_id = entry.get("target_scene_id")
+            restored_turn = entry.get("restored_turn")
+            if isinstance(target_scene_id, str) and isinstance(restored_turn, int):
+                branch_targets.setdefault(target_scene_id, []).append(restored_turn)
+        return branch_targets
+
+    @staticmethod
     def _format_story_map_label(
         scene_id: str,
         narrative: str,
@@ -274,7 +287,7 @@ class NavigationMixin:
         journal_list.append(
             JournalListItem(
                 Label(f"Timeline fracture → resumed from Turn {idx + 1}"),
-                scene_index=idx,
+                scene_index=host._current_story_turn_index(),
                 entry_kind="branch",
                 label_text=f"Timeline fracture → resumed from Turn {idx + 1}",
             )
@@ -312,14 +325,7 @@ class NavigationMixin:
         nodes = tree_data.get("nodes", {})
         edges = tree_data.get("edges", {})
         root_id = tree_data.get("root_id")
-        branch_targets: dict[str, list[int]] = {}
-        for entry in engine.state.timeline_metadata:
-            if entry.get("kind") != "branch_restore":
-                continue
-            target_scene_id = entry.get("target_scene_id")
-            restored_turn = entry.get("restored_turn")
-            if isinstance(target_scene_id, str) and isinstance(restored_turn, int):
-                branch_targets.setdefault(target_scene_id, []).append(restored_turn)
+        branch_targets = self._collect_branch_targets(engine.state.timeline_metadata)
 
         if not root_id:
             return
