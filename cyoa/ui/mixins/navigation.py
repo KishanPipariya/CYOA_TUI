@@ -15,6 +15,15 @@ logger = logging.getLogger(__name__)
 class NavigationMixin:
     """Mixin for app navigation and branching."""
 
+    @staticmethod
+    def _trim_story_segments_for_undo(host: Any) -> None:
+        """Drop the latest turn and its preceding branch/choice marker."""
+        while host._story_segments and host._story_segments[-1].get("kind") == "story_turn":
+            host._story_segments.pop()
+            break
+        if host._story_segments and host._story_segments[-1].get("kind") in {"player_choice", "branch_marker"}:
+            host._story_segments.pop()
+
     @work(exclusive=True)
     async def action_restart(self) -> None:
         """Reset story state via the engine."""
@@ -119,11 +128,7 @@ class NavigationMixin:
             host._current_turn_text = host._current_story
             host._current_turn_widget.update(host._current_turn_text)
 
-        while host._story_segments and host._story_segments[-1].get("kind") == "story_turn":
-            host._story_segments.pop()
-            break
-        if host._story_segments and host._story_segments[-1].get("kind") in {"player_choice", "branch_marker"}:
-            host._story_segments.pop()
+        self._trim_story_segments_for_undo(host)
         if not host._story_segments:
             host._reset_story_segments(host._current_story)
         else:

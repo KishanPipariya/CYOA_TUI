@@ -17,6 +17,120 @@ class PersistenceMixin:
     """Mixin for save/load game persistence."""
 
     @staticmethod
+    def _clear_restore_runtime_state(host: object, app: object) -> None:
+        """Stop transient workers and buffered text before hydrating a save."""
+        textual_app = as_textual_app(app)
+        mixin_host = as_mixin_host(host)
+        textual_app.workers.cancel_group(textual_app, "speculation")
+        mixin_host._is_typing = False
+        mixin_host._typewriter_active_chunk.clear()
+        while True:
+            try:
+                mixin_host._typewriter_queue.get_nowait()
+            except (asyncio.QueueEmpty, Empty, AttributeError):
+                break
+
+    def _restore_story_state(self, host: object, ui_state: dict[str, object]) -> None:
+        """Restore flattened and structured story text from saved UI state."""
+        mixin_host = as_mixin_host(host)
+        current_story_text = ui_state.get("current_story_text")
+        story_segments = self._coerce_story_segments(ui_state.get("story_segments"))
+        if story_segments:
+            mixin_host._story_segments = [
+                {"kind": segment["kind"], "text": segment["text"]}
+                for segment in story_segments
+            ]
+            mixin_host._current_story = self._render_story_segments(story_segments) or constants.LOADING_ART
+            current_turn_from_segments = next(
+                (
+                    segment["text"]
+                    for segment in reversed(story_segments)
+                    if segment["kind"] == "story_turn"
+                ),
+                "",
+            )
+        else:
+            mixin_host._current_story = (
+                current_story_text
+                if isinstance(current_story_text, str) and current_story_text
+                else constants.LOADING_ART
+            )
+            current_turn_from_segments = ""
+            mixin_host._reset_story_segments(mixin_host._current_story)
+
+        current_turn_text = ui_state.get("current_turn_text")
+        mixin_host._current_turn_text = (
+            current_turn_text
+            if isinstance(current_turn_text, str)
+            else current_turn_from_segments or mixin_host._current_story
+        )
+        mixin_host._update_current_story_segment(mixin_host._current_turn_text)
+        mixin_host._loading_suffix_shown = False
+        mood = ui_state.get("mood")
+        mixin_host.mood = mood if isinstance(mood, str) else "default"
+
+    def _restore_story_widgets(self, host: object, app: object) -> None:
+        """Rebuild the story pane from saved structured segments."""
+        textual_app = as_textual_app(app)
+        mixin_host = as_mixin_host(host)
+        container = textual_app.query_one("#story-container", VerticalScroll)
+        existing_markdown = list(container.query(Markdown))
+        reusable_turn = existing_markdown[0] if existing_markdown else None
+        for md in existing_markdown[1:]:
+            md.remove()
+
+        saved_segments = self._coerce_story_segments(mixin_host._story_segments)
+        story_turns: list[Markdown] = []
+        for index, segment in enumerate(saved_segments):
+            kind = segment["kind"]
+            text = segment["text"]
+            if index == 0 and reusable_turn is not None and kind == "story_turn":
+                reusable_turn.set_classes("story-turn")
+                reusable_turn.update(text)
+                mounted = reusable_turn
+                story_turns.append(mounted)
+                continue
+            if kind in {"player_choice", "branch_marker"}:
+                mounted = Markdown(text, classes="player-choice")
+            else:
+                mounted = Markdown(text, classes="story-turn")
+                story_turns.append(mounted)
+            container.mount(mounted, before="#scene-art")
+
+        if story_turns:
+            mixin_host._current_turn_widget = story_turns[-1]
+        else:
+            new_turn = Markdown(mixin_host._current_turn_text, classes="story-turn")
+            container.mount(new_turn, before="#scene-art")
+            mixin_host._current_turn_widget = new_turn
+
+        mixin_host._scroll_to_bottom()
+
+    def _restore_journal_and_panels(self, app: object, ui_state: dict[str, object]) -> None:
+        """Restore journal entries and side-panel visibility from saved UI state."""
+        textual_app = as_textual_app(app)
+        journal_list = textual_app.query_one("#journal-list", ListView)
+        journal_list.clear()
+        for entry in self._coerce_journal_entries(ui_state.get("journal_entries")):
+            label = entry.get("label")
+            entry_kind = entry.get("entry_kind")
+            journal_list.append(
+                JournalListItem(
+                    Label(label if isinstance(label, str) and label else "Unknown Turn"),
+                    scene_index=self._coerce_scene_index(entry.get("scene_index", 0)),
+                    entry_kind=entry_kind if isinstance(entry_kind, str) else "choice",
+                    label_text=label if isinstance(label, str) and label else "Unknown Turn",
+                )
+            )
+
+        journal_panel = textual_app.query_one("#journal-panel", Container)
+        story_map_panel = textual_app.query_one("#story-map-panel", Container)
+        journal_collapsed = ui_state.get("journal_panel_collapsed")
+        story_map_collapsed = ui_state.get("story_map_panel_collapsed")
+        journal_panel.set_class(journal_collapsed is not False, "panel-collapsed")
+        story_map_panel.set_class(story_map_collapsed is not False, "panel-collapsed")
+
+    @staticmethod
     def _coerce_ui_state(payload: object) -> dict[str, object]:
         """Normalize optional UI save data so partial files still restore safely."""
         if not isinstance(payload, dict):
@@ -183,89 +297,11 @@ class PersistenceMixin:
         if not host.engine:
             return
 
-        # Cancel speculative generation before hydrating; keep core UI workers alive.
-        app.workers.cancel_group(app, "speculation")
-        host._is_typing = False
-        host._typewriter_active_chunk.clear()
-        while True:
-            try:
-                host._typewriter_queue.get_nowait()
-            except (asyncio.QueueEmpty, Empty, AttributeError):
-                break
-
+        self._clear_restore_runtime_state(host, app)
         ui_state = self._coerce_ui_state(data.get("ui_state"))
         host.engine.load_save_data(data)
-
-        current_story_text = ui_state.get("current_story_text")
-        story_segments = self._coerce_story_segments(ui_state.get("story_segments"))
-        if story_segments:
-            host._story_segments = [
-                {"kind": segment["kind"], "text": segment["text"]}
-                for segment in story_segments
-            ]
-            story_text = ""
-            current_turn_from_segments = ""
-            for segment in story_segments:
-                if segment["kind"] == "player_choice":
-                    if story_text:
-                        story_text += "\n\n"
-                    story_text += f"> {segment['text']}\n\n---\n\n"
-                elif segment["kind"] == "branch_marker":
-                    story_text += f"\n\n***\n\n{segment['text']}"
-                else:
-                    story_text += segment["text"]
-                    current_turn_from_segments = segment["text"]
-            host._current_story = story_text or constants.LOADING_ART
-        else:
-            host._current_story = (
-                current_story_text
-                if isinstance(current_story_text, str) and current_story_text
-                else constants.LOADING_ART
-            )
-            current_turn_from_segments = ""
-            host._reset_story_segments(host._current_story)
-        current_turn_text = ui_state.get("current_turn_text")
-        host._current_turn_text = (
-            current_turn_text
-            if isinstance(current_turn_text, str)
-            else current_turn_from_segments or host._current_story
-        )
-        host._update_current_story_segment(host._current_turn_text)
-        host._loading_suffix_shown = False
-        mood = ui_state.get("mood")
-        host.mood = mood if isinstance(mood, str) else "default"
-
-        # Sync UI
-        container = app.query_one("#story-container", VerticalScroll)
-        existing_markdown = list(container.query(Markdown))
-        reusable_turn = existing_markdown[0] if existing_markdown else None
-        for md in existing_markdown[1:]:
-            md.remove()
-        story_turns: list[Markdown] = []
-        for index, segment in enumerate(host._story_segments):
-            kind = segment.get("kind")
-            text = segment.get("text", "")
-            if index == 0 and reusable_turn is not None and kind == "story_turn":
-                reusable_turn.set_classes("story-turn")
-                reusable_turn.update(str(text))
-                mounted = reusable_turn
-                story_turns.append(mounted)
-                continue
-            if kind in {"player_choice", "branch_marker"}:
-                mounted = Markdown(str(text), classes="player-choice")
-            else:
-                mounted = Markdown(str(text), classes="story-turn")
-                story_turns.append(mounted)
-            container.mount(mounted, before="#scene-art")
-
-        if story_turns:
-            host._current_turn_widget = story_turns[-1]
-        else:
-            new_turn = Markdown(host._current_turn_text, classes="story-turn")
-            container.mount(new_turn, before="#scene-art")
-            host._current_turn_widget = new_turn
-
-        host._scroll_to_bottom()
+        self._restore_story_state(host, ui_state)
+        self._restore_story_widgets(host, app)
 
         # U8 Fix: If loaded node is empty (error case), provide a way out
         choices_container = app.query_one("#choices-container", Container)
@@ -274,27 +310,7 @@ class PersistenceMixin:
             host._mount_choice_buttons(host.engine.state.current_node, choices_container, False)
         else:
             choices_container.mount(Button("✦ Start a New Adventure", id="btn-new-adventure", variant="success"))
-
-        journal_list = app.query_one("#journal-list", ListView)
-        journal_list.clear()
-        for entry in self._coerce_journal_entries(ui_state.get("journal_entries")):
-            label = entry.get("label")
-            entry_kind = entry.get("entry_kind")
-            journal_list.append(
-                JournalListItem(
-                    Label(label if isinstance(label, str) and label else "Unknown Turn"),
-                    scene_index=self._coerce_scene_index(entry.get("scene_index", 0)),
-                    entry_kind=entry_kind if isinstance(entry_kind, str) else "choice",
-                    label_text=label if isinstance(label, str) and label else "Unknown Turn",
-                )
-            )
-
-        journal_panel = app.query_one("#journal-panel", Container)
-        story_map_panel = app.query_one("#story-map-panel", Container)
-        journal_collapsed = ui_state.get("journal_panel_collapsed")
-        story_map_collapsed = ui_state.get("story_map_panel_collapsed")
-        journal_panel.set_class(journal_collapsed is not False, "panel-collapsed")
-        story_map_panel.set_class(story_map_collapsed is not False, "panel-collapsed")
+        self._restore_journal_and_panels(app, ui_state)
 
         app.notify(
             f"Loaded save from Turn {host.engine.state.turn_count}.",

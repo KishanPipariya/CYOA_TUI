@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import TypedDict
+from typing import Any, TypedDict, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -26,12 +26,12 @@ class FakeMetric:
 class FakeSpan:
     name: str
     attributes: dict[str, object]
-    events: list[tuple[str, dict[str, float]]] = field(default_factory=list)
+    events: list[tuple[str, dict[str, object]]] = field(default_factory=list)
     exceptions: list[BaseException] = field(default_factory=list)
     status: obs.Status | None = None
     ended: bool = False
 
-    def add_event(self, name: str, attributes: dict[str, float] | None = None) -> None:
+    def add_event(self, name: str, attributes: dict[str, object] | None = None) -> None:
         self.events.append((name, attributes or {}))
 
     def record_exception(self, exc: BaseException) -> None:
@@ -277,9 +277,10 @@ def test_llm_observed_session_ignores_duplicate_first_token_reports(
     session.report_first_token()
 
     assert len(fake_telemetry["ttft_histogram"].records) == 1
-    assert fake_telemetry["tracer"].spans[0].events == [
-        ("first_token", {"ttft_ms": pytest.approx(200.0)})
-    ]
+    assert len(fake_telemetry["tracer"].spans[0].events) == 1
+    event_name, event_attributes = fake_telemetry["tracer"].spans[0].events[0]
+    assert event_name == "first_token"
+    assert event_attributes["ttft_ms"] == pytest.approx(200.0)
 
 
 def test_llm_observed_session_warns_when_end_called_before_start(
@@ -287,12 +288,13 @@ def test_llm_observed_session_warns_when_end_called_before_start(
     fake_telemetry: FakeTelemetry,
 ) -> None:
     session = obs.LLMObservedSession(model_name="mock-model", task="generation")
-    session.span = FakeSpan(name="llm.generate.generation", attributes={})
+    session.span = cast(Any, FakeSpan(name="llm.generate.generation", attributes={}))
 
     with caplog.at_level("WARNING"):
         session.end()
 
     assert "LLMObservedSession ended before start time was initialized" in caplog.text
+    assert isinstance(session.span, FakeSpan)
     assert session.span.ended is True
     assert fake_telemetry["success_counter"].adds == []
     assert fake_telemetry["failure_counter"].adds == []
@@ -314,20 +316,23 @@ def test_setup_observability_without_otlp_endpoint(
     meter_provider = MagicMock()
     set_tracer_provider = MagicMock()
     set_meter_provider = MagicMock()
+    create_resource = MagicMock(return_value="resource")
+    tracer_provider_factory = MagicMock(return_value=tracer_provider)
+    meter_provider_factory = MagicMock(return_value=meter_provider)
 
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
-    monkeypatch.setattr(obs.Resource, "create", MagicMock(return_value="resource"))
-    monkeypatch.setattr(obs, "TracerProvider", MagicMock(return_value=tracer_provider))
-    monkeypatch.setattr(obs, "MeterProvider", MagicMock(return_value=meter_provider))
+    monkeypatch.setattr(obs.Resource, "create", create_resource)
+    monkeypatch.setattr(obs, "TracerProvider", tracer_provider_factory)
+    monkeypatch.setattr(obs, "MeterProvider", meter_provider_factory)
     monkeypatch.setattr(obs.trace, "set_tracer_provider", set_tracer_provider)
     monkeypatch.setattr(obs.metrics, "set_meter_provider", set_meter_provider)
 
     with caplog.at_level("INFO"):
         obs.setup_observability()
 
-    obs.Resource.create.assert_called_once_with({"service.name": obs.SERVICE_NAME})
-    obs.TracerProvider.assert_called_once_with(resource="resource")
-    obs.MeterProvider.assert_called_once_with(resource="resource", metric_readers=[])
+    create_resource.assert_called_once_with({"service.name": obs.SERVICE_NAME})
+    tracer_provider_factory.assert_called_once_with(resource="resource")
+    meter_provider_factory.assert_called_once_with(resource="resource", metric_readers=[])
     tracer_provider.add_span_processor.assert_not_called()
     set_tracer_provider.assert_called_once_with(tracer_provider)
     set_meter_provider.assert_called_once_with(meter_provider)
@@ -346,18 +351,25 @@ def test_setup_observability_with_otlp_endpoint(
     metric_reader = MagicMock()
     set_tracer_provider = MagicMock()
     set_meter_provider = MagicMock()
+    create_resource = MagicMock(return_value="resource")
+    tracer_provider_factory = MagicMock(return_value=tracer_provider)
+    meter_provider_factory = MagicMock(return_value=meter_provider)
+    span_exporter_factory = MagicMock(return_value=span_exporter)
+    span_processor_factory = MagicMock(return_value=span_processor)
+    metric_exporter_factory = MagicMock(return_value=metric_exporter)
+    metric_reader_factory = MagicMock(return_value=metric_reader)
 
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel:4318")
-    monkeypatch.setattr(obs.Resource, "create", MagicMock(return_value="resource"))
-    monkeypatch.setattr(obs, "TracerProvider", MagicMock(return_value=tracer_provider))
-    monkeypatch.setattr(obs, "MeterProvider", MagicMock(return_value=meter_provider))
-    monkeypatch.setattr(obs, "OTLPSpanExporter", MagicMock(return_value=span_exporter))
-    monkeypatch.setattr(obs, "BatchSpanProcessor", MagicMock(return_value=span_processor))
-    monkeypatch.setattr(obs, "OTLPMetricExporter", MagicMock(return_value=metric_exporter))
+    monkeypatch.setattr(obs.Resource, "create", create_resource)
+    monkeypatch.setattr(obs, "TracerProvider", tracer_provider_factory)
+    monkeypatch.setattr(obs, "MeterProvider", meter_provider_factory)
+    monkeypatch.setattr(obs, "OTLPSpanExporter", span_exporter_factory)
+    monkeypatch.setattr(obs, "BatchSpanProcessor", span_processor_factory)
+    monkeypatch.setattr(obs, "OTLPMetricExporter", metric_exporter_factory)
     monkeypatch.setattr(
         obs,
         "PeriodicExportingMetricReader",
-        MagicMock(return_value=metric_reader),
+        metric_reader_factory,
     )
     monkeypatch.setattr(obs.trace, "set_tracer_provider", set_tracer_provider)
     monkeypatch.setattr(obs.metrics, "set_meter_provider", set_meter_provider)
@@ -365,12 +377,12 @@ def test_setup_observability_with_otlp_endpoint(
     with caplog.at_level("INFO"):
         obs.setup_observability()
 
-    obs.OTLPSpanExporter.assert_called_once_with()
-    obs.BatchSpanProcessor.assert_called_once_with(span_exporter)
+    span_exporter_factory.assert_called_once_with()
+    span_processor_factory.assert_called_once_with(span_exporter)
     tracer_provider.add_span_processor.assert_called_once_with(span_processor)
-    obs.OTLPMetricExporter.assert_called_once_with()
-    obs.PeriodicExportingMetricReader.assert_called_once_with(metric_exporter)
-    obs.MeterProvider.assert_called_once_with(
+    metric_exporter_factory.assert_called_once_with()
+    metric_reader_factory.assert_called_once_with(metric_exporter)
+    meter_provider_factory.assert_called_once_with(
         resource="resource",
         metric_readers=[metric_reader],
     )
