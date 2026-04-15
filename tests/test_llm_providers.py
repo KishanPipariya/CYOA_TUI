@@ -20,6 +20,7 @@ from cyoa.llm.pipeline import (
     SummarizationComponent,
     SystemMessageComponent,
 )
+from cyoa.llm.broker import MemoryEntry
 from cyoa.llm.providers import (
     LlamaCppProvider,
     OllamaProvider,
@@ -588,6 +589,29 @@ def test_memory_component_formats_multiple_memories_and_noop_on_empty() -> None:
     rendered = component.transform(SimpleNamespace(memories=["m1", "m2"]), [])
     assert "<memory_retrieval>" in rendered[0]["content"]
     assert "\n---\n" in rendered[0]["content"]
+
+    structured = component.transform(
+        SimpleNamespace(
+            memories=[],
+            memory_entries=[
+                MemoryEntry(
+                    text="The gate shudders from the last explosion.",
+                    category="scene",
+                    reason="Recent scene continuity.",
+                ),
+                MemoryEntry(
+                    text="Mira still distrusts the regent.",
+                    category="entity",
+                    source="Mira",
+                    reason="Mira is present in the current scene.",
+                ),
+            ],
+        ),
+        [],
+    )
+    assert "[Scene Memory]" in structured[0]["content"]
+    assert "[Entity Memory: Mira]" in structured[0]["content"]
+    assert "Reason: Mira is present in the current scene." in structured[0]["content"]
 
 
 def test_summarization_component_renders_all_levels_and_noops_without_data() -> None:

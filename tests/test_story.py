@@ -830,6 +830,7 @@ class TestStreamingCallback:
         ctx.inject_memory(["You once saw a torch flicker."])
 
         assert len(ctx.memories) == 1
+        assert len(ctx.memory_entries) == 1
         assert "torch flicker" in ctx.memories[0]
 
     def test_inject_memory_empty_is_noop(self):

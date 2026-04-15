@@ -27,18 +27,34 @@ async def test_retrieve_memories_returns_empty_without_current_narrative() -> No
     result = await manager.retrieve_memories(None, StoryContext("Start"))
 
     assert result == []
+    memory.get_recent_async.assert_not_called()
     memory.query_async.assert_not_called()
     npc_memory.query_async.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_retrieve_memories_injects_and_deduplicates_npc_memories() -> None:
+async def test_retrieve_memories_separates_scene_chapter_and_entity_memories() -> None:
     memory = MagicMock()
-    memory.query_async = AsyncMock(return_value=["old oath", "hidden vault"])
+    memory.get_recent_async = AsyncMock(
+        return_value=[
+            "The torchlight fades behind the party.",
+            "Mira warns that the gate is trapped.",
+        ]
+    )
+    memory.query_async = AsyncMock(
+        return_value=[
+            "Mira warns that the gate is trapped.",
+            "An old oath binds Captain Varo to the salt vault.",
+            "The hidden vault lies beneath the drowned chapel.",
+        ]
+    )
     npc_memory = MagicMock()
     npc_memory.query_async = AsyncMock(
         side_effect=[
-            ["hidden vault", "Mira distrusts the crown"],
+            [
+                "An old oath binds Captain Varo to the salt vault.",
+                "Mira distrusts the crown and the regent.",
+            ],
             ["Captain Varo lost the map"],
         ]
     )
@@ -49,12 +65,25 @@ async def test_retrieve_memories_injects_and_deduplicates_npc_memories() -> None
     result = await manager.retrieve_memories(node, ctx)
 
     assert result == [
-        "old oath",
-        "hidden vault",
-        "Mira distrusts the crown",
+        "The torchlight fades behind the party.",
+        "Mira warns that the gate is trapped.",
+        "An old oath binds Captain Varo to the salt vault.",
+        "The hidden vault lies beneath the drowned chapel.",
+        "Mira distrusts the crown and the regent.",
         "Captain Varo lost the map",
     ]
     assert ctx.memories == result
+    assert [entry.category for entry in ctx.memory_entries] == [
+        "scene",
+        "scene",
+        "chapter",
+        "chapter",
+        "entity",
+        "entity",
+    ]
+    assert ctx.memory_entries[4].source == "Mira"
+    assert ctx.memory_entries[5].source == "Captain Varo"
+    memory.get_recent_async.assert_awaited_once_with(n=2, exclude_text="The party enters the ruins.")
     memory.query_async.assert_awaited_once_with("The party enters the ruins.", n=3)
     assert npc_memory.query_async.await_args_list[0].args == ("Mira", "The party enters the ruins.")
     assert npc_memory.query_async.await_args_list[0].kwargs == {"n": 2}
@@ -63,6 +92,43 @@ async def test_retrieve_memories_injects_and_deduplicates_npc_memories() -> None
         "The party enters the ruins.",
     )
     assert npc_memory.query_async.await_args_list[1].kwargs == {"n": 2}
+
+
+@pytest.mark.asyncio
+async def test_retrieve_memories_filters_current_scene_duplicates() -> None:
+    memory = MagicMock()
+    memory.get_recent_async = AsyncMock(
+        return_value=[
+            "The party enters the ruins.",
+            "A bell tolls from the crypt.",
+        ]
+    )
+    memory.query_async = AsyncMock(
+        return_value=[
+            "The party enters the ruins.",
+            "A bell tolls from the crypt.",
+            "The crown was last seen in the marsh.",
+        ]
+    )
+    npc_memory = MagicMock()
+    npc_memory.query_async = AsyncMock(
+        return_value=[
+            "The party enters the ruins.",
+            "The crown was last seen in the marsh.",
+            "Mira hid the key beneath the altar.",
+        ]
+    )
+    manager = RAGManager(memory=memory, npc_memory=npc_memory)
+    ctx = StoryContext("Start")
+
+    result = await manager.retrieve_memories(_node(npcs_present=["Mira"]), ctx)
+
+    assert result == [
+        "A bell tolls from the crypt.",
+        "The crown was last seen in the marsh.",
+        "Mira hid the key beneath the altar.",
+    ]
+    assert [entry.category for entry in ctx.memory_entries] == ["scene", "chapter", "entity"]
 
 
 @pytest.mark.asyncio

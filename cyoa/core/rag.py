@@ -3,9 +3,30 @@ from typing import Any
 
 from cyoa.core.models import StoryNode
 from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
-from cyoa.llm.broker import StoryContext
+from cyoa.llm.broker import MemoryEntry, StoryContext
 
 logger = logging.getLogger(__name__)
+
+
+def _append_unique_memory(
+    text: str,
+    *,
+    category: str,
+    reason: str,
+    entries: list[MemoryEntry],
+    seen: set[str],
+    source: str | None = None,
+    exclude: set[str] | None = None,
+) -> None:
+    normalized = text.strip()
+    if not normalized:
+        return
+    if exclude and normalized in exclude:
+        return
+    if normalized in seen:
+        return
+    entries.append(MemoryEntry(text=normalized, category=category, reason=reason, source=source))
+    seen.add(normalized)
 
 
 class RAGManager:
@@ -32,19 +53,61 @@ class RAGManager:
         if not last_narrative:
             return []
 
-        # 1. Retrieve narrative-level memories
-        memories = await self.memory.query_async(last_narrative, n=3)
+        entries: list[MemoryEntry] = []
+        seen: set[str] = set()
+        excluded = {last_narrative.strip()}
 
-        # 2. Retrieve character-specific (NPC) memories
+        # 1. Retrieve short-term scene continuity from the latest prior scenes.
+        recent_memories = await self.memory.get_recent_async(n=2, exclude_text=last_narrative)
+        for memory in recent_memories:
+            _append_unique_memory(
+                memory,
+                category="scene",
+                reason="Recent scene continuity with the immediately preceding beats.",
+                entries=entries,
+                seen=seen,
+                exclude=excluded,
+            )
+
+        # 2. Retrieve longer-range chapter context via semantic matching.
+        chapter_memories = await self.memory.query_async(last_narrative, n=3)
+        for memory in chapter_memories:
+            _append_unique_memory(
+                memory,
+                category="chapter",
+                reason="Semantically relevant older chapter context for continuity.",
+                entries=entries,
+                seen=seen,
+                exclude=excluded,
+            )
+
+        # 3. Retrieve character-specific (NPC/entity) memories.
         if current_node and getattr(current_node, "npcs_present", None):
             for npc in current_node.npcs_present:
                 npc_mems = await self.npc_memory.query_async(npc, last_narrative, n=2)
                 for mem in npc_mems:
-                    if mem not in memories:
-                        memories.append(mem)
+                    _append_unique_memory(
+                        mem,
+                        category="entity",
+                        source=npc,
+                        reason=f"{npc} is present in the current scene.",
+                        entries=entries,
+                        seen=seen,
+                        exclude=excluded,
+                    )
 
-        # 3. Inject into the LLM context
-        story_context.inject_memory(memories)
+        memories = [entry.text for entry in entries]
+        for entry in entries:
+            logger.debug(
+                "Injected %s memory%s: %s | reason=%s",
+                entry.category,
+                f" ({entry.source})" if entry.source else "",
+                entry.text,
+                entry.reason,
+            )
+
+        # 4. Inject into the LLM context.
+        story_context.inject_memory(memories, memory_entries=entries)
         return memories
 
     async def index_node(

@@ -137,6 +137,34 @@ class MemoryComponent(PromptComponent, PromptComponentMixin):
     """Injects RAG memories into the system prompt."""
 
     def transform(self, context: Any, messages: list[dict[str, str]]) -> list[dict[str, str]]:
+        memory_entries = getattr(context, "memory_entries", [])
+        if memory_entries:
+            order = {"scene": 0, "chapter": 1, "entity": 2, "generic": 3}
+            lines = ["<memory_retrieval>"]
+            sorted_entries = sorted(
+                memory_entries,
+                key=lambda entry: (
+                    order.get(getattr(entry, "category", "generic"), 99),
+                    getattr(entry, "source", "") or "",
+                    getattr(entry, "text", ""),
+                ),
+            )
+            for i, entry in enumerate(sorted_entries):
+                category = getattr(entry, "category", "generic").title()
+                source = getattr(entry, "source", None)
+                reason = getattr(entry, "reason", "")
+                header = f"[{category} Memory]"
+                if source:
+                    header = f"[{category} Memory: {source}]"
+                lines.append(header)
+                lines.append(getattr(entry, "text", ""))
+                if reason:
+                    lines.append(f"Reason: {reason}")
+                if i < len(sorted_entries) - 1:
+                    lines.append("---")
+            lines.append("</memory_retrieval>")
+            return self._inject_into_system(messages, "\n".join(lines))
+
         memories = getattr(context, "memories", [])
         if not memories:
             return messages

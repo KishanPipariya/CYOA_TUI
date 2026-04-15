@@ -227,6 +227,13 @@ class NarrativeMemory:
 
         return await asyncio.to_thread(_sync_query)
 
+    async def get_recent_async(self, n: int = 2, *, exclude_text: str | None = None) -> list[str]:
+        """Return the most recent prior narratives for short-term continuity."""
+        entries = [item for item in self._fallback if item and item != exclude_text]
+        if not entries:
+            return []
+        return list(reversed(entries[-n:]))
+
 
 class NPCMemory:
     """

@@ -5,6 +5,7 @@ import os
 import pathlib
 from collections import OrderedDict
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import jinja2
@@ -55,6 +56,16 @@ SUMMARIZATION_THRESHOLD = float(
 logger = logging.getLogger(__name__)
 
 
+@dataclass(slots=True)
+class MemoryEntry:
+    """Structured memory injected into the prompt with retrieval rationale."""
+
+    text: str
+    category: str = "generic"
+    reason: str = ""
+    source: str | None = None
+
+
 class StoryContext:
     def __init__(
         self,
@@ -69,6 +80,7 @@ class StoryContext:
         self.inventory: list[str] = []
         self.player_stats: dict[str, int] = {}
         self.memories: list[str] = []
+        self.memory_entries: list[MemoryEntry] = []
         # Hierarchical Context Compression
         self.scene_summary: str | None = None
         self.chapter_summary: str | None = None
@@ -160,9 +172,17 @@ class StoryContext:
         """Calculate the total token count of the current message stack."""
         return count_messages_tokens(self.get_messages(), self.token_counter)
 
-    def inject_memory(self, memories: list[str]) -> None:
+    def inject_memory(
+        self,
+        memories: list[str],
+        memory_entries: list[MemoryEntry] | None = None,
+    ) -> None:
         """Store memories to be injected dynamically into the system prompt."""
-        self.memories = memories
+        self.memories = list(memories)
+        if memory_entries is None:
+            self.memory_entries = [MemoryEntry(text=mem) for mem in memories]
+        else:
+            self.memory_entries = list(memory_entries)
 
     def set_hierarchical_summary(
         self,
@@ -225,6 +245,7 @@ class StoryContext:
         new_ctx.inventory = list(self.inventory)
         new_ctx.player_stats = dict(self.player_stats)
         new_ctx.memories = list(self.memories)
+        new_ctx.memory_entries = list(self.memory_entries)
         new_ctx.scene_summary = self.scene_summary
         new_ctx.chapter_summary = self.chapter_summary
         new_ctx.arc_summary = self.arc_summary
