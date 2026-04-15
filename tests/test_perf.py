@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -130,3 +130,31 @@ async def test_process_turn_records_ttft_and_duration_guardrails(monkeypatch):
     assert failure_counter.adds == []
     assert engine.state.current_node is not None
     assert engine.state.current_node.narrative == "A torch sputters in the crypt."
+
+
+@pytest.mark.asyncio
+async def test_app_startup_records_latency_guardrail(monkeypatch):
+    perf_values: Iterator[float] = iter([10.0, 10.18])
+
+    startup_latency_histogram = _FakeMetric()
+    monkeypatch.setattr(obs, "startup_latency_histogram", startup_latency_histogram)
+    monkeypatch.setattr("cyoa.ui.app.time.perf_counter", lambda: next(perf_values))
+
+    app = CYOAApp(model_path="dummy.gguf")
+    app.show_loading = lambda selected_button_id=None: None
+    app.notify = lambda *args, **kwargs: None
+    app.query_one = MagicMock(return_value=MagicMock())  # type: ignore[method-assign]
+    app.generator = MagicMock()  # type: ignore[assignment]
+    app.generator.runtime_controls.return_value = {"preset": "balanced"}
+    app.engine = MagicMock()  # type: ignore[assignment]
+    app.engine.db = None
+    app.engine.rag = MagicMock()
+    app.engine.rag.memory.is_online = True
+    app.engine.initialize = AsyncMock()
+
+    await CYOAApp.initialize_and_start.__wrapped__(app, "dummy.gguf")
+
+    assert startup_latency_histogram.records == [
+        (pytest.approx(180.0), {"status": "success"})
+    ]
+    assert startup_latency_histogram.records[0][0] < 250.0

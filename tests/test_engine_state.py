@@ -5,7 +5,7 @@ import pytest
 
 from cyoa.core.engine import StoryEngine
 from cyoa.core.events import Events, bus
-from cyoa.core.models import Choice, StoryNode
+from cyoa.core.models import Choice, Objective, StoryNode
 from cyoa.core.state import GameState
 from cyoa.llm.broker import ModelBroker, StoryContext
 from cyoa.llm.providers import LLMProvider
@@ -237,6 +237,42 @@ def test_engine_load_save_data_ignores_malformed_optional_payloads():
     assert loaded.state.player_stats == {"health": 100, "gold": 4, "reputation": 0}
     assert loaded.state.current_node is None
     assert loaded.state.timeline_metadata == [{"kind": "branch_restore", "restored_turn": 3}]
+
+
+def test_engine_save_and_load_roundtrip_preserves_extended_world_state():
+    broker, _provider = _make_broker_with_mock_provider()
+    engine = StoryEngine(
+        broker=broker,
+        starting_prompt="Start",
+        initial_world_state={
+            "inventory": ["Torch"],
+            "player_stats": {"health": 95, "gold": 3, "reputation": 1},
+            "objectives": [{"id": "escape", "text": "Escape", "status": "active"}],
+            "faction_reputation": {"Wardens": -2},
+            "npc_affinity": {"Mira": 2},
+            "story_flags": ["cell_opened"],
+        },
+        initial_prompt_config={
+            "goals": ["Survive"],
+            "directives": ["Honor locked choices."],
+        },
+    )
+    engine.story_context = StoryContext("Start")
+    engine._apply_initial_state()
+    engine.state.current_node = _make_story_node("Node")
+
+    data = engine.get_save_data()
+
+    loaded = StoryEngine(broker=broker, starting_prompt="Start")
+    loaded.load_save_data(data)
+
+    assert loaded.state.objectives == [Objective(id="escape", text="Escape", status="active")]
+    assert loaded.state.faction_reputation == {"Wardens": -2}
+    assert loaded.state.npc_affinity == {"Mira": 2}
+    assert loaded.state.story_flags == {"cell_opened"}
+    assert loaded.story_context is not None
+    assert loaded.story_context.goals == ["Survive"]
+    assert loaded.story_context.directives == ["Honor locked choices."]
 
 
 @pytest.mark.asyncio

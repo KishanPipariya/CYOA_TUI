@@ -20,8 +20,14 @@ from cyoa.core.constants import (
     DEFAULT_LLM_SUMMARY_THRESHOLD,
     DEFAULT_LLM_TEMPERATURE,
 )
-from cyoa.core.models import Choice, ExtractionNode, NarratorNode, StoryNode
-from cyoa.core.observability import EngineObservedSession, record_repair_attempt
+from cyoa.core.models import Choice, ExtractionNode, NarratorNode, Objective, StoryNode
+from cyoa.core.observability import (
+    EngineObservedSession,
+    record_fallback_node,
+    record_provider_cache_state_restore,
+    record_provider_cache_state_save,
+    record_repair_attempt,
+)
 from cyoa.llm.pipeline import (
     DirectiveComponent,
     GoalComponent,
@@ -37,6 +43,7 @@ from cyoa.llm.providers import (
     LLMProvider,
     MockProvider,
     OllamaProvider,
+    ProviderCapabilities,
     count_messages_tokens,
 )
 
@@ -66,6 +73,21 @@ class MemoryEntry:
     source: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class GenerationPreset:
+    name: str
+    temperature: float
+    max_tokens: int
+    summary_max_tokens: int
+
+
+PRESETS: dict[str, GenerationPreset] = {
+    "balanced": GenerationPreset("balanced", temperature=0.6, max_tokens=512, summary_max_tokens=200),
+    "precise": GenerationPreset("precise", temperature=0.35, max_tokens=420, summary_max_tokens=160),
+    "cinematic": GenerationPreset("cinematic", temperature=0.85, max_tokens=640, summary_max_tokens=240),
+}
+
+
 class StoryContext:
     def __init__(
         self,
@@ -88,6 +110,10 @@ class StoryContext:
         # User/System goals and directives (injected into prompt via pipeline)
         self.goals: list[str] = []
         self.directives: list[str] = []
+        self.objectives: list[Objective] = []
+        self.faction_reputation: dict[str, int] = {}
+        self.npc_affinity: dict[str, int] = {}
+        self.story_flags: set[str] = set()
         # Hierarchy tracking
         self._scene_turn_count: int = 0
         self._chapter_scene_count: int = 0
@@ -184,6 +210,30 @@ class StoryContext:
         else:
             self.memory_entries = list(memory_entries)
 
+    def sync_world_state(
+        self,
+        *,
+        inventory: list[str] | None = None,
+        player_stats: dict[str, int] | None = None,
+        objectives: list[Objective] | None = None,
+        faction_reputation: dict[str, int] | None = None,
+        npc_affinity: dict[str, int] | None = None,
+        story_flags: set[str] | None = None,
+    ) -> None:
+        """Keep prompt state aligned with the engine's long-lived world state."""
+        if inventory is not None:
+            self.inventory = list(inventory)
+        if player_stats is not None:
+            self.player_stats = dict(player_stats)
+        if objectives is not None:
+            self.objectives = [objective.model_copy() for objective in objectives]
+        if faction_reputation is not None:
+            self.faction_reputation = dict(faction_reputation)
+        if npc_affinity is not None:
+            self.npc_affinity = dict(npc_affinity)
+        if story_flags is not None:
+            self.story_flags = set(story_flags)
+
     def set_hierarchical_summary(
         self,
         scene: str | None = None,
@@ -251,6 +301,10 @@ class StoryContext:
         new_ctx.arc_summary = self.arc_summary
         new_ctx.goals = list(self.goals)
         new_ctx.directives = list(self.directives)
+        new_ctx.objectives = [objective.model_copy() for objective in self.objectives]
+        new_ctx.faction_reputation = dict(self.faction_reputation)
+        new_ctx.npc_affinity = dict(self.npc_affinity)
+        new_ctx.story_flags = set(self.story_flags)
         new_ctx._scene_turn_count = self._scene_turn_count
         new_ctx._chapter_scene_count = self._chapter_scene_count
         # Reuse the same pipeline (shallow copy of list is fine if components are stateless or handled)
@@ -324,12 +378,15 @@ class ModelBroker:
         self._narrator_schema = NarratorNode.model_json_schema()
         self._extraction_schema = ExtractionNode.model_json_schema()
         self._schema = StoryNode.model_json_schema()
+        self._capabilities = self.provider.capabilities()
 
-        self._temperature = float(os.getenv("LLM_TEMPERATURE", str(DEFAULT_LLM_TEMPERATURE)))
-        self._max_tokens = int(os.getenv("LLM_MAX_TOKENS", str(DEFAULT_LLM_MAX_TOKENS)))
+        default_preset = os.getenv("LLM_PRESET", "balanced").strip().lower()
+        self._preset = PRESETS.get(default_preset, PRESETS["balanced"])
+        self._temperature = float(os.getenv("LLM_TEMPERATURE", str(self._preset.temperature)))
+        self._max_tokens = int(os.getenv("LLM_MAX_TOKENS", str(self._preset.max_tokens)))
         # Maximum tokens for the "Story So Far" summary paragraph.
         self._summary_max_tokens = int(
-            os.getenv("LLM_SUMMARY_MAX_TOKENS", str(DEFAULT_LLM_SUMMARY_MAX_TOKENS))
+            os.getenv("LLM_SUMMARY_MAX_TOKENS", str(self._preset.summary_max_tokens))
         )
         # Number of recursive repair attempts if JSON structure or schema fails
         self._repair_attempts = int(
@@ -342,7 +399,30 @@ class ModelBroker:
 
         # Architecture setting: Unified vs Judge pattern
         self.unified_mode = os.getenv("LLM_UNIFIED_MODE", "true").lower() == "true"
+        if "LLM_SUMMARY_MAX_TOKENS" not in os.environ and self._summary_max_tokens <= 0:
+            self._summary_max_tokens = DEFAULT_LLM_SUMMARY_MAX_TOKENS
 
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return self._capabilities
+
+    def runtime_controls(self) -> dict[str, float | int | str]:
+        return {
+            "preset": self._preset.name,
+            "temperature": self._temperature,
+            "max_tokens": self._max_tokens,
+            "summary_max_tokens": self._summary_max_tokens,
+        }
+
+    def cycle_generation_preset(self) -> dict[str, float | int | str]:
+        preset_names = list(PRESETS)
+        current_idx = preset_names.index(self._preset.name)
+        next_preset = PRESETS[preset_names[(current_idx + 1) % len(preset_names)]]
+        self._preset = next_preset
+        self._temperature = next_preset.temperature
+        self._max_tokens = next_preset.max_tokens
+        self._summary_max_tokens = next_preset.summary_max_tokens
+        return self.runtime_controls()
 
     def _create_provider_from_env(
         self, model_path: str | None = None, n_ctx: int | None = None
@@ -594,6 +674,11 @@ class ModelBroker:
             items_gained=extraction_node.items_gained,
             items_lost=extraction_node.items_lost,
             stat_updates=extraction_node.stat_updates,
+            objectives_updated=extraction_node.objectives_updated,
+            faction_updates=extraction_node.faction_updates,
+            npc_affinity_updates=extraction_node.npc_affinity_updates,
+            story_flags_set=extraction_node.story_flags_set,
+            story_flags_cleared=extraction_node.story_flags_cleared,
         )
 
     async def _run_unified_generation(
@@ -612,7 +697,7 @@ class ModelBroker:
 
         while attempts < max_attempts:
             try:
-                if attempts == 0 and stream and on_token_chunk is not None:
+                if attempts == 0 and stream and on_token_chunk is not None and self.capabilities.streaming_json:
                     content = await self._stream_with_callback_async(messages, on_token_chunk, self._schema)
                 else:
                     content = await self.provider.generate_json(
@@ -658,7 +743,7 @@ class ModelBroker:
 
         while attempts < max_attempts:
             try:
-                if attempts == 0 and stream and on_token_chunk is not None:
+                if attempts == 0 and stream and on_token_chunk is not None and self.capabilities.streaming_json:
                     content = await self._stream_with_callback_async(messages, on_token_chunk, self._narrator_schema)
                 else:
                     content = await self.provider.generate_json(
@@ -705,7 +790,8 @@ class ModelBroker:
                 "content": (
                     "You are the 'Judge' for a role-playing game. Your task is to extract "
                     "player state changes from the narrative text provided. "
-                    "Extract ONLY items gained, items lost, and stat updates (health, gold, reputation). "
+                    "Extract ONLY items gained, items lost, stat updates (health, gold, reputation), "
+                    "objective updates, faction shifts, NPC affinity changes, and story flag changes. "
                     "If the narrative doesn't mention a change, return an empty list or 0 for that field."
                 )
             },
@@ -729,6 +815,7 @@ class ModelBroker:
             return ExtractionNode()
 
     def _get_fallback_node(self) -> StoryNode:
+        record_fallback_node(reason="invalid_json")
         return StoryNode(
             narrative=(
                 "The universe encounters an anomaly (LLM failed to format its response). "
@@ -780,11 +867,18 @@ class ModelBroker:
 
     async def save_state_async(self) -> Any:
         """Save the provider's internal state (KV cache)."""
-        return await self.provider.save_state()
+        if not self.capabilities.state_transfer:
+            return None
+        state = await self.provider.save_state()
+        record_provider_cache_state_save(hit=state is not None)
+        return state
 
     async def load_state_async(self, state: Any) -> None:
         """Load a previously saved state (KV cache)."""
+        if not self.capabilities.state_transfer or state is None:
+            return
         await self.provider.load_state(state)
+        record_provider_cache_state_restore(hit=True)
 
     def close(self) -> None:
         """Shut down the underlying model provider."""

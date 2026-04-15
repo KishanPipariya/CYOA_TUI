@@ -8,7 +8,7 @@ from textual.widgets import Button, Label, ListView, Markdown
 from textual.worker import WorkerFailed
 
 from cyoa.core.events import EventBus, EventDispatchError, Events, bus
-from cyoa.core.models import Choice, StoryNode
+from cyoa.core.models import Choice, ChoiceRequirement, StoryNode
 from cyoa.ui.app import CYOAApp
 from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen
 from cyoa.ui.mixins.navigation import NavigationMixin
@@ -224,6 +224,53 @@ async def test_inventory_updates_on_item_gain_and_loss(mock_app_dependencies):
         inv_label = app.query_one("#inventory-label", Label)
         assert "Health Potion" not in inv_label.render().plain
         assert "Broken Sword" not in inv_label.render().plain
+
+
+@pytest.mark.asyncio
+async def test_status_display_shows_active_objectives(mock_app_dependencies):
+    app = CYOAApp(
+        model_path="dummy_path.gguf",
+        initial_world_state={
+            "objectives": [{"id": "escape", "text": "Escape the dungeon", "status": "active"}]
+        },
+    )
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        objectives_text = app.query_one("#objectives-label", Label).render().plain
+        assert "Escape the dungeon" in objectives_text
+
+
+@pytest.mark.asyncio
+async def test_locked_choices_render_disabled_and_block_selection(mock_app_dependencies):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        assert app.engine is not None
+        app.engine.state.story_flags.clear()
+        locked_node = StoryNode(
+            narrative="A sealed door bars the way.",
+            choices=[
+                Choice(
+                    text="Open the sigil door",
+                    requirements=ChoiceRequirement(flags=["sigil_unlocked"]),
+                ),
+                Choice(text="Wait"),
+            ],
+        )
+
+        app.turn_count = 42
+        app.engine.state.current_node = locked_node
+        app.display_node(locked_node)
+        await pilot.pause(0.1)
+
+        buttons = list(app.query_one("#choices-container", Container).query(Button))
+        assert buttons[0].disabled is True
+
+        current_story_before = app._current_story
+        await app._trigger_choice(0)
+        assert app._current_story == current_story_before
 
 
 @pytest.mark.asyncio

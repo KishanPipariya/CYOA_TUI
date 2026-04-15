@@ -2,6 +2,12 @@ name = "Dark Dungeon"
 description = "A classic dark fantasy dungeon crawl."
 accent_color = "blue"
 spinner_frames = ["[💀]", "[🦴]", "[💀]", "[🩸]"]
+goals = ["Escape the prison depth", "Identify who chained you here"]
+directives = ["Honor inventory and stat-based choice requirements.", "Track grim faction fallout."]
+opening_inventory = ["Rusted Shackle Pin"]
+story_flags = ["cell_awakening"]
+content_tags = ["dark_fantasy", "dungeon", "escape"]
+persona = "You are a brutal dark fantasy narrator. Choices should reflect scarcity, danger, and consequences."
 
 prompt = """You are a dark fantasy interactive fiction engine.
 Describe the starting scenario where the player wakes up in a cold, unfamiliar dungeon cell.
@@ -10,3 +16,19 @@ You MUST provide a creative 'title' for this new adventure in the JSON response.
 When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true and provide an empty choices list.
 Ensure your output is strictly valid JSON matching the requested schema.
 """
+
+[opening_stats]
+health = 90
+gold = 0
+reputation = -1
+
+[[opening_objectives]]
+id = "escape_cell"
+text = "Find a way out of the dungeon cell."
+status = "active"
+
+[faction_reputation]
+"Dungeon Wardens" = -2
+
+[npc_affinity]
+"Unknown Prisoner" = 1

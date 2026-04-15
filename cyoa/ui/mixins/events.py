@@ -94,6 +94,20 @@ class EventsMixin:
             return
         app.query_one(StatusDisplay).inventory = list(inventory)
 
+    def _handle_world_state_updated(self, state: dict[str, object]) -> None:
+        app = as_textual_app(self)
+        if not as_mixin_host(self).is_runtime_active():
+            return
+        objectives = []
+        for objective in state.get("objectives", []) if isinstance(state, dict) else []:
+            if not isinstance(objective, dict):
+                continue
+            text = objective.get("text")
+            status = objective.get("status")
+            if isinstance(text, str) and isinstance(status, str) and status == "active":
+                objectives.append(text)
+        app.query_one(StatusDisplay).objectives = objectives
+
     def _handle_title_generated(self, title: str) -> None:
         if not as_mixin_host(self).is_runtime_active():
             return

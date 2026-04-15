@@ -69,6 +69,9 @@ class FakeTelemetry(TypedDict):
     success_counter: FakeMetric
     failure_counter: FakeMetric
     repair_counter: FakeMetric
+    fallback_counter: FakeMetric
+    provider_cache_counter: FakeMetric
+    startup_latency_histogram: FakeMetric
 
 
 @pytest.fixture
@@ -85,6 +88,9 @@ def fake_telemetry(monkeypatch: pytest.MonkeyPatch) -> FakeTelemetry:
         "success_counter": FakeMetric(),
         "failure_counter": FakeMetric(),
         "repair_counter": FakeMetric(),
+        "fallback_counter": FakeMetric(),
+        "provider_cache_counter": FakeMetric(),
+        "startup_latency_histogram": FakeMetric(),
     }
 
     for name, value in metrics.items():
@@ -305,6 +311,22 @@ def test_record_repair_attempt_increments_counter(fake_telemetry: FakeTelemetry)
 
     assert fake_telemetry["repair_counter"].adds == [
         (1, {"llm.model": "mock-model", "error_type": "JSONDecodeError"})
+    ]
+
+
+def test_extended_observability_helpers_record_metrics(fake_telemetry: FakeTelemetry) -> None:
+    obs.record_fallback_node("invalid_json")
+    obs.record_provider_cache_state_save(hit=True)
+    obs.record_provider_cache_state_restore(hit=False)
+    obs.record_startup_latency(123.0, status="success")
+
+    assert fake_telemetry["fallback_counter"].adds == [(1, {"reason": "invalid_json"})]
+    assert fake_telemetry["provider_cache_counter"].adds == [
+        (1, {"operation": "save", "hit": "True"}),
+        (1, {"operation": "restore", "hit": "False"}),
+    ]
+    assert fake_telemetry["startup_latency_histogram"].records == [
+        (123.0, {"status": "success"})
     ]
 
 

@@ -187,6 +187,11 @@ class RenderingMixin:
         status.gold = host.engine.state.player_stats.get("gold", 0)
         status.reputation = host.engine.state.player_stats.get("reputation", 0)
         status.inventory = list(host.engine.state.inventory)
+        status.objectives = [
+            objective.text
+            for objective in host.engine.state.objectives
+            if objective.status == "active"
+        ]
 
     def _mount_choice_buttons(
         self, node: StoryNode, choices_container: Container, is_error: bool
@@ -209,7 +214,18 @@ class RenderingMixin:
             for i, choice in enumerate(node.choices):
                 # Unique ID per mount to avoid collisions if previous buttons haven't fully unmounted
                 btn_id = f"choice-t{as_mixin_host(self).turn_count}-{uuid4().hex[:6]}-{i}"
-                btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="primary")
+                disabled_reason = None
+                host = as_mixin_host(self)
+                if host.engine:
+                    disabled_reason = choice.availability_reason(
+                        host.engine.state.inventory,
+                        host.engine.state.player_stats,
+                        host.engine.state.story_flags,
+                    )
+                label = f"[b]{i + 1}[/b]  {choice.text}"
+                if disabled_reason:
+                    label = f"{label} [dim](Locked: {disabled_reason})[/dim]"
+                btn = Button(label, id=btn_id, variant="primary", disabled=disabled_reason is not None)
                 choices_container.mount(btn)
 
         self._focus_first_choice_button(choices_container)
@@ -235,6 +251,14 @@ class RenderingMixin:
             return
 
         choice = host.engine.state.current_node.choices[choice_idx]
+        disabled_reason = choice.availability_reason(
+            host.engine.state.inventory,
+            host.engine.state.player_stats,
+            host.engine.state.story_flags,
+        )
+        if disabled_reason:
+            app.notify(disabled_reason, severity="warning", timeout=2)
+            return
         choice_text = choice.text
         rendered_turn_index = host._current_story_turn_index()
 

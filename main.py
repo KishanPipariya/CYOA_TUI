@@ -22,6 +22,7 @@ class StartupConfig:
     provider: str
     theme: str
     prompt: str | None
+    preset: str | None
 
 
 def _build_parser(available_themes: Sequence[str] | None = None) -> argparse.ArgumentParser:
@@ -50,6 +51,12 @@ def _build_parser(available_themes: Sequence[str] | None = None) -> argparse.Arg
         type=str,
         default=None,
         help="Override the starting prompt directly (takes precedence over --theme).",
+    )
+    parser.add_argument(
+        "--preset",
+        type=str,
+        default=os.getenv("LLM_PRESET"),
+        help="Generation preset to use at startup (balanced, precise, cinematic).",
     )
     return parser
 
@@ -83,6 +90,8 @@ def _parse_non_negative_float(name: str) -> None:
 
 
 def validate_startup_config(args: argparse.Namespace) -> StartupConfig:
+    from cyoa.llm.broker import PRESETS
+
     provider = os.getenv("LLM_PROVIDER", "llama_cpp").strip().lower()
     if provider not in VALID_PROVIDERS:
         valid = ", ".join(sorted(VALID_PROVIDERS))
@@ -94,6 +103,12 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:
     _parse_positive_int("LLM_MAX_TOKENS")
     _parse_positive_int("LLM_TOKEN_BUDGET")
     _parse_non_negative_float("LLM_TEMPERATURE")
+
+    preset = args.preset.strip().lower() if isinstance(args.preset, str) and args.preset.strip() else None
+    if preset and preset not in PRESETS:
+        raise StartupConfigError(
+            f"Unsupported preset {preset!r}. Expected one of: {', '.join(sorted(PRESETS))}."
+        )
 
     model = args.model.strip() if isinstance(args.model, str) and args.model.strip() else None
     if provider == "llama_cpp" and not model:
@@ -110,6 +125,7 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:
         provider=provider,
         theme=args.theme,
         prompt=args.prompt,
+        preset=preset,
     )
 
 
@@ -137,15 +153,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         starting_prompt = config.prompt
         spinner_frames = ["[-]", "[\\]", "[|]", "[/]"]
         accent_color = None
+        initial_world_state = {}
+        initial_prompt_config = {}
     else:
         try:
             theme = load_theme(config.theme)
             starting_prompt = theme.get("prompt", DEFAULT_STARTING_PROMPT)
             spinner_frames = theme.get("spinner_frames", ["[-]", "[\\]", "[|]", "[/]"])
             accent_color = theme.get("accent_color")
+            initial_world_state = {
+                "inventory": theme.get("opening_inventory", []),
+                "player_stats": theme.get("opening_stats", {}),
+                "objectives": theme.get("opening_objectives", []),
+                "faction_reputation": theme.get("faction_reputation", {}),
+                "npc_affinity": theme.get("npc_affinity", {}),
+                "story_flags": theme.get("story_flags", []),
+            }
+            initial_prompt_config = {
+                "goals": theme.get("goals", []),
+                "directives": theme.get("directives", []),
+                "persona": theme.get("persona"),
+            }
         except (FileNotFoundError, ThemeValidationError) as e:
             print(f"Error: {e}", file=sys.stderr)
             return 2
+
+    if config.preset:
+        os.environ["LLM_PRESET"] = config.preset
 
     # Initialize a global log listener
     logger_service = StoryLogger(filepath=STORY_LOG_FILE)
@@ -155,6 +189,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         starting_prompt=starting_prompt,
         spinner_frames=spinner_frames,
         accent_color=accent_color,
+        initial_world_state=initial_world_state,
+        initial_prompt_config=initial_prompt_config,
     )
 
     try:

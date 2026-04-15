@@ -85,6 +85,16 @@ failure_counter = meter.create_counter(
     description="Failed LLM generations",
 )
 
+fallback_counter = meter.create_counter(
+    name="llm.fallback",
+    description="Fallback nodes emitted after provider or parsing failures",
+)
+
+provider_cache_counter = meter.create_counter(
+    name="llm.provider_cache",
+    description="Provider state save/load activity and hit rate",
+)
+
 # DB Metrics
 db_latency_histogram = meter.create_histogram(
     name="db.operation_latency",
@@ -112,6 +122,12 @@ engine_turn_duration_histogram = meter.create_histogram(
 engine_event_counter = meter.create_counter(
     name="engine.events",
     description="Significant engine events",
+)
+
+startup_latency_histogram = meter.create_histogram(
+    name="app.startup_latency",
+    description="Time taken to initialize the app runtime",
+    unit="ms",
 )
 
 
@@ -285,3 +301,19 @@ class LLMObservedSession:
 
 def record_repair_attempt(model_name: str, error_type: str) -> None:
     repair_counter.add(1, {"llm.model": model_name, "error_type": error_type})
+
+
+def record_fallback_node(reason: str) -> None:
+    fallback_counter.add(1, {"reason": reason})
+
+
+def record_provider_cache_state_save(*, hit: bool) -> None:
+    provider_cache_counter.add(1, {"operation": "save", "hit": str(hit)})
+
+
+def record_provider_cache_state_restore(*, hit: bool) -> None:
+    provider_cache_counter.add(1, {"operation": "restore", "hit": str(hit)})
+
+
+def record_startup_latency(duration_ms: float, *, status: str) -> None:
+    startup_latency_histogram.record(duration_ms, {"status": status})

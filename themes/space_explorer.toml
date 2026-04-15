@@ -2,6 +2,12 @@ name = "Space Explorer"
 description = "A sci-fi survival adventure set on a hostile alien moon."
 accent_color = "cyan"
 spinner_frames = ["[🌑]", "[🌒]", "[🌓]", "[🌔]", "[🌕]", "[🌖]", "[🌗]", "[🌘]"]
+goals = ["Stabilize life support", "Make contact or find shelter"]
+directives = ["Respect oxygen scarcity and prior discoveries when presenting choices."]
+opening_inventory = ["Emergency Beacon", "Cracked Visor Patch"]
+story_flags = ["crash_site"]
+content_tags = ["science_fiction", "survival", "exploration"]
+persona = "You are a grounded sci-fi survival narrator. Choices should reflect logistics, pressure, and scientific discovery."
 
 prompt = """You are a sci-fi interactive fiction engine.
 Describe the starting scenario where the player wakes up as the sole survivor of a crashed research shuttle on a hostile alien moon with dwindling oxygen.
@@ -10,3 +16,19 @@ You MUST provide a creative 'title' for this new adventure in the JSON response.
 When the story reaches a definitive conclusion (rescue, death, discovery, etc), set 'is_ending' to true and provide an empty choices list.
 Ensure your output is strictly valid JSON matching the requested schema.
 """
+
+[opening_stats]
+health = 100
+gold = 0
+reputation = 0
+
+[[opening_objectives]]
+id = "survive_first_night"
+text = "Survive the first night on the moon."
+status = "active"
+
+[faction_reputation]
+"Expedition Command" = 1
+
+[npc_affinity]
+"Shuttle AI" = 2

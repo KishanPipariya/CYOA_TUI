@@ -12,6 +12,7 @@ def _args(**overrides: str | None) -> argparse.Namespace:
         "model": None,
         "theme": "dark_dungeon",
         "prompt": None,
+        "preset": None,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -82,6 +83,15 @@ def test_validate_startup_config_rejects_unknown_provider(
 
     with pytest.raises(main.StartupConfigError, match="Unsupported LLM_PROVIDER"):
         main.validate_startup_config(_args())
+
+
+def test_validate_startup_config_rejects_unknown_preset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+
+    with pytest.raises(main.StartupConfigError, match="Unsupported preset"):
+        main.validate_startup_config(_args(preset="chaos"))
 
 
 @pytest.mark.smoke

@@ -128,6 +128,25 @@ class PlayerSheetComponent(PromptComponent, PromptComponentMixin):
             import json
 
             lines.append(f"Current Stats: {json.dumps(stats)}")
+        objectives = getattr(context, "objectives", [])
+        if objectives:
+            objective_bits = [
+                f"{objective.text} ({objective.status})" for objective in objectives
+            ]
+            lines.append(f"Objectives: {'; '.join(objective_bits)}")
+        faction_reputation = getattr(context, "faction_reputation", {})
+        if faction_reputation:
+            import json
+
+            lines.append(f"Faction Reputation: {json.dumps(faction_reputation)}")
+        npc_affinity = getattr(context, "npc_affinity", {})
+        if npc_affinity:
+            import json
+
+            lines.append(f"NPC Affinity: {json.dumps(npc_affinity)}")
+        story_flags = sorted(getattr(context, "story_flags", set()))
+        if story_flags:
+            lines.append(f"Unlocked Story Flags: {', '.join(story_flags)}")
         lines.append("</player_sheet>")
 
         return self._inject_into_system(messages, "\n".join(lines))

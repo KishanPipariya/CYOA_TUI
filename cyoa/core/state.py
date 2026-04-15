@@ -2,7 +2,7 @@ import logging
 from typing import Any, ClassVar
 
 from cyoa.core.events import Events, bus
-from cyoa.core.models import StoryNode
+from cyoa.core.models import Objective, StoryNode
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,10 @@ class GameState:
         self.current_scene_id: str | None = None
         self.last_choice_text: str | None = None
         self.timeline_metadata: list[dict[str, Any]] = []
+        self.objectives: list[Objective] = []
+        self.faction_reputation: dict[str, int] = {}
+        self.npc_affinity: dict[str, int] = {}
+        self.story_flags: set[str] = set()
 
         # Snapshot for one-level undo
         self._undo_snapshot: dict[str, Any] | None = None
@@ -44,6 +48,10 @@ class GameState:
         self.current_scene_id = None
         self.last_choice_text = None
         self.timeline_metadata = []
+        self.objectives = []
+        self.faction_reputation = {}
+        self.npc_affinity = {}
+        self.story_flags = set()
         self._undo_snapshot = None
 
     def apply_node_updates(self, node: StoryNode) -> None:
@@ -72,6 +80,10 @@ class GameState:
         if inv_changed:
             bus.emit(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
 
+        world_state_changed = self._apply_world_updates(node)
+        if world_state_changed:
+            bus.emit(Events.WORLD_STATE_UPDATED, state=self.get_world_state())
+
         # 3. Advance state
         self.current_node = node
 
@@ -86,6 +98,10 @@ class GameState:
             "current_scene_id": self.current_scene_id,
             "last_choice_text": self.last_choice_text,
             "timeline_metadata": [entry.copy() for entry in self.timeline_metadata],
+            "objectives": [objective.model_dump() for objective in self.objectives],
+            "faction_reputation": dict(self.faction_reputation),
+            "npc_affinity": dict(self.npc_affinity),
+            "story_flags": sorted(self.story_flags),
         }
         if extra_data:
             snapshot.update(extra_data)
@@ -105,6 +121,10 @@ class GameState:
         self.current_scene_id = snap["current_scene_id"]
         self.last_choice_text = snap["last_choice_text"]
         self.timeline_metadata = [entry.copy() for entry in snap.get("timeline_metadata", [])]
+        self.objectives = self._coerce_objectives(snap.get("objectives"))
+        self.faction_reputation = self._coerce_relationships(snap.get("faction_reputation"))
+        self.npc_affinity = self._coerce_relationships(snap.get("npc_affinity"))
+        self.story_flags = self._coerce_story_flags(snap.get("story_flags"))
 
         # Snapshot used; clear it
         self._undo_snapshot = None
@@ -112,6 +132,7 @@ class GameState:
         # Emit refresh events
         bus.emit(Events.STATS_UPDATED, stats=dict(self.player_stats))
         bus.emit(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
+        bus.emit(Events.WORLD_STATE_UPDATED, state=self.get_world_state())
 
         # Refresh narrative node
         if self.current_node:
@@ -130,6 +151,10 @@ class GameState:
             "current_scene_id": self.current_scene_id,
             "last_choice_text": self.last_choice_text,
             "timeline_metadata": [entry.copy() for entry in self.timeline_metadata],
+            "objectives": [objective.model_dump() for objective in self.objectives],
+            "faction_reputation": dict(self.faction_reputation),
+            "npc_affinity": dict(self.npc_affinity),
+            "story_flags": sorted(self.story_flags),
         }
 
     def load_save_data(self, data: dict[str, Any]) -> None:
@@ -145,6 +170,10 @@ class GameState:
             data.get("last_choice_text") if isinstance(data.get("last_choice_text"), str) else None
         )
         self.timeline_metadata = self._coerce_timeline_metadata(data.get("timeline_metadata"))
+        self.objectives = self._coerce_objectives(data.get("objectives"))
+        self.faction_reputation = self._coerce_relationships(data.get("faction_reputation"))
+        self.npc_affinity = self._coerce_relationships(data.get("npc_affinity"))
+        self.story_flags = self._coerce_story_flags(data.get("story_flags"))
 
         node_data = data.get("current_node")
         if not isinstance(node_data, dict):
@@ -158,6 +187,7 @@ class GameState:
 
         bus.emit(Events.STATS_UPDATED, stats=dict(self.player_stats))
         bus.emit(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
+        bus.emit(Events.WORLD_STATE_UPDATED, state=self.get_world_state())
         if self.current_node:
             bus.emit(Events.NODE_COMPLETED, node=self.current_node)
 
@@ -241,3 +271,106 @@ class GameState:
             except ValueError:
                 return None
         return None
+
+    def get_world_state(self) -> dict[str, Any]:
+        """Return tracked long-lived world state for prompt injection and UI display."""
+        return {
+            "objectives": [objective.model_dump() for objective in self.objectives],
+            "faction_reputation": dict(self.faction_reputation),
+            "npc_affinity": dict(self.npc_affinity),
+            "story_flags": sorted(self.story_flags),
+        }
+
+    def seed_world_state(
+        self,
+        *,
+        inventory: list[str] | None = None,
+        player_stats: dict[str, int] | None = None,
+        objectives: list[Objective] | None = None,
+        faction_reputation: dict[str, int] | None = None,
+        npc_affinity: dict[str, int] | None = None,
+        story_flags: set[str] | None = None,
+    ) -> None:
+        """Apply initial state from a theme or imported save payload."""
+        if inventory is not None:
+            self.inventory = list(dict.fromkeys(inventory))
+        if player_stats is not None:
+            self.player_stats = self._coerce_player_stats(player_stats)
+        if objectives is not None:
+            self.objectives = [objective.model_copy() for objective in objectives]
+        if faction_reputation is not None:
+            self.faction_reputation = dict(faction_reputation)
+        if npc_affinity is not None:
+            self.npc_affinity = dict(npc_affinity)
+        if story_flags is not None:
+            self.story_flags = set(story_flags)
+
+    def _apply_world_updates(self, node: StoryNode) -> bool:
+        changed = False
+
+        objective_index = {objective.id: idx for idx, objective in enumerate(self.objectives)}
+        for objective in node.objectives_updated:
+            existing_idx = objective_index.get(objective.id)
+            if existing_idx is None:
+                self.objectives.append(objective.model_copy())
+                objective_index[objective.id] = len(self.objectives) - 1
+                changed = True
+                continue
+            existing = self.objectives[existing_idx]
+            if existing.text != objective.text or existing.status != objective.status:
+                self.objectives[existing_idx] = objective.model_copy()
+                changed = True
+
+        for faction, delta in node.faction_updates.items():
+            if delta == 0:
+                continue
+            self.faction_reputation[faction] = self.faction_reputation.get(faction, 0) + delta
+            changed = True
+
+        for npc, delta in node.npc_affinity_updates.items():
+            if delta == 0:
+                continue
+            self.npc_affinity[npc] = self.npc_affinity.get(npc, 0) + delta
+            changed = True
+
+        for flag in node.story_flags_set:
+            if flag not in self.story_flags:
+                self.story_flags.add(flag)
+                changed = True
+        for flag in node.story_flags_cleared:
+            if flag in self.story_flags:
+                self.story_flags.remove(flag)
+                changed = True
+
+        return changed
+
+    def _coerce_objectives(self, value: Any) -> list[Objective]:
+        if not isinstance(value, list):
+            return []
+        objectives: list[Objective] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            try:
+                objectives.append(Objective(**item))
+            except Exception:
+                continue
+        return objectives
+
+    def _coerce_relationships(self, value: Any) -> dict[str, int]:
+        relationships: dict[str, int] = {}
+        if not isinstance(value, dict):
+            return relationships
+        for key, raw in value.items():
+            if not isinstance(key, str) or isinstance(raw, bool):
+                continue
+            try:
+                relationships[key] = int(raw)
+            except (TypeError, ValueError):
+                continue
+        return relationships
+
+    def _coerce_story_flags(self, value: Any) -> set[str]:
+        if not isinstance(value, list):
+            return set()
+        return {flag for flag in value if isinstance(flag, str) and flag}

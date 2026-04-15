@@ -1,8 +1,60 @@
 from pydantic import BaseModel, Field, model_validator
 
 
+class Objective(BaseModel):
+    id: str = Field(description="Stable objective identifier.")
+    text: str = Field(description="Objective text shown to the player.")
+    status: str = Field(
+        default="active",
+        description="Objective status. Usually active, completed, or failed.",
+    )
+
+
+class ChoiceRequirement(BaseModel):
+    items: list[str] = Field(
+        default_factory=list,
+        description="Inventory items required before this choice is available.",
+    )
+    stats: dict[str, int] = Field(
+        default_factory=dict,
+        description="Minimum stat thresholds required before this choice is available.",
+    )
+    flags: list[str] = Field(
+        default_factory=list,
+        description="Story flags that must already be present before this choice is available.",
+    )
+
+
 class Choice(BaseModel):
     text: str = Field(description="The description of the action the user can take.")
+    requirements: ChoiceRequirement = Field(
+        default_factory=ChoiceRequirement,
+        description="Optional requirements gating this choice.",
+    )
+
+    def availability_reason(
+        self,
+        inventory: list[str],
+        stats: dict[str, int],
+        flags: set[str],
+    ) -> str | None:
+        missing_items = [
+            item for item in self.requirements.items if item not in inventory
+        ]
+        if missing_items:
+            return f"Requires item: {missing_items[0]}"
+
+        for stat, minimum in self.requirements.stats.items():
+            if stats.get(stat, 0) < minimum:
+                return f"Requires {stat} {minimum}+"
+
+        missing_flags = [
+            flag for flag in self.requirements.flags if flag not in flags
+        ]
+        if missing_flags:
+            return f"Requires event: {missing_flags[0]}"
+
+        return None
 
 
 class StoryNode(BaseModel):
@@ -40,6 +92,26 @@ class StoryNode(BaseModel):
     mood: str = Field(
         default="default",
         description="The atmospheric mood of the current scene (e.g., 'mysterious', 'heroic', 'combat', 'ethereal', 'dark', 'grimy').",
+    )
+    objectives_updated: list[Objective] = Field(
+        default_factory=list,
+        description="Objective updates that should be tracked in the UI and prompt state.",
+    )
+    faction_updates: dict[str, int] = Field(
+        default_factory=dict,
+        description="Faction or reputation deltas keyed by faction name.",
+    )
+    npc_affinity_updates: dict[str, int] = Field(
+        default_factory=dict,
+        description="NPC affinity deltas keyed by NPC name.",
+    )
+    story_flags_set: list[str] = Field(
+        default_factory=list,
+        description="Story flags unlocked by this turn for future conditional choices.",
+    )
+    story_flags_cleared: list[str] = Field(
+        default_factory=list,
+        description="Story flags that should no longer be considered active.",
     )
 
     @model_validator(mode="after")
@@ -94,4 +166,24 @@ class ExtractionNode(BaseModel):
     stat_updates: dict[str, int] = Field(
         default_factory=dict,
         description="Health, gold, or reputation changes derived from the narrative. E.g. {'health': -5}.",
+    )
+    objectives_updated: list[Objective] = Field(
+        default_factory=list,
+        description="Objective updates derived from the narrative.",
+    )
+    faction_updates: dict[str, int] = Field(
+        default_factory=dict,
+        description="Faction or reputation changes derived from the narrative.",
+    )
+    npc_affinity_updates: dict[str, int] = Field(
+        default_factory=dict,
+        description="NPC affinity changes derived from the narrative.",
+    )
+    story_flags_set: list[str] = Field(
+        default_factory=list,
+        description="Story flags unlocked by the narrative.",
+    )
+    story_flags_cleared: list[str] = Field(
+        default_factory=list,
+        description="Story flags retired by the narrative.",
     )

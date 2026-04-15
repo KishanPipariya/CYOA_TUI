@@ -111,6 +111,18 @@ def test_llama_cpp_prepare_stream_params_omits_optional_fields(mock_llama) -> No
         "stream": True,
     }
 
+
+def test_provider_capabilities_are_normalized(mock_llama) -> None:
+    from cyoa.llm.providers import MockProvider
+
+    llama = LlamaCppProvider(model_path="dummy.gguf")
+    ollama = OllamaProvider(model="llama3")
+    mock = MockProvider()
+
+    assert llama.capabilities().state_transfer is True
+    assert ollama.capabilities().streaming_json is True
+    assert mock.capabilities().structured_json is True
+
 @pytest.mark.asyncio
 async def test_llama_cpp_generate_json(mock_llama):
     provider = LlamaCppProvider(model_path="dummy.gguf")

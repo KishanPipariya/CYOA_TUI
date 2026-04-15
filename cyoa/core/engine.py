@@ -4,8 +4,11 @@ import uuid
 from typing import Any
 
 from cyoa.core.events import Events, bus
-from cyoa.core.models import Choice, StoryNode
-from cyoa.core.observability import EngineObservedSession
+from cyoa.core.models import Choice, Objective, StoryNode
+from cyoa.core.observability import (
+    EngineObservedSession,
+    record_provider_cache_state_restore,
+)
 from cyoa.core.rag import RAGManager
 from cyoa.core.state import GameState
 from cyoa.db.graph_db import CYOAGraphDB
@@ -29,6 +32,8 @@ class StoryEngine:
         db: CYOAGraphDB | None = None,
         memory: NarrativeMemory | None = None,
         npc_memory: NPCMemory | None = None,
+        initial_world_state: dict[str, Any] | None = None,
+        initial_prompt_config: dict[str, Any] | None = None,
     ) -> None:
         self.broker = broker
         self.starting_prompt = starting_prompt
@@ -41,6 +46,8 @@ class StoryEngine:
 
         # Story context (for LLM interactions)
         self.story_context: StoryContext | None = None
+        self.initial_world_state = initial_world_state or {}
+        self.initial_prompt_config = initial_prompt_config or {}
 
         # Background summarization task — kept alive to prevent GC and allow
         # inspection. A new task replaces this reference each time summarization
@@ -58,6 +65,10 @@ class StoryEngine:
 
             # Reset extracted state
             self.state.reset()
+            self._apply_initial_state()
+            bus.emit(Events.STATS_UPDATED, stats=dict(self.state.player_stats))
+            bus.emit(Events.INVENTORY_UPDATED, inventory=list(self.state.inventory))
+            bus.emit(Events.WORLD_STATE_UPDATED, state=self.state.get_world_state())
 
             bus.emit(Events.ENGINE_STARTED)
             await self._generate_next()
@@ -135,6 +146,7 @@ class StoryEngine:
             await asyncio.sleep(0.1)
             if session.span:
                 session.span.set_attribute("engine.cache_hit", True)
+            record_provider_cache_state_restore(hit=True)
             return cached_node
 
         story_context = self.story_context
@@ -146,6 +158,7 @@ class StoryEngine:
         )
         if session.span:
             session.span.set_attribute("engine.cache_hit", False)
+        record_provider_cache_state_restore(hit=False)
         return node
 
     async def _set_story_title(self, node: StoryNode) -> None:
@@ -170,6 +183,7 @@ class StoryEngine:
             self.speculation_cache.set_state(self.state.current_scene_id, state)
 
         self.state.apply_node_updates(node)
+        self._sync_story_context_state()
 
         if self.state.turn_count == 1:
             await self._set_story_title(node)
@@ -254,6 +268,10 @@ class StoryEngine:
         data = {
             "starting_prompt": self.starting_prompt,
             "context_history": self.story_context.history,
+            "prompt_config": {
+                "goals": list(self.story_context.goals),
+                "directives": list(self.story_context.directives),
+            },
         }
         data.update(self.state.get_save_data())
         return data
@@ -275,6 +293,17 @@ class StoryEngine:
         )
         context_history = data.get("context_history")
         self.story_context.history = context_history if isinstance(context_history, list) else []
+        prompt_config = data.get("prompt_config")
+        if isinstance(prompt_config, dict):
+            goals = prompt_config.get("goals")
+            directives = prompt_config.get("directives")
+            if isinstance(goals, list):
+                self.story_context.goals = [goal for goal in goals if isinstance(goal, str)]
+            if isinstance(directives, list):
+                self.story_context.directives = [
+                    directive for directive in directives if isinstance(directive, str)
+                ]
+        self._sync_story_context_state()
 
     async def branch_to_scene(self, idx: int, history: dict[str, Any]) -> None:
         """Restore the engine state to a specific scene from the history."""
@@ -324,8 +353,54 @@ class StoryEngine:
             is_ending=len(choices) == 0,
         )
         self.state.current_node = node
+        self._sync_story_context_state()
 
         # Emit events so UI can refresh stats/inventory/narrative
         bus.emit(Events.STATS_UPDATED, stats=self.state.player_stats)
         bus.emit(Events.INVENTORY_UPDATED, inventory=self.state.inventory)
+        bus.emit(Events.WORLD_STATE_UPDATED, state=self.state.get_world_state())
         bus.emit(Events.NODE_COMPLETED, node=node)
+
+    def _apply_initial_state(self) -> None:
+        objectives = []
+        for raw in self.initial_world_state.get("objectives", []):
+            if isinstance(raw, Objective):
+                objectives.append(raw)
+            elif isinstance(raw, dict):
+                try:
+                    objectives.append(Objective(**raw))
+                except Exception:
+                    continue
+        self.state.seed_world_state(
+            inventory=self.initial_world_state.get("inventory"),
+            player_stats=self.initial_world_state.get("player_stats"),
+            objectives=objectives,
+            faction_reputation=self.initial_world_state.get("faction_reputation"),
+            npc_affinity=self.initial_world_state.get("npc_affinity"),
+            story_flags=set(self.initial_world_state.get("story_flags", [])),
+        )
+        if self.story_context:
+            goals = self.initial_prompt_config.get("goals")
+            directives = self.initial_prompt_config.get("directives")
+            persona = self.initial_prompt_config.get("persona")
+            if isinstance(goals, list):
+                self.story_context.goals = [goal for goal in goals if isinstance(goal, str)]
+            if isinstance(directives, list):
+                self.story_context.directives = [
+                    directive for directive in directives if isinstance(directive, str)
+                ]
+            if isinstance(persona, str) and persona.strip():
+                self.story_context.set_persona(persona)
+        self._sync_story_context_state()
+
+    def _sync_story_context_state(self) -> None:
+        if not self.story_context:
+            return
+        self.story_context.sync_world_state(
+            inventory=self.state.inventory,
+            player_stats=self.state.player_stats,
+            objectives=self.state.objectives,
+            faction_reputation=self.state.faction_reputation,
+            npc_affinity=self.state.npc_affinity,
+            story_flags=self.state.story_flags,
+        )

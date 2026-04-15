@@ -220,6 +220,7 @@ HELP_TEXT = """\
 | [b][reverse]  L  [/reverse][/b] | Load Game |
 | [b][reverse]  R  [/reverse][/b] | Restart Adventure |
 | [b][reverse]  T  [/reverse][/b] | Toggle Typewriter |
+| [b][reverse]  G  [/reverse][/b] | Cycle generation preset |
 | [b][reverse]  H  [/reverse][/b] | Show this help screen |
 | [b][reverse]SPACE[/reverse][/b] | Skip typewriter narrator |
 | [b][reverse]  Q  [/reverse][/b] | Quit Game |
@@ -356,6 +357,8 @@ class StatusDisplay(Static):
     gold = reactive(0)
     reputation = reactive(0)
     inventory: reactive[list[str]] = reactive([])
+    objectives: reactive[list[str]] = reactive([])
+    generation_preset = reactive("balanced")
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="stats-row"):
@@ -363,6 +366,7 @@ class StatusDisplay(Static):
             yield ProgressBar(total=100, show_percentage=False, show_eta=False, id="health-bar")
             yield Label("", id="stats-text")
         yield Label("🎒 Inventory: Empty", id="inventory-label")
+        yield Label("🎯 Objectives: None", id="objectives-label")
 
     def watch_health(self, health: int) -> None:
         self.query_one("#health-bar", ProgressBar).progress = health
@@ -383,8 +387,19 @@ class StatusDisplay(Static):
         )
         self.query_one("#inventory-label", Label).update(inv_str)
 
+    def watch_objectives(self, objectives: list[str]) -> None:
+        objective_text = (
+            f"🎯 Objectives: {' | '.join(objectives[:2])}"
+            if objectives
+            else "🎯 Objectives: None"
+        )
+        self.query_one("#objectives-label", Label).update(objective_text)
+
     def _update_stats_text(self) -> None:
-        text = f" ❤️ {self.health}% | 🪙 {self.gold} Gold | 🌟 {self.reputation} Rep"
+        text = (
+            f" ❤️ {self.health}% | 🪙 {self.gold} Gold | 🌟 {self.reputation} Rep"
+            f" | ⚙️ {self.generation_preset}"
+        )
         self.query_one("#stats-text", Label).update(text)
 
     def _set_health_class(self, health: int) -> None:

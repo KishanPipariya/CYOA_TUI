@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from typing import Any, ClassVar
 
@@ -70,6 +71,7 @@ class CYOAApp(
         Binding("r", "request_restart", "Restart", show=True),
         Binding("t", "toggle_typewriter", "Typewriter", show=True),
         Binding("v", "cycle_typewriter_speed", "Speed", show=True),
+        Binding("g", "cycle_generation_preset", "Preset", show=True),
         Binding("space", "skip_typewriter", "Skip", show=True),
         Binding("1", "choose('1')", "Choice 1", show=False),
         Binding("2", "choose('2')", "Choice 2", show=False),
@@ -90,6 +92,8 @@ class CYOAApp(
         starting_prompt: str = constants.DEFAULT_STARTING_PROMPT,
         spinner_frames: list[str] | None = None,
         accent_color: str | None = None,
+        initial_world_state: dict[str, object] | None = None,
+        initial_prompt_config: dict[str, object] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -97,6 +101,8 @@ class CYOAApp(
         self.starting_prompt = starting_prompt
         self.spinner_frames = spinner_frames or ["[-]", "[\\]", "[|]", "[/]"]
         self._accent_color = accent_color
+        self._initial_world_state = initial_world_state or {}
+        self._initial_prompt_config = initial_prompt_config or {}
 
         self.generator: ModelBroker | None = None
         self.engine: StoryEngine | None = None
@@ -155,6 +161,7 @@ class CYOAApp(
 
         self._current_turn_widget = self.query_one("#initial-turn", Markdown)
         self._set_compact_layout(self.size.width)
+        self.query_one(StatusDisplay).generation_preset = "balanced"
 
         self._subscribe_engine_events()
 
@@ -200,6 +207,7 @@ class CYOAApp(
                 bus.subscribe(Events.NODE_COMPLETED, self._handle_node_completed),
                 bus.subscribe(Events.STATS_UPDATED, self._handle_stats_updated),
                 bus.subscribe(Events.INVENTORY_UPDATED, self._handle_inventory_updated),
+                bus.subscribe(Events.WORLD_STATE_UPDATED, self._handle_world_state_updated),
                 bus.subscribe(Events.STORY_TITLE_GENERATED, self._handle_title_generated),
                 bus.subscribe(Events.ENDING_REACHED, self._handle_ending_reached),
                 bus.subscribe(Events.ERROR_OCCURRED, self._handle_error),
@@ -282,12 +290,16 @@ class CYOAApp(
     @work(exclusive=True)
     async def initialize_and_start(self, model_path: str) -> None:
         """Load model and start the story engine."""
+        start_time = time.perf_counter()
         self.show_loading()
         await asyncio.sleep(0.2)
 
         try:
             if self.generator is None:
                 self.generator = await asyncio.to_thread(ModelBroker, model_path=model_path)
+            self.query_one(StatusDisplay).generation_preset = str(
+                self.generator.runtime_controls()["preset"]
+            )
 
             if self.engine is None:
                 # Initialize engine with shared services
@@ -295,6 +307,8 @@ class CYOAApp(
                     broker=self.generator,
                     starting_prompt=self.starting_prompt,
                     db=CYOAGraphDB(),
+                    initial_world_state=getattr(self, "_initial_world_state", {}),
+                    initial_prompt_config=getattr(self, "_initial_prompt_config", {}),
                 )
 
             # 2. Check for Graceful Degradation (Graph / RAG)
@@ -317,8 +331,14 @@ class CYOAApp(
                 )
 
             await self.engine.initialize()
+            from cyoa.core.observability import record_startup_latency
+
+            record_startup_latency((time.perf_counter() - start_time) * 1000, status="success")
 
         except Exception as e:
+            from cyoa.core.observability import record_startup_latency
+
+            record_startup_latency((time.perf_counter() - start_time) * 1000, status="failure")
             self.notify(f"Initial setup failed: {e}", severity="error", timeout=5)
             self.query_one("#loading", ThemeSpinner).add_class("hidden")
             self._close_runtime_resources()
@@ -332,6 +352,8 @@ class CYOAApp(
     async def speculate_all_choices(self, node: StoryNode) -> None:
         """Sequential background generation of the most likely next scenes."""
         if not self.engine or not self.engine.story_context or not self.generator:
+            return
+        if not self.is_runtime_active():
             return
 
         # Emit status message to inform user of background activity
@@ -349,6 +371,8 @@ class CYOAApp(
             await asyncio.sleep(2.0)
         else:
             await asyncio.sleep(0.5)
+        if not self.is_runtime_active():
+            return
 
         # Optimization: Limit speculation to only 1 "most likely" choice (the first one)
         # to prevent resource starvation on local LLMs.
@@ -378,6 +402,17 @@ class CYOAApp(
             )
         except Exception as e:
             logger.debug("Speculative generation failed: %s", e)
+
+    def action_cycle_generation_preset(self) -> None:
+        if not self.generator:
+            return
+        controls = self.generator.cycle_generation_preset()
+        self.query_one(StatusDisplay).generation_preset = str(controls["preset"])
+        self.notify(
+            f"Generation preset: {controls['preset']} (temp {controls['temperature']}, max {controls['max_tokens']})",
+            severity="information",
+            timeout=3,
+        )
 
     def on_click(self, event: Click) -> None:
         """Typewriter skip shortcut on clicking the story area."""

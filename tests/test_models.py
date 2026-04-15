@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from cyoa.core.models import Choice, StoryNode
+from cyoa.core.models import Choice, ChoiceRequirement, Objective, StoryNode
 
 
 def test_choice_basic_valid():
@@ -76,3 +76,44 @@ def test_story_node_ending_with_no_choices():
     """Verify that ending nodes can have zero choices."""
     node = StoryNode(narrative="The End.", choices=[], is_ending=True)
     assert node.choices == []
+
+
+def test_choice_availability_reason_handles_items_stats_and_flags():
+    choice = Choice(
+        text="Open the sealed vault",
+        requirements=ChoiceRequirement(
+            items=["Vault Key"],
+            stats={"reputation": 3},
+            flags=["met_archivist"],
+        ),
+    )
+
+    assert choice.availability_reason([], {"reputation": 0}, set()) == "Requires item: Vault Key"
+    assert (
+        choice.availability_reason(["Vault Key"], {"reputation": 1}, {"met_archivist"})
+        == "Requires reputation 3+"
+    )
+    assert (
+        choice.availability_reason(["Vault Key"], {"reputation": 3}, set())
+        == "Requires event: met_archivist"
+    )
+    assert (
+        choice.availability_reason(["Vault Key"], {"reputation": 3}, {"met_archivist"})
+        is None
+    )
+
+
+def test_story_node_accepts_extended_gameplay_updates():
+    node = StoryNode(
+        narrative="The guild grants you passage.",
+        choices=[Choice(text="Enter the archive"), Choice(text="Question the steward")],
+        objectives_updated=[Objective(id="enter_archive", text="Enter the archive", status="active")],
+        faction_updates={"Guild": 2},
+        npc_affinity_updates={"Steward Hale": 1},
+        story_flags_set=["guild_trusted"],
+    )
+
+    assert node.objectives_updated[0].id == "enter_archive"
+    assert node.faction_updates["Guild"] == 2
+    assert node.npc_affinity_updates["Steward Hale"] == 1
+    assert node.story_flags_set == ["guild_trusted"]

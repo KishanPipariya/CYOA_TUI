@@ -80,6 +80,7 @@ class Events:
     # State updates
     STATS_UPDATED = "engine.stats_updated"
     INVENTORY_UPDATED = "engine.inventory_updated"
+    WORLD_STATE_UPDATED = "engine.world_state_updated"
     STORY_TITLE_GENERATED = "engine.story_title_generated"
 
     # Endings and errors

@@ -31,6 +31,9 @@ def test_load_theme_returns_validated_theme(theme_name: str):
     assert theme["accent_color"]
     assert theme["spinner_frames"]
     assert all(isinstance(frame, str) and frame for frame in theme["spinner_frames"])
+    if "opening_objectives" in theme:
+        assert theme["opening_objectives"][0]["id"]
+        assert theme["opening_objectives"][0]["text"]
 
 
 def test_validate_theme_rejects_missing_required_field():
@@ -104,3 +107,30 @@ def test_load_non_existent_theme():
     """Verify loading a non-existent theme raises FileNotFoundError."""
     with pytest.raises(FileNotFoundError):
         load_theme("non_existent_theme_9999")
+
+
+def test_validate_theme_accepts_richer_content_bundle():
+    theme = validate_theme(
+        {
+            "name": "Bundle",
+            "description": "Richer theme",
+            "prompt": "Start",
+            "accent_color": "cyan",
+            "spinner_frames": ["-", "|"],
+            "goals": ["Investigate"],
+            "directives": ["Respect locks"],
+            "opening_inventory": ["Keycard"],
+            "opening_stats": {"health": 90},
+            "opening_objectives": [{"id": "obj", "text": "Investigate", "status": "active"}],
+            "faction_reputation": {"Guild": 2},
+            "npc_affinity": {"Ada": 1},
+            "story_flags": ["met_ada"],
+            "content_tags": ["sci_fi"],
+            "persona": "Be precise.",
+        },
+        "bundle",
+    )
+
+    assert theme["opening_stats"] == {"health": 90}
+    assert theme["faction_reputation"] == {"Guild": 2}
+    assert theme["opening_objectives"][0]["id"] == "obj"

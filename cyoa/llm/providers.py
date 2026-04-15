@@ -5,6 +5,7 @@ import logging
 import os
 import threading
 from collections.abc import AsyncIterator, Callable, Iterator
+from dataclasses import dataclass
 from typing import Any, cast
 
 import httpx
@@ -13,6 +14,13 @@ from llama_cpp import Llama
 from cyoa.core.observability import LLMObservedSession
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderCapabilities:
+    streaming_json: bool = True
+    structured_json: bool = True
+    state_transfer: bool = False
 
 
 def _fallback_token_estimate(text: str) -> int:
@@ -32,6 +40,10 @@ def count_messages_tokens(messages: list[dict[str, str]], token_counter: Callabl
 
 
 class LLMProvider(abc.ABC):
+    def capabilities(self) -> ProviderCapabilities:
+        """Return a normalized provider feature map used by the broker/UI."""
+        return ProviderCapabilities()
+
     @abc.abstractmethod
     def count_tokens(self, text: str) -> int:
         """Count the number of tokens in the given text."""
@@ -143,6 +155,9 @@ class LlamaCppProvider(LLMProvider):
         except Exception as e:
             logger.warning("LlamaCpp tokenization failed: %s — using fallback.", e)
             return _fallback_token_estimate(text)
+
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(streaming_json=True, structured_json=True, state_transfer=True)
 
     def _prepare_stream_params(
         self,
@@ -384,6 +399,9 @@ class OllamaProvider(LLMProvider):
         # Fallback to rough estimate if tiktoken is missing
         return _fallback_token_estimate(text)
 
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(streaming_json=True, structured_json=True, state_transfer=False)
+
     def _build_payload(
         self,
         messages: list[dict[str, str]],
@@ -541,6 +559,9 @@ class MockProvider(LLMProvider):
 
     def count_tokens(self, text: str) -> int:
         return _fallback_token_estimate(text)
+
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(streaming_json=True, structured_json=True, state_transfer=False)
 
     async def generate_text(
         self,

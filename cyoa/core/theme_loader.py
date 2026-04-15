@@ -35,7 +35,7 @@ def _require_non_empty_string_list(value: Any, field: str, source: str) -> list[
 def validate_theme(theme: dict[str, Any], theme_name: str) -> dict[str, Any]:
     """Validate and normalize a single theme payload."""
     source = f"Theme '{theme_name}'"
-    return {
+    validated = {
         "name": _require_non_empty_string(theme.get("name"), "name", source),
         "description": _require_non_empty_string(theme.get("description"), "description", source),
         "prompt": _require_non_empty_string(theme.get("prompt"), "prompt", source),
@@ -44,6 +44,59 @@ def validate_theme(theme: dict[str, Any], theme_name: str) -> dict[str, Any]:
             theme.get("spinner_frames"), "spinner_frames", source
         ),
     }
+    for optional_list_field in (
+        "goals",
+        "directives",
+        "opening_inventory",
+        "story_flags",
+        "content_tags",
+    ):
+        if optional_list_field in theme:
+            validated[optional_list_field] = _require_non_empty_string_list(
+                theme.get(optional_list_field), optional_list_field, source
+            )
+    if "persona" in theme:
+        validated["persona"] = _require_non_empty_string(theme.get("persona"), "persona", source)
+    for optional_mapping_field in ("opening_stats", "faction_reputation", "npc_affinity"):
+        value = theme.get(optional_mapping_field)
+        if value is None:
+            continue
+        if not isinstance(value, dict):
+            raise ThemeValidationError(f"{source}: {optional_mapping_field} must be an object.")
+        normalized: dict[str, int] = {}
+        for key, raw in value.items():
+            if not isinstance(key, str) or isinstance(raw, bool):
+                raise ThemeValidationError(
+                    f"{source}: {optional_mapping_field} keys must be strings and values integers."
+                )
+            try:
+                normalized[key] = int(raw)
+            except (TypeError, ValueError) as exc:
+                raise ThemeValidationError(
+                    f"{source}: {optional_mapping_field} values must be integers."
+                ) from exc
+        validated[optional_mapping_field] = normalized
+    objectives = theme.get("opening_objectives")
+    if objectives is not None:
+        if not isinstance(objectives, list) or not objectives:
+            raise ThemeValidationError(f"{source}: opening_objectives must be a non-empty list.")
+        normalized_objectives: list[dict[str, str]] = []
+        for objective in objectives:
+            if not isinstance(objective, dict):
+                raise ThemeValidationError(
+                    f"{source}: opening_objectives entries must be objects."
+                )
+            normalized_objectives.append(
+                {
+                    "id": _require_non_empty_string(objective.get("id"), "id", source),
+                    "text": _require_non_empty_string(objective.get("text"), "text", source),
+                    "status": _require_non_empty_string(
+                        objective.get("status", "active"), "status", source
+                    ),
+                }
+            )
+        validated["opening_objectives"] = normalized_objectives
+    return validated
 
 
 def validate_moods_config(config: dict[str, Any]) -> dict[str, Any]:

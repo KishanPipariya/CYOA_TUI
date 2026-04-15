@@ -5,7 +5,7 @@ import pytest
 
 from cyoa.core.models import Choice, StoryNode
 from cyoa.llm.broker import ModelBroker, SpeculationCache, StoryContext
-from cyoa.llm.providers import LLMProvider
+from cyoa.llm.providers import LLMProvider, ProviderCapabilities
 
 
 def _node(text: str) -> StoryNode:
@@ -18,6 +18,11 @@ def _make_provider() -> MagicMock:
     provider.generate_text = AsyncMock(return_value="summary")
     provider.save_state = AsyncMock(return_value=None)
     provider.load_state = AsyncMock(return_value=None)
+    provider.capabilities.return_value = ProviderCapabilities(
+        streaming_json=True,
+        structured_json=True,
+        state_transfer=False,
+    )
     return provider
 
 
@@ -109,3 +114,17 @@ async def test_generate_legacy_summary_falls_back_to_plaintext():
 
     assert "A very long narrative" in summary
     assert "I choose the left door" in summary
+
+
+def test_model_broker_cycles_generation_presets():
+    provider = _make_provider()
+    broker = ModelBroker(provider=provider)
+
+    first = broker.runtime_controls()
+    second = broker.cycle_generation_preset()
+    third = broker.cycle_generation_preset()
+
+    assert first["preset"] == "balanced"
+    assert second["preset"] == "precise"
+    assert third["preset"] == "cinematic"
+    assert broker.capabilities.streaming_json is True
