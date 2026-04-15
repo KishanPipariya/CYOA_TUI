@@ -13,12 +13,10 @@ import jiter
 
 from cyoa.core.constants import (
     CHARS_PER_TOKEN,
-    DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_LLM_N_CTX,
     DEFAULT_LLM_REPAIR_ATTEMPTS,
     DEFAULT_LLM_SUMMARY_MAX_TOKENS,
     DEFAULT_LLM_SUMMARY_THRESHOLD,
-    DEFAULT_LLM_TEMPERATURE,
 )
 from cyoa.core.models import Choice, ExtractionNode, NarratorNode, Objective, StoryNode
 from cyoa.core.observability import (

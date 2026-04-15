@@ -305,11 +305,10 @@ class GameState:
         if story_flags is not None:
             self.story_flags = set(story_flags)
 
-    def _apply_world_updates(self, node: StoryNode) -> bool:
+    def _apply_objective_updates(self, objectives_updated: list[Objective]) -> bool:
         changed = False
-
         objective_index = {objective.id: idx for idx, objective in enumerate(self.objectives)}
-        for objective in node.objectives_updated:
+        for objective in objectives_updated:
             existing_idx = objective_index.get(objective.id)
             if existing_idx is None:
                 self.objectives.append(objective.model_copy())
@@ -320,28 +319,35 @@ class GameState:
             if existing.text != objective.text or existing.status != objective.status:
                 self.objectives[existing_idx] = objective.model_copy()
                 changed = True
+        return changed
 
-        for faction, delta in node.faction_updates.items():
+    @staticmethod
+    def _apply_delta_map(target: dict[str, int], updates: dict[str, int]) -> bool:
+        changed = False
+        for key, delta in updates.items():
             if delta == 0:
                 continue
-            self.faction_reputation[faction] = self.faction_reputation.get(faction, 0) + delta
+            target[key] = target.get(key, 0) + delta
             changed = True
+        return changed
 
-        for npc, delta in node.npc_affinity_updates.items():
-            if delta == 0:
-                continue
-            self.npc_affinity[npc] = self.npc_affinity.get(npc, 0) + delta
-            changed = True
-
-        for flag in node.story_flags_set:
+    def _apply_flag_updates(self, flags_set: list[str], flags_cleared: list[str]) -> bool:
+        changed = False
+        for flag in flags_set:
             if flag not in self.story_flags:
                 self.story_flags.add(flag)
                 changed = True
-        for flag in node.story_flags_cleared:
+        for flag in flags_cleared:
             if flag in self.story_flags:
                 self.story_flags.remove(flag)
                 changed = True
+        return changed
 
+    def _apply_world_updates(self, node: StoryNode) -> bool:
+        changed = self._apply_objective_updates(node.objectives_updated)
+        changed = self._apply_delta_map(self.faction_reputation, node.faction_updates) or changed
+        changed = self._apply_delta_map(self.npc_affinity, node.npc_affinity_updates) or changed
+        changed = self._apply_flag_updates(node.story_flags_set, node.story_flags_cleared) or changed
         return changed
 
     def _coerce_objectives(self, value: Any) -> list[Objective]:

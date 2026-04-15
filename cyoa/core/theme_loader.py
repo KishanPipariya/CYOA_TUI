@@ -32,18 +32,11 @@ def _require_non_empty_string_list(value: Any, field: str, source: str) -> list[
     return validated
 
 
-def validate_theme(theme: dict[str, Any], theme_name: str) -> dict[str, Any]:
-    """Validate and normalize a single theme payload."""
-    source = f"Theme '{theme_name}'"
-    validated = {
-        "name": _require_non_empty_string(theme.get("name"), "name", source),
-        "description": _require_non_empty_string(theme.get("description"), "description", source),
-        "prompt": _require_non_empty_string(theme.get("prompt"), "prompt", source),
-        "accent_color": _require_non_empty_string(theme.get("accent_color"), "accent_color", source),
-        "spinner_frames": _require_non_empty_string_list(
-            theme.get("spinner_frames"), "spinner_frames", source
-        ),
-    }
+def _validate_optional_string_lists(
+    theme: dict[str, Any],
+    source: str,
+    validated: dict[str, Any],
+) -> None:
     for optional_list_field in (
         "goals",
         "directives",
@@ -55,8 +48,13 @@ def validate_theme(theme: dict[str, Any], theme_name: str) -> dict[str, Any]:
             validated[optional_list_field] = _require_non_empty_string_list(
                 theme.get(optional_list_field), optional_list_field, source
             )
-    if "persona" in theme:
-        validated["persona"] = _require_non_empty_string(theme.get("persona"), "persona", source)
+
+
+def _validate_optional_mappings(
+    theme: dict[str, Any],
+    source: str,
+    validated: dict[str, Any],
+) -> None:
     for optional_mapping_field in ("opening_stats", "faction_reputation", "npc_affinity"):
         value = theme.get(optional_mapping_field)
         if value is None:
@@ -76,26 +74,53 @@ def validate_theme(theme: dict[str, Any], theme_name: str) -> dict[str, Any]:
                     f"{source}: {optional_mapping_field} values must be integers."
                 ) from exc
         validated[optional_mapping_field] = normalized
+
+
+def _validate_opening_objectives(
+    theme: dict[str, Any],
+    source: str,
+    validated: dict[str, Any],
+) -> None:
     objectives = theme.get("opening_objectives")
-    if objectives is not None:
-        if not isinstance(objectives, list) or not objectives:
-            raise ThemeValidationError(f"{source}: opening_objectives must be a non-empty list.")
-        normalized_objectives: list[dict[str, str]] = []
-        for objective in objectives:
-            if not isinstance(objective, dict):
-                raise ThemeValidationError(
-                    f"{source}: opening_objectives entries must be objects."
-                )
-            normalized_objectives.append(
-                {
-                    "id": _require_non_empty_string(objective.get("id"), "id", source),
-                    "text": _require_non_empty_string(objective.get("text"), "text", source),
-                    "status": _require_non_empty_string(
-                        objective.get("status", "active"), "status", source
-                    ),
-                }
+    if objectives is None:
+        return
+    if not isinstance(objectives, list) or not objectives:
+        raise ThemeValidationError(f"{source}: opening_objectives must be a non-empty list.")
+    normalized_objectives: list[dict[str, str]] = []
+    for objective in objectives:
+        if not isinstance(objective, dict):
+            raise ThemeValidationError(
+                f"{source}: opening_objectives entries must be objects."
             )
-        validated["opening_objectives"] = normalized_objectives
+        normalized_objectives.append(
+            {
+                "id": _require_non_empty_string(objective.get("id"), "id", source),
+                "text": _require_non_empty_string(objective.get("text"), "text", source),
+                "status": _require_non_empty_string(
+                    objective.get("status", "active"), "status", source
+                ),
+            }
+        )
+    validated["opening_objectives"] = normalized_objectives
+
+
+def validate_theme(theme: dict[str, Any], theme_name: str) -> dict[str, Any]:
+    """Validate and normalize a single theme payload."""
+    source = f"Theme '{theme_name}'"
+    validated: dict[str, Any] = {
+        "name": _require_non_empty_string(theme.get("name"), "name", source),
+        "description": _require_non_empty_string(theme.get("description"), "description", source),
+        "prompt": _require_non_empty_string(theme.get("prompt"), "prompt", source),
+        "accent_color": _require_non_empty_string(theme.get("accent_color"), "accent_color", source),
+        "spinner_frames": _require_non_empty_string_list(
+            theme.get("spinner_frames"), "spinner_frames", source
+        ),
+    }
+    if "persona" in theme:
+        validated["persona"] = _require_non_empty_string(theme.get("persona"), "persona", source)
+    _validate_optional_string_lists(theme, source, validated)
+    _validate_optional_mappings(theme, source, validated)
+    _validate_opening_objectives(theme, source, validated)
     return validated
 
 

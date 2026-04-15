@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
+from cyoa.llm.broker import MemoryEntry
 from cyoa.llm.pipeline import (
     DirectiveComponent,
     GoalComponent,
@@ -20,7 +21,6 @@ from cyoa.llm.pipeline import (
     SummarizationComponent,
     SystemMessageComponent,
 )
-from cyoa.llm.broker import MemoryEntry
 from cyoa.llm.providers import (
     LlamaCppProvider,
     OllamaProvider,

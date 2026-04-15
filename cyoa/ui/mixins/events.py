@@ -99,7 +99,10 @@ class EventsMixin:
         if not as_mixin_host(self).is_runtime_active():
             return
         objectives = []
-        for objective in state.get("objectives", []) if isinstance(state, dict) else []:
+        objective_entries = state.get("objectives", [])
+        if not isinstance(objective_entries, list):
+            objective_entries = []
+        for objective in objective_entries:
             if not isinstance(objective, dict):
                 continue
             text = objective.get("text")
