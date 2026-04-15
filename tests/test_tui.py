@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from textual.containers import Container
-from textual.widgets import Button, Label, ListView
+from textual.widgets import Button, Label, ListView, Markdown
 from textual.worker import WorkerFailed
 
 from cyoa.core.events import EventBus, EventDispatchError, Events, bus
@@ -650,9 +650,11 @@ async def test_save_and_load_game(mock_app_dependencies, tmp_path, monkeypatch):
         assert "version" not in payload
         assert "ui_state" in payload
         assert payload["ui_state"]["current_story_text"]
+        assert payload["ui_state"]["story_segments"]
         assert len(payload["ui_state"]["journal_entries"]) == 1
         assert payload["ui_state"]["current_turn_text"]
         assert payload["ui_state"]["journal_entries"][0]["entry_kind"] == "choice"
+        assert payload["ui_state"]["story_segments"][-1]["kind"] == "story_turn"
 
         # Restart the game
         await pilot.press("r")
@@ -689,6 +691,7 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
         )
         app.engine.state.current_node = node
         app._current_story = "Previous history.\n\n---\n\n" + node.narrative
+        app._story_segments = [{"kind": "story_turn", "text": app._current_story}]
 
         # Save
         await pilot.press("s")
@@ -715,6 +718,8 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
             # After restore, _current_story should contain the narrative
             assert "unique story" in app2._current_story
             assert app2._current_turn_text == "A unique story begins."
+            story_turns = list(app2.query_one("#story-container").query(".story-turn"))
+            assert len(story_turns) == 1
             stats_label2_text = app2.query_one("#stats-text").render().plain
             assert "88%" in stats_label2_text
 
@@ -765,6 +770,83 @@ async def test_restore_from_save_handles_malformed_ui_state(mock_app_dependencie
 
 
 @pytest.mark.asyncio
+async def test_restore_from_save_rebuilds_story_timeline(mock_app_dependencies, tmp_path):
+    save_path = tmp_path / "timeline-save.json"
+    save_path.write_text(
+        json.dumps(
+            {
+                "starting_prompt": "Start",
+                "context_history": [],
+                "story_title": "Timeline Adventure",
+                "turn_count": 3,
+                "inventory": ["Compass"],
+                "player_stats": {"health": 91, "gold": 4, "reputation": 2},
+                "current_node": {
+                    "narrative": "You return to the crossroads.",
+                    "choices": [{"text": "Take the east road"}, {"text": "Camp"}],
+                },
+                "timeline_metadata": [
+                    {
+                        "kind": "branch_restore",
+                        "source_scene_id": "scene-3",
+                        "target_scene_id": "scene-1",
+                        "restored_turn": 2,
+                    }
+                ],
+                "ui_state": {
+                    "current_story_text": "Opening scene.\n\n> **You chose:** Go North\n\n---\n\nNorth path.",
+                    "current_turn_text": "You return to the crossroads.",
+                    "story_segments": [
+                        {"kind": "story_turn", "text": "Opening scene."},
+                        {"kind": "player_choice", "text": "**You chose:** Go North"},
+                        {"kind": "story_turn", "text": "North path."},
+                        {"kind": "branch_marker", "text": "**[Time fractures... you return to Turn 2]**"},
+                        {"kind": "story_turn", "text": "You return to the crossroads."},
+                    ],
+                    "journal_entries": [
+                        {"label": "Turn 1: Go North", "scene_index": 0, "entry_kind": "choice"},
+                        {
+                            "label": "Timeline fracture → resumed from Turn 2",
+                            "scene_index": 1,
+                            "entry_kind": "branch",
+                        },
+                    ],
+                    "journal_panel_collapsed": False,
+                    "story_map_panel_collapsed": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+
+        app._restore_from_save(str(save_path))
+        await pilot.pause(0.1)
+
+        story_widgets = list(app.query_one("#story-container").query(Markdown))
+        assert len(story_widgets) == 5
+        assert app._story_segments == [
+            {"kind": "story_turn", "text": "Opening scene."},
+            {"kind": "player_choice", "text": "**You chose:** Go North"},
+            {"kind": "story_turn", "text": "North path."},
+            {"kind": "branch_marker", "text": "**[Time fractures... you return to Turn 2]**"},
+            {"kind": "story_turn", "text": "You return to the crossroads."},
+        ]
+        assert len(list(app.query_one("#story-container").query(".story-turn"))) == 3
+        assert app.engine.state.timeline_metadata == [
+            {
+                "kind": "branch_restore",
+                "source_scene_id": "scene-3",
+                "target_scene_id": "scene-1",
+                "restored_turn": 2,
+            }
+        ]
+
+
+@pytest.mark.asyncio
 async def test_restore_from_save_accepts_partial_payload(mock_app_dependencies, tmp_path):
     save_path = tmp_path / "partial-save.json"
     save_path.write_text(
@@ -793,3 +875,41 @@ async def test_restore_from_save_accepts_partial_payload(mock_app_dependencies, 
         assert app._current_story
         buttons = list(app.query_one("#choices-container", Container).query(Button))
         assert len(buttons) == 2
+
+
+@pytest.mark.asyncio
+async def test_restore_from_save_ignores_malformed_story_segments(mock_app_dependencies, tmp_path):
+    save_path = tmp_path / "bad-story-segments.json"
+    save_path.write_text(
+        json.dumps(
+            {
+                "story_title": "Broken Timeline",
+                "current_node": {
+                    "narrative": "Recovered ending",
+                    "choices": [{"text": "Continue"}],
+                },
+                "ui_state": {
+                    "current_story_text": "Recovered history",
+                    "current_turn_text": "Recovered ending",
+                    "story_segments": [
+                        {"kind": "story_turn", "text": 99},
+                        {"kind": "bad", "text": "ignored"},
+                        "oops",
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+
+        app._restore_from_save(str(save_path))
+        await pilot.pause(0.1)
+
+        story_turns = list(app.query_one("#story-container").query(".story-turn"))
+        assert len(story_turns) == 1
+        assert app._current_turn_text == "Recovered ending"
+        assert app._story_segments == [{"kind": "story_turn", "text": "Recovered ending"}]

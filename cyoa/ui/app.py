@@ -102,6 +102,7 @@ class CYOAApp(
         self.engine: StoryEngine | None = None
         self._current_story: str = constants.LOADING_ART
         self._current_turn_text: str = constants.LOADING_ART
+        self._story_segments: list[dict[str, object]] = [{"kind": "story_turn", "text": constants.LOADING_ART}]
         self._loading_suffix_shown: bool = False
         self._unsubscribers: list[Callable[[], None]] = []
         self._subscriptions_active: bool = False
@@ -253,6 +254,22 @@ class CYOAApp(
             lambda: story_container.scroll_to_widget(target, animate=True, top=True)
         )
         self.set_timer(1.2, lambda: target.remove_class("turn-highlight"))
+
+    def _reset_story_segments(self, initial_text: str) -> None:
+        """Reset the structured story timeline to a single story turn."""
+        self._story_segments = [{"kind": "story_turn", "text": initial_text}]
+
+    def _append_story_segment(self, kind: str, text: str) -> None:
+        """Append a structured story segment for save/restore fidelity."""
+        self._story_segments.append({"kind": kind, "text": text})
+
+    def _update_current_story_segment(self, text: str) -> None:
+        """Keep the active story-turn segment synced with rendered narrative text."""
+        for segment in reversed(self._story_segments):
+            if segment.get("kind") == "story_turn":
+                segment["text"] = text
+                return
+        self._append_story_segment("story_turn", text)
 
     @work(exclusive=True)
     async def initialize_and_start(self, model_path: str) -> None:

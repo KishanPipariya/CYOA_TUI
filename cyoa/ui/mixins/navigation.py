@@ -25,6 +25,7 @@ class NavigationMixin:
 
         host._current_story = constants.LOADING_ART
         host._current_turn_text = constants.LOADING_ART
+        host._reset_story_segments(constants.LOADING_ART)
 
         container = app.query_one("#story-container", VerticalScroll)
         await container.query(Markdown).remove()
@@ -118,6 +119,16 @@ class NavigationMixin:
             host._current_turn_text = host._current_story
             host._current_turn_widget.update(host._current_turn_text)
 
+        while host._story_segments and host._story_segments[-1].get("kind") == "story_turn":
+            host._story_segments.pop()
+            break
+        if host._story_segments and host._story_segments[-1].get("kind") in {"player_choice", "branch_marker"}:
+            host._story_segments.pop()
+        if not host._story_segments:
+            host._reset_story_segments(host._current_story)
+        else:
+            host._update_current_story_segment(host._current_turn_text)
+
         # U5 Fix: Re-mount choice buttons for the restored node
         choices_container = app.query_one("#choices-container", Container)
         choices_container.remove_children()
@@ -199,6 +210,8 @@ class NavigationMixin:
 
         fracture_msg = f"\n\n***\n\n**[Time fractures... you return to Turn {idx + 1}]**"
         host._current_story += fracture_msg
+        host._append_story_segment("branch_marker", f"**[Time fractures... you return to Turn {idx + 1}]**")
+        host._append_story_segment("story_turn", "")
 
         container = app.query_one("#story-container", VerticalScroll)
         frac_md = Markdown(f"**[Time fractures... you return to Turn {idx + 1}]**", classes="player-choice")

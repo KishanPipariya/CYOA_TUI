@@ -37,10 +37,12 @@ class RenderingMixin:
             if host._current_story == constants.LOADING_ART:
                 host._current_story = ""
                 host._current_turn_text = ""
+                host._reset_story_segments("")
 
         if not host.typewriter_enabled:
             host._current_story += partial
             host._current_turn_text += partial
+            host._update_current_story_segment(host._current_turn_text)
             host._current_turn_widget.update(host._current_turn_text)
             if host._is_at_bottom():
                 host._scroll_to_bottom(animate=False)
@@ -109,6 +111,7 @@ class RenderingMixin:
             error_msg = "\n\n> ⚠️ **An error occurred.** The story engine could not generate a valid response."
             host._current_story += error_msg
             host._current_turn_text += error_msg
+            host._update_current_story_segment(host._current_turn_text)
 
         # 4. Update the widget
         try:
@@ -151,10 +154,12 @@ class RenderingMixin:
             if host._current_story == constants.LOADING_ART:
                 host._current_story = ""
                 host._current_turn_text = ""
+                host._reset_story_segments("")
 
             if not host.typewriter_enabled:
                 host._current_story += narrative
                 host._current_turn_text += narrative
+                host._update_current_story_segment(host._current_turn_text)
             else:
                 host._typewriter_queue.put_nowait(narrative)
         else:
@@ -169,6 +174,7 @@ class RenderingMixin:
                 host._current_story = narrative
 
             host._current_turn_text = narrative
+            host._update_current_story_segment(host._current_turn_text)
 
     def _update_ui_stats(self) -> None:
         """Update UI stats from engine state."""
@@ -235,6 +241,8 @@ class RenderingMixin:
         host.action_skip_typewriter()
         host._current_story += f"\n\n> **You chose:** {choice_text}"
         host._current_story += "\n\n---\n\n"
+        host._append_story_segment("player_choice", f"**You chose:** {choice_text}")
+        host._append_story_segment("story_turn", "")
 
         container = app.query_one("#story-container", VerticalScroll)
         choice_md = Markdown(f"**You chose:** {choice_text}", classes="player-choice")

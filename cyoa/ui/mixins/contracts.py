@@ -25,6 +25,7 @@ class CYOAAppMixinContract(Protocol):
     typewriter_speed: str
     _current_story: str
     _current_turn_text: str
+    _story_segments: list[dict[str, object]]
     _loading_suffix_shown: bool
     _is_shutting_down: bool
     _current_turn_widget: Markdown
@@ -44,6 +45,9 @@ class CYOAAppMixinContract(Protocol):
     def _mount_choice_buttons(
         self, node: StoryNode, choices_container: Container, is_error: bool
     ) -> None: ...
+    def _reset_story_segments(self, initial_text: str) -> None: ...
+    def _append_story_segment(self, kind: str, text: str) -> None: ...
+    def _update_current_story_segment(self, text: str) -> None: ...
     def speculate_all_choices(self, node: StoryNode) -> Any: ...
 
 

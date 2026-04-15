@@ -96,11 +96,13 @@ class TypewriterMixin:
             to_add = "".join(host._typewriter_active_chunk)
             host._current_story += to_add
             host._current_turn_text += to_add
+            host._update_current_story_segment(host._current_turn_text)
             host._typewriter_active_chunk.clear()
             while not host._typewriter_queue.empty():
                 to_add = host._typewriter_queue.get_nowait()
                 host._current_story += to_add
                 host._current_turn_text += to_add
+                host._update_current_story_segment(host._current_turn_text)
         elif q_size > 10:
             batch_size = constants.TYPEWRITER_MAX_BATCH
 
@@ -109,6 +111,7 @@ class TypewriterMixin:
             host._typewriter_active_chunk = host._typewriter_active_chunk[batch_size:]
             host._current_story += to_add
             host._current_turn_text += to_add
+            host._update_current_story_segment(host._current_turn_text)
 
     def action_skip_typewriter(self) -> None:
         """Instantly reveal all pending text in the typewriter queue."""
@@ -121,6 +124,7 @@ class TypewriterMixin:
             to_add = "".join(host._typewriter_active_chunk)
             host._current_story += to_add
             host._current_turn_text += to_add
+            host._update_current_story_segment(host._current_turn_text)
             host._typewriter_active_chunk.clear()
 
         # Flush queue
@@ -129,6 +133,7 @@ class TypewriterMixin:
                 to_add = host._typewriter_queue.get_nowait()
                 host._current_story += to_add
                 host._current_turn_text += to_add
+                host._update_current_story_segment(host._current_turn_text)
             except asyncio.QueueEmpty:
                 break
         host._is_typing = False

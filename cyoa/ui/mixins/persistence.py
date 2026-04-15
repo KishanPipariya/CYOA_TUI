@@ -1,6 +1,8 @@
+import asyncio
 import json
 import logging
 import os
+from queue import Empty
 
 from textual.containers import Container, VerticalScroll
 from textual.widgets import Button, Label, ListView, Markdown
@@ -27,6 +29,56 @@ class PersistenceMixin:
         if not isinstance(payload, list):
             return []
         return [entry for entry in payload if isinstance(entry, dict)]
+
+    @staticmethod
+    def _coerce_story_segments(payload: object) -> list[dict[str, str]]:
+        """Normalize structured story timeline entries from save payloads."""
+        if not isinstance(payload, list):
+            return []
+
+        normalized: list[dict[str, str]] = []
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            kind = entry.get("kind")
+            text = entry.get("text")
+            if kind not in {"story_turn", "player_choice", "branch_marker"} or not isinstance(text, str):
+                continue
+            normalized.append({"kind": kind, "text": text})
+        return normalized
+
+    @staticmethod
+    def _render_story_segments(segments: list[dict[str, str]]) -> str:
+        """Rebuild the flattened story text from structured timeline segments."""
+        story_text = ""
+        for segment in segments:
+            if segment["kind"] == "player_choice":
+                if story_text:
+                    story_text += "\n\n"
+                story_text += f"> {segment['text']}\n\n---\n\n"
+            elif segment["kind"] == "branch_marker":
+                story_text += f"\n\n***\n\n{segment['text']}"
+            else:
+                story_text += segment["text"]
+        return story_text
+
+    def _snapshot_story_segments(self, host: object) -> list[dict[str, str]]:
+        """Serialize structured timeline state, falling back to a flat story turn if needed."""
+        mixin_host = as_mixin_host(host)
+        segments = [
+            {
+                "kind": str(segment.get("kind", "story_turn")),
+                "text": str(segment.get("text", "")),
+            }
+            for segment in mixin_host._story_segments
+            if isinstance(segment, dict)
+        ]
+        normalized = self._coerce_story_segments(segments)
+        if normalized and self._render_story_segments(normalized) == mixin_host._current_story:
+            return normalized
+        if mixin_host._current_story:
+            return [{"kind": "story_turn", "text": mixin_host._current_story}]
+        return normalized
 
     @staticmethod
     def _coerce_scene_index(value: object) -> int:
@@ -71,6 +123,7 @@ class PersistenceMixin:
         )
         save_data["ui_state"] = {
             "current_story_text": host._current_story,
+            "story_segments": self._snapshot_story_segments(host),
             "journal_entries": [
                 {
                     "label": item.label_text,
@@ -132,30 +185,85 @@ class PersistenceMixin:
 
         # Cancel speculative generation before hydrating; keep core UI workers alive.
         app.workers.cancel_group(app, "speculation")
+        host._is_typing = False
+        host._typewriter_active_chunk.clear()
+        while True:
+            try:
+                host._typewriter_queue.get_nowait()
+            except (asyncio.QueueEmpty, Empty, AttributeError):
+                break
 
         ui_state = self._coerce_ui_state(data.get("ui_state"))
         host.engine.load_save_data(data)
 
         current_story_text = ui_state.get("current_story_text")
-        host._current_story = (
-            current_story_text if isinstance(current_story_text, str) and current_story_text else constants.LOADING_ART
-        )
+        story_segments = self._coerce_story_segments(ui_state.get("story_segments"))
+        if story_segments:
+            host._story_segments = [
+                {"kind": segment["kind"], "text": segment["text"]}
+                for segment in story_segments
+            ]
+            story_text = ""
+            current_turn_from_segments = ""
+            for segment in story_segments:
+                if segment["kind"] == "player_choice":
+                    if story_text:
+                        story_text += "\n\n"
+                    story_text += f"> {segment['text']}\n\n---\n\n"
+                elif segment["kind"] == "branch_marker":
+                    story_text += f"\n\n***\n\n{segment['text']}"
+                else:
+                    story_text += segment["text"]
+                    current_turn_from_segments = segment["text"]
+            host._current_story = story_text or constants.LOADING_ART
+        else:
+            host._current_story = (
+                current_story_text
+                if isinstance(current_story_text, str) and current_story_text
+                else constants.LOADING_ART
+            )
+            current_turn_from_segments = ""
+            host._reset_story_segments(host._current_story)
         current_turn_text = ui_state.get("current_turn_text")
         host._current_turn_text = (
-            current_turn_text if isinstance(current_turn_text, str) else host._current_story
+            current_turn_text
+            if isinstance(current_turn_text, str)
+            else current_turn_from_segments or host._current_story
         )
+        host._update_current_story_segment(host._current_turn_text)
         host._loading_suffix_shown = False
         mood = ui_state.get("mood")
         host.mood = mood if isinstance(mood, str) else "default"
 
         # Sync UI
         container = app.query_one("#story-container", VerticalScroll)
-        for md in container.query(Markdown):
+        existing_markdown = list(container.query(Markdown))
+        reusable_turn = existing_markdown[0] if existing_markdown else None
+        for md in existing_markdown[1:]:
             md.remove()
+        story_turns: list[Markdown] = []
+        for index, segment in enumerate(host._story_segments):
+            kind = segment.get("kind")
+            text = segment.get("text", "")
+            if index == 0 and reusable_turn is not None and kind == "story_turn":
+                reusable_turn.set_classes("story-turn")
+                reusable_turn.update(str(text))
+                mounted = reusable_turn
+                story_turns.append(mounted)
+                continue
+            if kind in {"player_choice", "branch_marker"}:
+                mounted = Markdown(str(text), classes="player-choice")
+            else:
+                mounted = Markdown(str(text), classes="story-turn")
+                story_turns.append(mounted)
+            container.mount(mounted, before="#scene-art")
 
-        new_turn = Markdown(host._current_turn_text, classes="story-turn")
-        container.mount(new_turn, before="#scene-art")
-        host._current_turn_widget = new_turn
+        if story_turns:
+            host._current_turn_widget = story_turns[-1]
+        else:
+            new_turn = Markdown(host._current_turn_text, classes="story-turn")
+            container.mount(new_turn, before="#scene-art")
+            host._current_turn_widget = new_turn
 
         host._scroll_to_bottom()
 

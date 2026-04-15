@@ -19,6 +19,7 @@ class EventsMixin:
         host.turn_count = 1
         host.mood = "default"
         host._last_stats_snapshot = None
+        host._reset_story_segments("")
         app.query_one("#journal-list", ListView).clear()
 
     def _handle_engine_restarted(self) -> None:
