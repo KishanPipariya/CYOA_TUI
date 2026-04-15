@@ -247,6 +247,7 @@ class PersistenceMixin:
                 for item in journal_list.query(JournalListItem)
             ],
             "current_turn_text": current_turn_text,
+            "active_turn": host.engine.state.turn_count,
             "mood": host.mood,
             "journal_panel_collapsed": app.query_one("#journal-panel", Container).has_class("panel-collapsed"),
             "story_map_panel_collapsed": app.query_one("#story-map-panel", Container).has_class("panel-collapsed"),
@@ -300,6 +301,7 @@ class PersistenceMixin:
         self._clear_restore_runtime_state(host, app)
         ui_state = self._coerce_ui_state(data.get("ui_state"))
         host.engine.load_save_data(data)
+        host.turn_count = host.engine.state.turn_count
         self._restore_story_state(host, ui_state)
         self._restore_story_widgets(host, app)
 
@@ -311,6 +313,9 @@ class PersistenceMixin:
         else:
             choices_container.mount(Button("✦ Start a New Adventure", id="btn-new-adventure", variant="success"))
         self._restore_journal_and_panels(app, ui_state)
+        story_map_panel = app.query_one("#story-map-panel", Container)
+        if not story_map_panel.has_class("panel-collapsed"):
+            host.update_story_map()
 
         app.notify(
             f"Loaded save from Turn {host.engine.state.turn_count}.",

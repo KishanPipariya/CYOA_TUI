@@ -655,6 +655,7 @@ async def test_save_and_load_game(mock_app_dependencies, tmp_path, monkeypatch):
         assert payload["ui_state"]["current_turn_text"]
         assert payload["ui_state"]["journal_entries"][0]["entry_kind"] == "choice"
         assert payload["ui_state"]["story_segments"][-1]["kind"] == "story_turn"
+        assert payload["ui_state"]["active_turn"] == 2
 
         # Restart the game
         await pilot.press("r")
@@ -871,6 +872,7 @@ async def test_restore_from_save_accepts_partial_payload(mock_app_dependencies, 
 
         assert app.engine.state.story_title == "Partial Adventure"
         assert app.engine.state.turn_count == 1
+        assert app.turn_count == 1
         assert app.engine.state.inventory == []
         assert app._current_story
         buttons = list(app.query_one("#choices-container", Container).query(Button))
@@ -913,3 +915,96 @@ async def test_restore_from_save_ignores_malformed_story_segments(mock_app_depen
         assert len(story_turns) == 1
         assert app._current_turn_text == "Recovered ending"
         assert app._story_segments == [{"kind": "story_turn", "text": "Recovered ending"}]
+
+
+@pytest.mark.asyncio
+async def test_restore_from_save_does_not_rebuild_branch_context_without_story_segments(
+    mock_app_dependencies, tmp_path
+):
+    save_path = tmp_path / "legacy-branch-save.json"
+    save_path.write_text(
+        json.dumps(
+            {
+                "story_title": "Legacy Branch Adventure",
+                "turn_count": 4,
+                "timeline_metadata": [
+                    {
+                        "kind": "branch_restore",
+                        "source_scene_id": "scene-8",
+                        "target_scene_id": "scene-2",
+                        "restored_turn": 2,
+                    }
+                ],
+                "current_node": {
+                    "narrative": "You return to the crossroads.",
+                    "choices": [{"text": "Take the east road"}, {"text": "Camp"}],
+                },
+                "ui_state": {
+                    "current_story_text": "Opening scene.\n\nNorth path.\n\nYou return to the crossroads.",
+                    "current_turn_text": "You return to the crossroads.",
+                    "journal_entries": [],
+                    "journal_panel_collapsed": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+
+        app._restore_from_save(str(save_path))
+        await pilot.pause(0.1)
+
+        assert app.turn_count == 4
+        assert app._story_segments == [
+            {"kind": "story_turn", "text": "You return to the crossroads."},
+        ]
+        journal_items = list(app.query_one("#journal-list", ListView).children)
+        assert len(journal_items) == 0
+
+
+@pytest.mark.asyncio
+async def test_restore_from_save_ignores_branch_state_without_structured_timeline(
+    mock_app_dependencies, tmp_path
+):
+    save_path = tmp_path / "bad-branch-state-save.json"
+    save_path.write_text(
+        json.dumps(
+            {
+                "story_title": "Malformed Branch Adventure",
+                "turn_count": 3,
+                "timeline_metadata": [
+                    {
+                        "kind": "branch_restore",
+                        "source_scene_id": "scene-5",
+                        "target_scene_id": "scene-1",
+                        "restored_turn": "3",
+                    }
+                ],
+                "current_node": {
+                    "narrative": "Recovered branch scene",
+                    "choices": [{"text": "Continue"}, {"text": "Wait"}],
+                },
+                "ui_state": {
+                    "current_story_text": "Recovered branch scene",
+                    "current_turn_text": "Recovered branch scene",
+                    "branch_state": {"restored_turn": 99},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+
+        app._restore_from_save(str(save_path))
+        await pilot.pause(0.1)
+
+        assert app.turn_count == 3
+        assert app._story_segments == [
+            {"kind": "story_turn", "text": "Recovered branch scene"},
+        ]
