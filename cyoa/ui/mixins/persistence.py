@@ -4,6 +4,7 @@ import logging
 import os
 from queue import Empty
 
+from textual.css.query import NoMatches
 from textual.containers import Container, VerticalScroll
 from textual.widgets import Button, Label, ListView, Markdown
 
@@ -15,6 +16,15 @@ logger = logging.getLogger(__name__)
 
 class PersistenceMixin:
     """Mixin for save/load game persistence."""
+
+    @staticmethod
+    def _query_optional_container(app: object, selector: str) -> Container | None:
+        """Return a mounted container when available, otherwise tolerate early restore timing."""
+        textual_app = as_textual_app(app)
+        try:
+            return textual_app.query_one(selector, Container)
+        except NoMatches:
+            return None
 
     @staticmethod
     def _clear_restore_runtime_state(host: object, app: object) -> None:
@@ -123,12 +133,14 @@ class PersistenceMixin:
                 )
             )
 
-        journal_panel = textual_app.query_one("#journal-panel", Container)
-        story_map_panel = textual_app.query_one("#story-map-panel", Container)
+        journal_panel = self._query_optional_container(app, "#journal-panel")
+        story_map_panel = self._query_optional_container(app, "#story-map-panel")
         journal_collapsed = ui_state.get("journal_panel_collapsed")
         story_map_collapsed = ui_state.get("story_map_panel_collapsed")
-        journal_panel.set_class(journal_collapsed is not False, "panel-collapsed")
-        story_map_panel.set_class(story_map_collapsed is not False, "panel-collapsed")
+        if journal_panel is not None:
+            journal_panel.set_class(journal_collapsed is not False, "panel-collapsed")
+        if story_map_panel is not None:
+            story_map_panel.set_class(story_map_collapsed is not False, "panel-collapsed")
 
     @staticmethod
     def _coerce_ui_state(payload: object) -> dict[str, object]:
@@ -314,8 +326,8 @@ class PersistenceMixin:
         else:
             choices_container.mount(Button("✦ Start a New Adventure", id="btn-new-adventure", variant="success"))
         self._restore_journal_and_panels(app, ui_state)
-        story_map_panel = app.query_one("#story-map-panel", Container)
-        if not story_map_panel.has_class("panel-collapsed"):
+        story_map_panel = self._query_optional_container(app, "#story-map-panel")
+        if story_map_panel is not None and not story_map_panel.has_class("panel-collapsed"):
             host.update_story_map()
 
         app.notify(

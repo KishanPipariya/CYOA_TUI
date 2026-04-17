@@ -9,6 +9,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
+from textual.css.query import NoMatches
 from textual.events import Click, Resize
 from textual.reactive import reactive
 from textual.widgets import (
@@ -396,7 +397,10 @@ class CYOAApp(
                 timeout=5,
             )
 
-        story_map_panel = self.query_one("#story-map-panel", Container)
+        try:
+            story_map_panel = self.query_one("#story-map-panel", Container)
+        except NoMatches:
+            return
         if not story_map_panel.has_class("panel-collapsed"):
             self.update_story_map()
 

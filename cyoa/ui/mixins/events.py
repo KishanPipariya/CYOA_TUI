@@ -1,5 +1,6 @@
 from typing import Literal
 
+from textual.css.query import NoMatches
 from textual.containers import Container
 from textual.widgets import ListView, Static
 
@@ -50,7 +51,10 @@ class EventsMixin:
         host.display_node(node)
         host.mark_first_scene_rendered()
         # Avoid DB/UI work when the panel is hidden.
-        story_map_panel = app.query_one("#story-map-panel", Container)
+        try:
+            story_map_panel = app.query_one("#story-map-panel", Container)
+        except NoMatches:
+            return
         if not story_map_panel.has_class("panel-collapsed"):
             if first_scene_render:
                 app.call_after_refresh(host.update_story_map)

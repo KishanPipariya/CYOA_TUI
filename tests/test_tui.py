@@ -5,6 +5,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from textual.css.query import NoMatches
 from textual.containers import Container
 from textual.widgets import Button, Label, ListView, Markdown
 from textual.worker import WorkerFailed
@@ -61,6 +62,21 @@ def _mock_generator(*args, **kwargs):
     mock_gen.provider = MagicMock()
     mock_gen.provider.count_tokens = MagicMock(return_value=10)
     return mock_gen
+
+
+async def _wait_for(
+    predicate: Any,
+    *,
+    timeout: float = 3.0,
+    interval: float = 0.05,
+) -> None:
+    """Poll until a condition becomes true to avoid fixed-delay UI test races."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(interval)
+    raise AssertionError("Timed out waiting for test condition")
 
 
 @pytest.fixture
@@ -857,7 +873,7 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for(lambda: app.engine is not None and app.engine.state.current_node is not None)
 
         # Set some unique state
         from cyoa.core.models import Choice, StoryNode
@@ -876,12 +892,12 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
 
         # Save
         await pilot.press("s")
-        await pilot.pause(0.2)
+        await _wait_for(lambda: len([f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]) == 1)
 
         # Create a new app instance to simulate loading fresh
         app2 = CYOAApp(model_path="dummy_path.gguf")
         async with app2.run_test() as pilot2:
-            await pilot2.pause(1.0) # Wait for engine to initialize
+            await _wait_for(lambda: app2.engine is not None and app2.engine.state.current_node is not None)
 
             # Find the save file
             save_files = [f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]
@@ -948,6 +964,57 @@ async def test_restore_from_save_handles_malformed_ui_state(mock_app_dependencie
         journal_items = list(app.query_one("#journal-list", ListView).children)
         assert len(journal_items) == 1
         assert "Unknown Turn" in journal_items[0].query_one(Label).render().plain
+
+
+@pytest.mark.asyncio
+async def test_restore_from_save_tolerates_missing_story_map_panel(
+    mock_app_dependencies, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    save_path = tmp_path / "missing-story-map-save.json"
+    save_path.write_text(
+        json.dumps(
+            {
+                "starting_prompt": "Start",
+                "context_history": [],
+                "story_title": "Recovered Adventure",
+                "turn_count": 2,
+                "inventory": ["Torch"],
+                "player_stats": {"health": 77, "gold": 3, "reputation": 1},
+                "current_node": {
+                    "narrative": "Recovered scene",
+                    "choices": [{"text": "Continue"}, {"text": "Wait"}],
+                },
+                "ui_state": {
+                    "current_story_text": "Recovered scene",
+                    "current_turn_text": "Recovered scene",
+                    "journal_entries": [],
+                    "story_map_panel_collapsed": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+
+        original_query_one = app.query_one
+
+        def query_one_without_story_map(*args: Any, **kwargs: Any) -> Any:
+            selector = args[0] if args else None
+            if selector == "#story-map-panel":
+                raise NoMatches("No nodes match '#story-map-panel' on Screen(id='_default')")
+            return original_query_one(*args, **kwargs)
+
+        monkeypatch.setattr(app, "query_one", query_one_without_story_map)
+
+        app._restore_from_save(str(save_path))
+        await pilot.pause(0.1)
+
+        assert app._current_story == "Recovered scene"
+        assert app.engine is not None
+        assert app.engine.state.turn_count == 2
 
 
 @pytest.mark.asyncio
