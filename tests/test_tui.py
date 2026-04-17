@@ -80,6 +80,22 @@ async def _wait_for(
     raise AssertionError("Timed out waiting for test condition")
 
 
+async def _wait_for_pilot(
+    pilot: Any,
+    predicate: Any,
+    *,
+    timeout: float = 3.0,
+    interval: float = 0.05,
+) -> None:
+    """Poll a UI condition while advancing Textual's test pilot loop."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
+        if predicate():
+            return
+        await pilot.pause(interval)
+    raise AssertionError("Timed out waiting for test condition")
+
+
 @pytest.fixture
 def mock_app_dependencies():
     """Mock the LLM Generator and DB to be fast and deterministic in UI tests."""
@@ -855,7 +871,7 @@ async def test_notifications_use_solid_left_border(mock_app_dependencies) -> Non
     async with app.run_test(notifications=True) as pilot:
         await pilot.pause(1.0)
         app.notify("Border regression check", severity="warning", timeout=10)
-        await _wait_for(lambda: len(app.query(Toast)) == 1)
+        await pilot.pause(0.2)
 
         toast = app.query_one(Toast)
         assert toast.styles.border_left == ("solid", toast.styles.border_left[1])
@@ -917,14 +933,20 @@ async def test_save_game_succeeds_before_story_title_is_persisted(
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await _wait_for(lambda: app.engine is not None and app.engine.state.current_node is not None)
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
 
         assert app.engine is not None
         app.engine.state.story_title = None
         app.engine.state.current_node.title = "Recovered Save Title"
 
         await pilot.press("s")
-        await _wait_for(lambda: len([f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]) == 1)
+        await _wait_for_pilot(
+            pilot,
+            lambda: len([f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]) == 1,
+        )
 
         save_files = [f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]
         assert save_files == ["Recovered Save Title_turn1.json"]
@@ -945,7 +967,10 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await _wait_for(lambda: app.engine is not None and app.engine.state.current_node is not None)
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
 
         # Set some unique state
         from cyoa.core.models import Choice, StoryNode
@@ -964,12 +989,18 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
 
         # Save
         await pilot.press("s")
-        await _wait_for(lambda: len([f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]) == 1)
+        await _wait_for_pilot(
+            pilot,
+            lambda: len([f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]) == 1,
+        )
 
         # Create a new app instance to simulate loading fresh
         app2 = CYOAApp(model_path="dummy_path.gguf")
-        async with app2.run_test():
-            await _wait_for(lambda: app2.engine is not None and app2.engine.state.current_node is not None)
+        async with app2.run_test() as pilot2:
+            await _wait_for_pilot(
+                pilot2,
+                lambda: app2.engine is not None and app2.engine.state.current_node is not None,
+            )
 
             # Find the save file
             save_files = [f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]
