@@ -346,6 +346,7 @@ def test_setup_observability_without_otlp_endpoint(
     monkeypatch.setattr(obs.Resource, "create", create_resource)
     monkeypatch.setattr(obs, "TracerProvider", tracer_provider_factory)
     monkeypatch.setattr(obs, "MeterProvider", meter_provider_factory)
+    monkeypatch.setattr(obs, "_is_otlp_endpoint_reachable", MagicMock(return_value=False))
     monkeypatch.setattr(obs.trace, "set_tracer_provider", set_tracer_provider)
     monkeypatch.setattr(obs.metrics, "set_meter_provider", set_meter_provider)
 
@@ -385,6 +386,7 @@ def test_setup_observability_with_otlp_endpoint(
     monkeypatch.setattr(obs.Resource, "create", create_resource)
     monkeypatch.setattr(obs, "TracerProvider", tracer_provider_factory)
     monkeypatch.setattr(obs, "MeterProvider", meter_provider_factory)
+    monkeypatch.setattr(obs, "_is_otlp_endpoint_reachable", MagicMock(return_value=True))
     monkeypatch.setattr(obs, "OTLPSpanExporter", span_exporter_factory)
     monkeypatch.setattr(obs, "BatchSpanProcessor", span_processor_factory)
     monkeypatch.setattr(obs, "OTLPMetricExporter", metric_exporter_factory)
@@ -412,3 +414,38 @@ def test_setup_observability_with_otlp_endpoint(
     set_meter_provider.assert_called_once_with(meter_provider)
     assert "OTLP Trace Exporter initialized." in caplog.text
     assert "OTLP Metric Exporter initialized." in caplog.text
+
+
+def test_setup_observability_with_unreachable_otlp_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    tracer_provider = MagicMock()
+    meter_provider = MagicMock()
+    set_tracer_provider = MagicMock()
+    set_meter_provider = MagicMock()
+    create_resource = MagicMock(return_value="resource")
+    tracer_provider_factory = MagicMock(return_value=tracer_provider)
+    meter_provider_factory = MagicMock(return_value=meter_provider)
+    span_exporter_factory = MagicMock()
+    metric_exporter_factory = MagicMock()
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
+    monkeypatch.setattr(obs.Resource, "create", create_resource)
+    monkeypatch.setattr(obs, "TracerProvider", tracer_provider_factory)
+    monkeypatch.setattr(obs, "MeterProvider", meter_provider_factory)
+    monkeypatch.setattr(obs, "_is_otlp_endpoint_reachable", MagicMock(return_value=False))
+    monkeypatch.setattr(obs, "OTLPSpanExporter", span_exporter_factory)
+    monkeypatch.setattr(obs, "OTLPMetricExporter", metric_exporter_factory)
+    monkeypatch.setattr(obs.trace, "set_tracer_provider", set_tracer_provider)
+    monkeypatch.setattr(obs.metrics, "set_meter_provider", set_meter_provider)
+
+    with caplog.at_level("INFO"):
+        obs.setup_observability()
+
+    span_exporter_factory.assert_not_called()
+    metric_exporter_factory.assert_not_called()
+    tracer_provider.add_span_processor.assert_not_called()
+    set_tracer_provider.assert_called_once_with(tracer_provider)
+    set_meter_provider.assert_called_once_with(meter_provider)
+    assert "OTLP endpoint configured but unavailable; tracing will stay local." in caplog.text

@@ -1,8 +1,10 @@
 import logging
 import os
+import socket
 import time
 from types import TracebackType
 from typing import Self
+from urllib.parse import urlparse
 
 from opentelemetry import metrics, trace
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
@@ -20,6 +22,38 @@ logger = logging.getLogger(__name__)
 SERVICE_NAME = "cyoa-tui"
 
 
+def _is_otlp_endpoint_reachable(endpoint: str) -> bool:
+    """Return whether the configured OTLP collector appears reachable."""
+    parsed = urlparse(endpoint)
+    if not parsed.scheme or not parsed.hostname:
+        logger.warning(
+            "Ignoring invalid OTLP endpoint %r; tracing and metrics will stay local.",
+            endpoint,
+        )
+        return False
+
+    default_port = 4318 if parsed.scheme in {"http", "https"} else None
+    port = parsed.port or default_port
+    if port is None:
+        logger.warning(
+            "OTLP endpoint %r is missing a port; tracing and metrics will stay local.",
+            endpoint,
+        )
+        return False
+
+    try:
+        with socket.create_connection((parsed.hostname, port), timeout=0.2):
+            return True
+    except OSError as exc:
+        logger.warning(
+            "OTLP endpoint %s:%s is unreachable (%s); tracing and metrics will stay local.",
+            parsed.hostname,
+            port,
+            exc,
+        )
+        return False
+
+
 def setup_observability() -> None:
     """Initialize OpenTelemetry tracers and meters."""
     resource = Resource.create({"service.name": SERVICE_NAME})
@@ -31,10 +65,14 @@ def setup_observability() -> None:
     # For now we'll use OTLP if an endpoint is set, otherwise maybe just logs?
     otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 
-    if otlp_endpoint:
+    otlp_available = bool(otlp_endpoint and _is_otlp_endpoint_reachable(otlp_endpoint))
+
+    if otlp_available:
         span_exporter = OTLPSpanExporter()
         tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
         logger.info("OTLP Trace Exporter initialized.")
+    elif otlp_endpoint:
+        logger.info("OTLP endpoint configured but unavailable; tracing will stay local.")
     else:
         logger.info("No OTEL_EXPORTER_OTLP_ENDPOINT found; tracing will be no-op or local.")
 
@@ -42,7 +80,7 @@ def setup_observability() -> None:
 
     # Metrics setup
     metric_reader = None
-    if otlp_endpoint:
+    if otlp_available:
         metric_exporter = OTLPMetricExporter()
         metric_reader = PeriodicExportingMetricReader(metric_exporter)
         logger.info("OTLP Metric Exporter initialized.")
