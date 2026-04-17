@@ -1,0 +1,407 @@
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+from textual.app import App, ComposeResult
+from textual.containers import Container
+from textual.theme import Theme
+from textual.widgets import Label, ListView, ProgressBar
+
+from cyoa.core import constants
+from cyoa.ui.components import BranchScreen, LoadGameScreen, StatusDisplay, ThemeSpinner
+from cyoa.ui.mixins.events import EventsMixin
+from cyoa.ui.mixins.navigation import NavigationMixin
+from cyoa.ui.mixins.persistence import PersistenceMixin
+from cyoa.ui.mixins.rendering import RenderingMixin, _detect_scene_art
+from cyoa.ui.mixins.theme import ThemeMixin
+from cyoa.ui.mixins.typewriter import TypewriterMixin
+
+
+class DummyTypewriterHost(TypewriterMixin):
+    def __init__(self) -> None:
+        self.runtime_active = True
+        self._is_typing = True
+        self._typewriter_active_chunk: list[str] = []
+        self._typewriter_queue: asyncio.Queue[str] = asyncio.Queue()
+        self._current_story = ""
+        self._current_turn_text = ""
+        self._current_turn_widget = MagicMock()
+        self.typewriter_speed = "instant"
+        self.typewriter_enabled = True
+        self.segment_updates: list[str] = []
+        self.notifications: list[str] = []
+        self.scroll_calls: list[bool] = []
+
+    def is_runtime_active(self) -> bool:
+        return self.runtime_active
+
+    def _is_at_bottom(self) -> bool:
+        return True
+
+    def _scroll_to_bottom(self, animate: bool = True) -> None:
+        self.scroll_calls.append(animate)
+
+    def _update_current_story_segment(self, text: str) -> None:
+        self.segment_updates.append(text)
+
+    def notify(self, message: str, **_: object) -> None:
+        self.notifications.append(message)
+
+
+class DummyThemeHost(ThemeMixin):
+    def __init__(self) -> None:
+        self.dark = True
+        self.theme = "textual-dark"
+        self.registered_theme_names: list[str] = []
+
+    def register_theme(self, theme: Theme) -> None:
+        self.registered_theme_names.append(theme.name)
+
+
+class DummyRenderingHost(RenderingMixin):
+    def __init__(self) -> None:
+        self.runtime_active = True
+        self.typewriter_enabled = False
+        self._loading_suffix_shown = True
+        self._current_story = constants.LOADING_ART
+        self._current_turn_text = constants.LOADING_ART
+        self._current_turn_widget = MagicMock()
+        self._typewriter_queue: asyncio.Queue[str] = asyncio.Queue()
+        self.reset_calls: list[str] = []
+        self.segment_updates: list[str] = []
+        self.scroll_calls: list[bool] = []
+        self.loading_widget = MagicMock()
+
+    def is_runtime_active(self) -> bool:
+        return self.runtime_active
+
+    def query_one(self, selector: str, *_args: object) -> object:
+        if selector == "#loading":
+            return self.loading_widget
+        raise AssertionError(selector)
+
+    def _reset_story_segments(self, initial_text: str) -> None:
+        self.reset_calls.append(initial_text)
+
+    def _update_current_story_segment(self, text: str) -> None:
+        self.segment_updates.append(text)
+
+    def _is_at_bottom(self) -> bool:
+        return True
+
+    def _scroll_to_bottom(self, animate: bool = True) -> None:
+        self.scroll_calls.append(animate)
+
+    def action_skip_typewriter(self) -> None:
+        self._current_story = "old prefix\n\n---\n\nstale"
+
+
+class DummyPersistenceHost:
+    def __init__(self) -> None:
+        self.engine = SimpleNamespace(
+            state=SimpleNamespace(
+                story_title="",
+                current_node=SimpleNamespace(title=""),
+            )
+        )
+        self._story_segments = [{"kind": "story_turn", "text": "segment"}]
+        self._current_story = "flattened story"
+        self._is_typing = True
+        self._typewriter_active_chunk = ["a"]
+        self._typewriter_queue: asyncio.Queue[str] = asyncio.Queue()
+
+
+class DummyPersistenceApp:
+    def __init__(self) -> None:
+        self.workers = SimpleNamespace(cancel_group=MagicMock())
+
+
+class DummyEventsHost(EventsMixin):
+    def __init__(self) -> None:
+        self.runtime_active = True
+        self._last_stats_snapshot = {"health": 100, "gold": 1, "reputation": 0}
+        self.status_display = SimpleNamespace(health=0, gold=0, reputation=0, objectives=[])
+        self.notifications: list[tuple[str, str]] = []
+
+    def is_runtime_active(self) -> bool:
+        return self.runtime_active
+
+    def query_one(self, selector: object, *_args: object) -> object:
+        return self.status_display
+
+    def queue_notification(
+        self,
+        message: str,
+        *,
+        severity: str = "information",
+        timeout: float = 3,
+        batch: bool = True,
+    ) -> None:
+        self.notifications.append((message, severity))
+
+
+class StatusDisplayHarness(App[None]):
+    def compose(self) -> ComposeResult:
+        yield StatusDisplay()
+
+
+class SpinnerHarness(App[None]):
+    def compose(self) -> ComposeResult:
+        yield ThemeSpinner(["[a]", "[b]"], id="spinner")
+
+
+class BranchScreenHarness(App[None]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.screen_ref = BranchScreen(
+            scenes=[{"narrative": "A very long scene " * 20, "available_choices": ["A"], "inventory": ["Torch"]}],
+            choices=["Take torch"],
+        )
+
+    def compose(self) -> ComposeResult:
+        yield Container()
+
+    async def on_mount(self) -> None:
+        self.push_screen(self.screen_ref)
+
+
+class LoadScreenHarness(App[None]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.screen_ref = LoadGameScreen(["test_adventure_turn2.json"])
+
+    def compose(self) -> ComposeResult:
+        yield Container()
+
+    async def on_mount(self) -> None:
+        self.push_screen(self.screen_ref)
+
+
+def test_typewriter_batch_catchup_consumes_active_chunk_and_queue():
+    host = DummyTypewriterHost()
+    host._typewriter_active_chunk = list("abc")
+    for _ in range(constants.TYPEWRITER_CATCHUP_THRESHOLD + 1):
+        host._typewriter_queue.put_nowait("x")
+
+    host._handle_typewriter_batch()
+
+    assert host._typewriter_active_chunk == []
+    assert host._typewriter_queue.empty()
+    assert host._current_story.startswith("abc")
+    assert host._current_turn_text == host._current_story
+    assert host.segment_updates
+
+
+def _render_text(widget: Label | ThemeSpinner) -> str:
+    return str(widget.render())
+
+
+def test_skip_typewriter_flushes_pending_text_and_updates_widget():
+    host = DummyTypewriterHost()
+    host._typewriter_active_chunk = list("hi")
+    host._typewriter_queue.put_nowait(" there")
+
+    host.action_skip_typewriter()
+
+    assert host._current_story == "hi there"
+    assert host._current_turn_text == "hi there"
+    assert host._is_typing is False
+    host._current_turn_widget.update.assert_called_once_with("hi there")
+    assert host.scroll_calls == [True]
+
+
+def test_should_stop_typewriter_clears_state_when_runtime_is_inactive():
+    host = DummyTypewriterHost()
+    host.runtime_active = False
+    host._typewriter_active_chunk = list("late")
+
+    assert host._should_stop_typewriter() is True
+    assert host._is_typing is False
+    assert host._typewriter_active_chunk == []
+
+
+def test_theme_toggle_dark_and_apply_custom_accent(monkeypatch: pytest.MonkeyPatch):
+    host = DummyThemeHost()
+    config: dict[str, object] = {}
+
+    monkeypatch.setattr("cyoa.ui.mixins.theme.utils.load_config", lambda: config)
+    monkeypatch.setattr("cyoa.ui.mixins.theme.utils.save_config", lambda payload: config.update(payload))
+
+    host.action_toggle_dark()
+    host._apply_custom_accent("#123456")
+
+    assert host.dark is False
+    assert config["dark"] is False
+    assert "cyoa-custom" in host.registered_theme_names
+    assert host.theme == "cyoa-custom"
+
+
+def test_stream_narrative_replaces_loading_art_without_typewriter():
+    host = DummyRenderingHost()
+
+    host._stream_narrative("Hello")
+
+    host.loading_widget.add_class.assert_called_once_with("hidden")
+    assert host.reset_calls == [""]
+    assert host._current_story == "Hello"
+    assert host._current_turn_text == "Hello"
+    host._current_turn_widget.update.assert_called_once_with("Hello")
+    assert host.scroll_calls == [False]
+
+
+def test_sync_narrative_replaces_finalized_streamed_turn():
+    host = DummyRenderingHost()
+    host._loading_suffix_shown = False
+
+    host._sync_narrative("Fresh ending")
+
+    assert host._current_story == "old prefix\n\n---\n\nFresh ending"
+    assert host._current_turn_text == "Fresh ending"
+    assert host.segment_updates[-1] == "Fresh ending"
+
+
+def test_detect_scene_art_matches_known_keywords():
+    assert _detect_scene_art("A dragon looms over the cavern.") is not None
+    assert _detect_scene_art("A plain hallway with no obvious cues.") is None
+
+
+def test_persistence_helpers_resolve_fallback_title_and_snapshot_story():
+    host = DummyPersistenceHost()
+    persistence = PersistenceMixin()
+
+    resolved = persistence._resolve_save_title(host)
+    snapshot = persistence._snapshot_story_segments(host)
+
+    assert resolved == "Untitled Adventure"
+    assert host.engine.state.story_title == "Untitled Adventure"
+    assert snapshot == [{"kind": "story_turn", "text": "flattened story"}]
+
+
+def test_persistence_clear_restore_runtime_state_drains_queue():
+    host = DummyPersistenceHost()
+    app = DummyPersistenceApp()
+    host._typewriter_queue.put_nowait("pending")
+
+    PersistenceMixin._clear_restore_runtime_state(host, app)
+
+    app.workers.cancel_group.assert_called_once_with(app, "speculation")
+    assert host._is_typing is False
+    assert host._typewriter_active_chunk == []
+    assert host._typewriter_queue.empty()
+
+
+def test_navigation_helpers_collect_branch_targets_and_trim_story_segments():
+    timeline_metadata = [
+        {"kind": "branch_restore", "target_scene_id": "scene-2", "restored_turn": 3},
+        {"kind": "branch_restore", "target_scene_id": "scene-2", "restored_turn": 1},
+        {"kind": "other"},
+    ]
+    branch_targets = NavigationMixin._collect_branch_targets(timeline_metadata)
+    label = NavigationMixin._format_story_map_label(
+        scene_id="scene-2",
+        narrative="A restored scene",
+        mood="heroic",
+        current_scene_id="scene-2",
+        branch_targets=branch_targets,
+    )
+    host = SimpleNamespace(
+        _story_segments=[
+            {"kind": "player_choice", "text": "Go north"},
+            {"kind": "story_turn", "text": "Result"},
+        ]
+    )
+
+    NavigationMixin._trim_story_segments_for_undo(host)
+
+    assert branch_targets == {"scene-2": [3, 1]}
+    assert "⟲ T1, 3" in label
+    assert host._story_segments == []
+
+
+def test_events_stats_and_world_state_handlers_emit_notifications():
+    host = DummyEventsHost()
+
+    host._handle_stats_updated({"health": 85, "gold": 4, "reputation": 2})
+    host._handle_world_state_updated(
+        {
+            "objectives": [
+                {"text": "Escape", "status": "active"},
+                {"text": "Ignore", "status": "completed"},
+            ]
+        }
+    )
+
+    assert host.status_display.health == 85
+    assert host.status_display.gold == 4
+    assert host.status_display.reputation == 2
+    assert host.status_display.objectives == ["Escape"]
+    assert host.notifications == [("-15 HP | +3 Gold | +2 Rep", "warning")]
+
+
+@pytest.mark.asyncio
+async def test_branch_screen_mount_populates_scene_list_and_cancel_dismisses() -> None:
+    app = BranchScreenHarness()
+    preview = app.screen_ref._build_scene_preview(app.screen_ref.scenes[0], 0, "Take torch")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.1)
+        list_view = app.screen.query_one("#branch-list", ListView)
+        assert len(list_view.children) == 1
+        await pilot.click("#cancel-branch")
+        await pilot.pause(0.1)
+        assert app.screen is not app.screen_ref
+
+    assert "Turn 1" in preview
+    assert "1 future path(s)" in preview
+    assert "1 item(s) carried" in preview
+
+
+@pytest.mark.asyncio
+async def test_load_game_screen_mount_formats_save_names_and_selection_dismisses() -> None:
+    app = LoadScreenHarness()
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.1)
+        list_view = app.screen.query_one("#load-list", ListView)
+        assert len(list_view.children) == 1
+        item = list_view.children[0]
+        assert _render_text(item.query_one(Label)) == "test adventure turn2"
+        await pilot.click("#btn-load-cancel")
+        await pilot.pause(0.1)
+        assert app.screen is not app.screen_ref
+
+
+@pytest.mark.asyncio
+async def test_status_display_watchers_and_spinner_tick() -> None:
+    app = StatusDisplayHarness()
+    async with app.run_test() as pilot:
+        display = app.query_one(StatusDisplay)
+        display.health = 25
+        display.gold = 9
+        display.reputation = 3
+        display.inventory = ["Torch", "Key"]
+        display.objectives = ["Escape", "Survive", "Ignore"]
+        display.generation_preset = "fast"
+        display._update_stats_text()
+        await pilot.pause(0.1)
+
+        assert display.query_one("#health-bar", ProgressBar).progress == 25
+        assert "25%" in _render_text(display.query_one("#stats-text", Label))
+        assert "fast" in _render_text(display.query_one("#stats-text", Label))
+        assert "Torch, Key" in _render_text(display.query_one("#inventory-label", Label))
+        assert "Escape | Survive" in _render_text(display.query_one("#objectives-label", Label))
+        assert display.has_class("health-low")
+
+    spinner_app = SpinnerHarness()
+    async with spinner_app.run_test() as pilot:
+        await pilot.pause(0.1)
+        spinner = spinner_app.query_one("#spinner", ThemeSpinner)
+        first_frame = _render_text(spinner)
+        assert first_frame in {"[a]", "[b]"}
+        spinner.tick()
+        advanced_frame = _render_text(spinner)
+        assert advanced_frame in {"[a]", "[b]"}
+        spinner.add_class("hidden")
+        spinner.tick()
+        assert _render_text(spinner) == advanced_frame

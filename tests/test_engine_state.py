@@ -396,3 +396,91 @@ def test_game_state_load_save_data_emits_title_and_node_events():
     assert state.player_stats["health"] == 75
     assert emitted_titles == ["Restored"]
     assert emitted_nodes == ["Restored node"]
+
+
+def test_game_state_seed_world_state_deduplicates_and_copies_models():
+    state = GameState()
+    objective = Objective(id="escape", text="Escape", status="active")
+
+    state.seed_world_state(
+        inventory=["Torch", "Torch", "Key"],
+        player_stats={"health": "88", "gold": 4, "reputation": 2},
+        objectives=[objective],
+        faction_reputation={"Guild": 3},
+        npc_affinity={"Mira": 5},
+        story_flags={"met_mira"},
+    )
+
+    objective.status = "completed"
+
+    assert state.inventory == ["Torch", "Key"]
+    assert state.player_stats == {"health": 88, "gold": 4, "reputation": 2}
+    assert state.objectives == [Objective(id="escape", text="Escape", status="active")]
+    assert state.faction_reputation == {"Guild": 3}
+    assert state.npc_affinity == {"Mira": 5}
+    assert state.story_flags == {"met_mira"}
+
+
+def test_game_state_apply_node_updates_emits_world_state_for_objectives_relationships_and_flags():
+    state = GameState()
+    node = StoryNode(
+        narrative="World changes.",
+        choices=[Choice(text="Continue"), Choice(text="Wait")],
+        objectives_updated=[Objective(id="escape", text="Escape", status="active")],
+        faction_updates={"Guild": 2},
+        npc_affinity_updates={"Mira": -1},
+        story_flags_set=["met_mira"],
+        story_flags_cleared=["missing-flag"],
+    )
+
+    world_events: list[dict[str, object]] = []
+    bus.subscribe(Events.WORLD_STATE_UPDATED, lambda state: world_events.append(state))
+
+    state.apply_node_updates(node)
+
+    assert state.objectives == [Objective(id="escape", text="Escape", status="active")]
+    assert state.faction_reputation == {"Guild": 2}
+    assert state.npc_affinity == {"Mira": -1}
+    assert state.story_flags == {"met_mira"}
+    assert world_events == [state.get_world_state()]
+
+
+def test_game_state_load_save_data_coerces_extended_world_fields():
+    state = GameState()
+
+    state.load_save_data(
+        {
+            "turn_count": True,
+            "inventory": ["Torch", 7, "Key"],
+            "player_stats": {"health": "91", "gold": False, "luck": "5"},
+            "timeline_metadata": [
+                "bad",
+                {"kind": "branch_restore", "source_scene_id": "scene-1", "restored_turn": 2.8},
+                {"kind": None},
+            ],
+            "objectives": [
+                {"id": "escape", "text": "Escape", "status": "active"},
+                {"id": "broken"},
+            ],
+            "faction_reputation": {"Guild": "4", "Broken": True},
+            "npc_affinity": {"Mira": 2.2, "Broken": object()},
+            "story_flags": ["met_mira", "", 9],
+            "current_node": {"choices": "broken"},
+        }
+    )
+
+    assert state.turn_count == 1
+    assert state.inventory == ["Torch", "Key"]
+    assert state.player_stats == {"health": 91, "gold": 0, "reputation": 0, "luck": 5}
+    assert state.timeline_metadata == [
+        {
+            "kind": "branch_restore",
+            "source_scene_id": "scene-1",
+            "restored_turn": 2,
+        }
+    ]
+    assert state.objectives == [Objective(id="escape", text="Escape", status="active")]
+    assert state.faction_reputation == {"Guild": 4}
+    assert state.npc_affinity == {"Mira": 2}
+    assert state.story_flags == {"met_mira"}
+    assert state.current_node is None
