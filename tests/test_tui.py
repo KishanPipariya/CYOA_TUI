@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from textual.css.query import NoMatches
 from textual.containers import Container
+from textual.widgets._toast import Toast
 from textual.widgets import Button, Label, ListView, Markdown
 from textual.worker import WorkerFailed
 
@@ -816,6 +817,19 @@ async def test_undo_with_no_history(mock_app_dependencies):
 
         # Should still be on turn 1
         assert app.turn_count == 1
+
+
+@pytest.mark.asyncio
+async def test_notifications_use_solid_left_border(mock_app_dependencies) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(notifications=True) as pilot:
+        await pilot.pause(1.0)
+        app.notify("Border regression check", severity="warning", timeout=10)
+        await _wait_for(lambda: len(app.query(Toast)) == 1)
+
+        toast = app.query_one(Toast)
+        assert toast.styles.border_left == ("solid", toast.styles.border_left[1])
 
 
 @pytest.mark.asyncio

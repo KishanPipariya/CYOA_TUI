@@ -7,6 +7,19 @@ Screen {
     background: $surface;
 }
 
+/* ── Notifications ───────────────────────────────────────────── */
+Toast.-information {
+    border-left: solid $success;
+}
+
+Toast.-warning {
+    border-left: solid $warning;
+}
+
+Toast.-error {
+    border-left: solid $error;
+}
+
 /* ── Main Layout Containers ──────────────────────────────────── */
 #workspace {
     height: 1fr;
