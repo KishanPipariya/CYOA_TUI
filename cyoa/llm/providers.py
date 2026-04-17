@@ -138,6 +138,8 @@ class LlamaCppProvider(LLMProvider):
         self._lock = threading.Lock()
         self._stream_events_lock = threading.Lock()
         self._active_cancel_events: set[threading.Event] = set()
+        self._stream_threads_lock = threading.Lock()
+        self._stream_threads: set[threading.Thread] = set()
         self._closing = False
 
     def count_tokens(self, text: str) -> int:
@@ -239,7 +241,18 @@ class LlamaCppProvider(LLMProvider):
     ) -> None:
         session.report_first_token()
         session.report_token(self.count_tokens(token))
-        loop.call_soon_threadsafe(queue.put_nowait, token)
+        self._queue_token_threadsafe(loop, queue, token)
+
+    def _queue_token_threadsafe(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        queue: asyncio.Queue[str | None],
+        token: str | None,
+    ) -> None:
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, token)
+        except RuntimeError:
+            logger.debug("Dropping llama.cpp stream token after event loop shutdown.")
 
     def _run_stream_producer(
         self,
@@ -275,7 +288,9 @@ class LlamaCppProvider(LLMProvider):
         finally:
             if session is not None:
                 session.end(success=success)
-            loop.call_soon_threadsafe(queue.put_nowait, None)
+            with self._stream_threads_lock:
+                self._stream_threads.discard(threading.current_thread())
+            self._queue_token_threadsafe(loop, queue, None)
 
     async def _run_cancellable_stream(
         self,
@@ -289,17 +304,23 @@ class LlamaCppProvider(LLMProvider):
         cancel_event = threading.Event()
         self._register_cancel_event(cancel_event)
 
-        loop.run_in_executor(
-            None,
-            self._run_stream_producer,
-            loop,
-            q,
-            messages,
-            schema,
-            max_tokens,
-            temperature,
-            cancel_event,
+        producer = threading.Thread(
+            target=self._run_stream_producer,
+            args=(
+                loop,
+                q,
+                messages,
+                schema,
+                max_tokens,
+                temperature,
+                cancel_event,
+            ),
+            name="llama-cpp-stream",
+            daemon=True,
         )
+        with self._stream_threads_lock:
+            self._stream_threads.add(producer)
+        producer.start()
 
         try:
             while True:
@@ -383,6 +404,10 @@ class LlamaCppProvider(LLMProvider):
     def close(self) -> None:
         """Clear the LLM instance to release memory/threads."""
         self._signal_active_streams()
+        with self._stream_threads_lock:
+            stream_threads = tuple(self._stream_threads)
+        for stream_thread in stream_threads:
+            stream_thread.join(timeout=0.1)
 
         # Give interrupted generation a short window to exit before tearing down the model.
         acquired = self._lock.acquire(timeout=2.0)

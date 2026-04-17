@@ -113,6 +113,7 @@ class CYOAApp(
         self._unsubscribers: list[Callable[[], None]] = []
         self._subscriptions_active: bool = False
         self._is_shutting_down: bool = False
+        self._startup_timer: Any | None = None
 
         # Typewriter Narrator state
         self._typewriter_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -170,7 +171,7 @@ class CYOAApp(
         # Start the typewriter narrator worker
         self._typewriter_worker()
         # Short delay to let the UI paint the initial scene before starting the engine
-        self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
+        self._startup_timer = self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
 
     def on_resize(self, event: Resize) -> None:
         self._set_compact_layout(event.size.width)
@@ -188,6 +189,9 @@ class CYOAApp(
     def on_unmount(self) -> None:
         """Cancel all background work and release resources."""
         self._is_shutting_down = True
+        if self._startup_timer is not None:
+            self._startup_timer.stop()
+            self._startup_timer = None
         self._cancel_background_workers()
         self._close_runtime_resources()
         self._unsubscribe_engine_events()
@@ -231,11 +235,11 @@ class CYOAApp(
 
     def _close_runtime_resources(self) -> None:
         """Close external resources and clear references."""
+        if self.engine:
+            self.engine.shutdown()
         if self.generator:
             self.generator.close()
             self.generator = None
-        if self.engine and self.engine.db:
-            self.engine.db.close()
         self.engine = None
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
@@ -290,13 +294,21 @@ class CYOAApp(
     @work(exclusive=True)
     async def initialize_and_start(self, model_path: str) -> None:
         """Load model and start the story engine."""
+        if not self.is_runtime_active():
+            return
+
         start_time = time.perf_counter()
         self.show_loading()
         await asyncio.sleep(0.2)
+        if not self.is_runtime_active():
+            return
 
         try:
             if self.generator is None:
                 self.generator = await asyncio.to_thread(ModelBroker, model_path=model_path)
+            if not self.is_runtime_active():
+                self._close_runtime_resources()
+                return
             self.query_one(StatusDisplay).generation_preset = str(
                 self.generator.runtime_controls()["preset"]
             )
@@ -331,6 +343,9 @@ class CYOAApp(
                 )
 
             await self.engine.initialize()
+            if not self.is_runtime_active():
+                self._close_runtime_resources()
+                return
             from cyoa.core.observability import record_startup_latency
 
             record_startup_latency((time.perf_counter() - start_time) * 1000, status="success")

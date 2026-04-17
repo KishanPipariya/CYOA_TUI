@@ -473,8 +473,8 @@ async def test_startup_failure_closes_runtime_resources() -> None:
                 await pilot.pause(0.3)
 
     notify_mock.assert_called()
+    engine.shutdown.assert_called_once_with()
     generator.close.assert_called_once_with()
-    db.close.assert_called_once_with()
     assert app.generator is None
     assert app.engine is None
 
@@ -549,21 +549,22 @@ async def test_on_unmount_cancels_workers_and_unsubscribes(mock_app_dependencies
 
         app.workers.cancel_group = MagicMock()
         app.workers.cancel_all = MagicMock()
+        startup_timer = MagicMock()
+        app._startup_timer = startup_timer
         generator = MagicMock()
-        db = MagicMock()
         engine = MagicMock()
-        engine.db = db
         app.generator = generator
         app.engine = engine
 
         app.on_unmount()
 
         assert app._is_shutting_down is True
+        startup_timer.stop.assert_called_once_with()
         app.workers.cancel_group.assert_any_call(app, "speculation")
         app.workers.cancel_group.assert_any_call(app, "typewriter")
         app.workers.cancel_all.assert_called_once_with()
+        engine.shutdown.assert_called_once_with()
         generator.close.assert_called_once_with()
-        db.close.assert_called_once_with()
         assert app.generator is None
         assert app.engine is None
         assert app._unsubscribers == []

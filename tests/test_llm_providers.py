@@ -166,6 +166,35 @@ async def test_llama_cpp_generate_text(mock_llama) -> None:
 
 
 @pytest.mark.asyncio
+async def test_llama_cpp_streaming_uses_daemon_thread(mock_llama, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeThread:
+        def __init__(self, *, target, args, name, daemon):
+            captured["target"] = target
+            captured["args"] = args
+            captured["name"] = name
+            captured["daemon"] = daemon
+            self._target = target
+            self._args = args
+
+        def start(self) -> None:
+            self._target(*self._args)
+
+        def join(self, timeout: float | None = None) -> None:
+            return None
+
+    monkeypatch.setattr("cyoa.llm.providers.threading.Thread", FakeThread)
+    provider = LlamaCppProvider(model_path="dummy.gguf")
+
+    result = await provider.generate_text([{"role": "user", "content": "hi"}], max_tokens=10)
+
+    assert result == '{"narrative": "Test"}'
+    assert captured["daemon"] is True
+    assert captured["name"] == "llama-cpp-stream"
+
+
+@pytest.mark.asyncio
 async def test_llama_cpp_save_and_load_state(mock_llama) -> None:
     provider = LlamaCppProvider(model_path="dummy.gguf")
     mock_llama.return_value.save_state.return_value = b"kv-state"

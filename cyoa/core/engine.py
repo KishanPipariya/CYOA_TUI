@@ -250,6 +250,18 @@ class StoryEngine:
             # fresh summary, which is preferable to blocking or crashing.
             logger.warning("Background summarization failed (non-fatal): %s", exc)
 
+    def shutdown(self) -> None:
+        """Cancel engine-owned background work and release external resources."""
+        if self._pending_summarization_task is not None:
+            self._pending_summarization_task.cancel()
+            self._pending_summarization_task = None
+
+        self.rag.memory.close()
+        self.rag.npc_memory.close()
+
+        if self.db:
+            self.db.close()
+
     def undo(self) -> bool:
         """Revert to the previous turn's state."""
         if not self.state._undo_snapshot or not self.story_context:

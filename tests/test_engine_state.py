@@ -1,3 +1,4 @@
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -187,6 +188,25 @@ def test_engine_save_payload_uses_current_ui_state_contract():
 
     assert "version" not in data
     assert "current_story_text" not in data
+
+
+@pytest.mark.asyncio
+async def test_engine_shutdown_cancels_summarization_and_closes_resources():
+    broker, _provider = _make_broker_with_mock_provider()
+    db = MagicMock()
+    engine = StoryEngine(broker=broker, starting_prompt="Start", db=db)
+    engine.rag.memory.close = MagicMock()  # type: ignore[method-assign]
+    engine.rag.npc_memory.close = MagicMock()  # type: ignore[method-assign]
+    task = asyncio.create_task(asyncio.sleep(10))
+    engine._pending_summarization_task = task
+
+    engine.shutdown()
+    await asyncio.sleep(0)
+
+    assert task.cancelled()
+    engine.rag.memory.close.assert_called_once_with()
+    engine.rag.npc_memory.close.assert_called_once_with()
+    db.close.assert_called_once_with()
 
 
 def test_engine_load_save_data_accepts_versionless_payload():
