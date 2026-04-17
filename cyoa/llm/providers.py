@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import threading
+import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, cast
@@ -124,6 +125,9 @@ class ProviderResponseError(RuntimeError):
 
 
 class LlamaCppProvider(LLMProvider):
+    _CLOSE_TIMEOUT_SECONDS = 2.0
+    _THREAD_JOIN_SLICE_SECONDS = 0.05
+
     def __init__(self, model_path: str, n_ctx: int = 4096):
         cpu_threads = max(1, (os.cpu_count() or 8) // 2)
         self.model_path = model_path
@@ -208,6 +212,28 @@ class LlamaCppProvider(LLMProvider):
             active_events = tuple(self._active_cancel_events)
         for cancel_event in active_events:
             cancel_event.set()
+
+    def _wait_for_stream_threads(self, deadline: float) -> None:
+        """Allow canceled producer threads to exit before model teardown."""
+        while True:
+            with self._stream_threads_lock:
+                stream_threads = tuple(self._stream_threads)
+            if not stream_threads:
+                return
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+
+            join_timeout = min(self._THREAD_JOIN_SLICE_SECONDS, remaining)
+            for stream_thread in stream_threads:
+                stream_thread.join(timeout=join_timeout)
+
+    def _acquire_model_lock_before(self, deadline: float) -> bool:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        return self._lock.acquire(timeout=remaining)
 
     def _stream_completion(
         self,
@@ -403,14 +429,12 @@ class LlamaCppProvider(LLMProvider):
 
     def close(self) -> None:
         """Clear the LLM instance to release memory/threads."""
+        deadline = time.monotonic() + self._CLOSE_TIMEOUT_SECONDS
         self._signal_active_streams()
-        with self._stream_threads_lock:
-            stream_threads = tuple(self._stream_threads)
-        for stream_thread in stream_threads:
-            stream_thread.join(timeout=0.1)
+        self._wait_for_stream_threads(deadline)
 
         # Give interrupted generation a short window to exit before tearing down the model.
-        acquired = self._lock.acquire(timeout=2.0)
+        acquired = self._acquire_model_lock_before(deadline)
         try:
             if hasattr(self, "llm"):
                 if acquired:

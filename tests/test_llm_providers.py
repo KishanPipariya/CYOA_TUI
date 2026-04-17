@@ -1,6 +1,8 @@
+import asyncio
 import json
 import os
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -240,6 +242,37 @@ def test_llama_cpp_close_signals_active_streams(mock_llama) -> None:
     provider.close()
 
     assert cancel_event.is_set()
+    assert not hasattr(provider, "llm")
+
+
+@pytest.mark.asyncio
+async def test_llama_cpp_close_waits_for_cancelled_stream_cleanup(mock_llama) -> None:
+    mock_llama.return_value.token_eos.return_value = 2
+    provider = LlamaCppProvider(model_path="dummy.gguf")
+    stream_started = threading.Event()
+    allow_cleanup = threading.Event()
+
+    def slow_cancelable_gen(*args, **kwargs):
+        processor = kwargs["logits_processor"][0]
+        yield {"choices": [{"delta": {"content": "first"}}]}
+        stream_started.set()
+        while not processor.cancel_event.is_set():
+            time.sleep(0.01)
+        allow_cleanup.wait(timeout=1.0)
+
+    mock_llama.return_value.create_chat_completion.side_effect = slow_cancelable_gen
+
+    task = asyncio.create_task(provider.generate_text([{"role": "user", "content": "hi"}]))
+    await asyncio.to_thread(stream_started.wait, 1.0)
+
+    close_task = asyncio.create_task(asyncio.to_thread(provider.close))
+    await asyncio.sleep(0.1)
+    assert not close_task.done()
+
+    allow_cleanup.set()
+    await asyncio.wait_for(close_task, timeout=1.0)
+    await asyncio.wait_for(task, timeout=1.0)
+
     assert not hasattr(provider, "llm")
 
 # ── OllamaProvider Tests ─────────────────────────────────────────────────────
