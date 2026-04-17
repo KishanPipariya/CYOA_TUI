@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -302,6 +303,39 @@ async def test_ui_panels_toggle(mock_app_dependencies):
 
 
 @pytest.mark.asyncio
+async def test_startup_does_not_wait_for_optional_runtime_checks() -> None:
+    release_connectivity = asyncio.Event()
+
+    def slow_db_factory(*args, **kwargs):
+        db = MagicMock()
+
+        async def verify_connectivity_async():
+            await release_connectivity.wait()
+            return True
+
+        db.verify_connectivity_async = AsyncMock(side_effect=verify_connectivity_async)
+        db.create_story_node_and_get_title.return_value = "Test Adventure"
+        db.get_story_tree.return_value = None
+        db.save_scene_async = AsyncMock(return_value="dummy-scene-id")
+        return db
+
+    with (
+        patch("cyoa.ui.app.ModelBroker", new=_mock_generator),
+        patch("cyoa.ui.app.CYOAGraphDB", side_effect=slow_db_factory),
+    ):
+        app = CYOAApp(model_path="dummy_path.gguf")
+
+        async with app.run_test() as pilot:
+            await pilot.pause(0.6)
+            app.action_skip_typewriter()
+
+            assert "You awaken in a test dungeon." in app._current_story
+
+            release_connectivity.set()
+            await pilot.pause(0.2)
+
+
+@pytest.mark.asyncio
 async def test_choice_selection_via_keyboard(mock_app_dependencies):
     """Test selecting a choice updates the narrative and inventory correctly."""
     app = CYOAApp(model_path="dummy_path.gguf")
@@ -542,33 +576,36 @@ async def test_quit_before_startup_timer_fires_skips_model_creation() -> None:
 @pytest.mark.asyncio
 async def test_quit_during_scene_persistence_ignores_late_turn(mock_app_dependencies) -> None:
     app = CYOAApp(model_path="dummy_path.gguf")
-    app.speculate_all_choices = MagicMock()
 
     save_reached = asyncio.Event()
     release_save = asyncio.Event()
 
-    async with app.run_test() as pilot:
-        await pilot.pause(1.0)
-        assert app.engine is not None
-        assert app.engine.db is not None
+    with patch.object(app, "speculate_all_choices", MagicMock()):
+        async with app.run_test() as pilot:
+            await pilot.pause(1.0)
+            assert app.engine is not None
+            assert app.engine.db is not None
 
-        original_save = app.engine.db.save_scene_async
+            original_save = app.engine.db.save_scene_async
 
-        async def delayed_save_scene_async(*args, **kwargs):
-            if kwargs.get("choice_text") == "Go North":
-                save_reached.set()
-                await release_save.wait()
-            return await original_save(*args, **kwargs)
+            async def delayed_save_scene_async(*args: Any, **kwargs: Any) -> str:
+                if kwargs.get("choice_text") == "Go North":
+                    save_reached.set()
+                    await release_save.wait()
+                return await original_save(*args, **kwargs)
 
-        app.engine.db.save_scene_async = AsyncMock(side_effect=delayed_save_scene_async)
+            with patch.object(
+                app.engine.db,
+                "save_scene_async",
+                AsyncMock(side_effect=delayed_save_scene_async),
+            ):
+                choice_task = asyncio.create_task(app._trigger_choice(0))
+                await asyncio.wait_for(save_reached.wait(), timeout=1.0)
 
-        choice_task = asyncio.create_task(app._trigger_choice(0))
-        await asyncio.wait_for(save_reached.wait(), timeout=1.0)
-
-        app.on_unmount()
-        release_save.set()
-        await asyncio.wait_for(choice_task, timeout=1.0)
-        await pilot.pause(0.1)
+                app.on_unmount()
+                release_save.set()
+                await asyncio.wait_for(choice_task, timeout=1.0)
+                await pilot.pause(0.1)
 
     assert "You went North." not in app._current_story
 
@@ -1251,3 +1288,96 @@ def test_story_map_label_marks_current_scene_restore_turns() -> None:
 
     assert "[reverse]" in label
     assert "⟲ T2" in label
+
+
+@pytest.mark.asyncio
+async def test_story_map_queries_are_cached_per_scene(mock_app_dependencies) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    tree_payload = {
+        "root_id": "scene-1",
+        "nodes": {
+            "scene-1": {"id": "scene-1", "narrative": "Opening scene", "mood": "default"},
+            "scene-2": {"id": "scene-2", "narrative": "North path", "mood": "heroic"},
+        },
+        "edges": {"scene-1": [{"target_id": "scene-2", "choice": "Go North"}], "scene-2": []},
+    }
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        assert app.engine is not None
+        assert app.engine.db is not None
+        get_story_tree = cast(MagicMock, app.engine.db.get_story_tree)
+        get_story_tree.return_value = tree_payload
+
+        app.update_story_map()
+        await pilot.pause(0.2)
+        app.update_story_map()
+        await pilot.pause(0.2)
+
+        assert get_story_tree.call_count == 1
+
+        app.engine.state.current_scene_id = "scene-2"
+        app.update_story_map()
+        await pilot.pause(0.2)
+
+        assert get_story_tree.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_branch_history_queries_are_cached_per_scene(mock_app_dependencies) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+    history = {
+        "scenes": [
+            {
+                "id": "scene-1",
+                "narrative": "Opening scene",
+                "available_choices": ["Go North"],
+                "inventory": [],
+                "player_stats": {"health": 100, "gold": 0, "reputation": 0},
+            }
+        ],
+        "choices": [],
+    }
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        assert app.engine is not None
+        assert app.engine.db is not None
+        get_scene_history_path = cast(MagicMock, app.engine.db.get_scene_history_path)
+        get_scene_history_path.return_value = history
+
+        with patch.object(app, "push_screen", MagicMock()):
+            app.action_branch_past()
+            await pilot.pause(0.2)
+            app.action_branch_past()
+            await pilot.pause(0.2)
+
+            assert get_scene_history_path.call_count == 1
+
+            app.engine.state.current_scene_id = "scene-2"
+            get_scene_history_path.return_value = history | {
+                "scenes": [{**history["scenes"][0], "id": "scene-2"}]
+            }
+            app.action_branch_past()
+            await pilot.pause(0.2)
+
+            assert get_scene_history_path.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_status_notifications_are_batched(mock_app_dependencies) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        notify = MagicMock()
+        with patch.object(app, "notify", notify):
+            bus.emit(Events.STATUS_MESSAGE, message="⚡ Weaving possible futures...")
+            bus.emit(Events.STATUS_MESSAGE, message="📜 Archiving old chapters...")
+            await pilot.pause(0.3)
+
+            notify.assert_called_once()
+            message = notify.call_args.args[0]
+            assert "⚡ Weaving possible futures..." in message
+            assert "📜 Archiving old chapters..." in message

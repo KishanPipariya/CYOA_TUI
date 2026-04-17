@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 from textual.app import App
 from textual.containers import Container
@@ -32,6 +32,7 @@ class CYOAAppMixinContract(Protocol):
     _typewriter_queue: asyncio.Queue[str]
     _typewriter_active_chunk: list[str]
     _is_typing: bool
+    _has_rendered_first_scene: bool
     _last_stats_snapshot: dict[str, int] | None
 
     def is_runtime_active(self) -> bool: ...
@@ -50,6 +51,20 @@ class CYOAAppMixinContract(Protocol):
     def _update_current_story_segment(self, text: str) -> None: ...
     def _current_story_turn_index(self) -> int: ...
     def speculate_all_choices(self, node: StoryNode) -> Any: ...
+    def mark_first_scene_rendered(self) -> None: ...
+    def queue_notification(
+        self,
+        message: str,
+        *,
+        severity: Literal["information", "warning", "error"] = "information",
+        timeout: float = 3,
+        batch: bool = True,
+    ) -> None: ...
+    def cache_story_history(self, scene_id: str | None, history: dict[str, Any]) -> None: ...
+    def get_cached_story_history(self, scene_id: str | None) -> dict[str, Any] | None: ...
+    def cache_story_map(self, scene_id: str | None, tree_data: dict[str, Any]) -> None: ...
+    def get_cached_story_map(self, scene_id: str | None) -> dict[str, Any] | None: ...
+    def invalidate_scene_caches(self, keep_scene_id: str | None = None) -> None: ...
 
 
 def as_textual_app(value: object) -> App[Any]:

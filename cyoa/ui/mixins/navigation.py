@@ -75,6 +75,8 @@ class NavigationMixin:
         if not host.engine or not host.is_runtime_active():
             return
 
+        host.invalidate_scene_caches()
+
         host._current_story = constants.LOADING_ART
         host._current_turn_text = constants.LOADING_ART
         host._reset_story_segments(constants.LOADING_ART)
@@ -231,10 +233,15 @@ class NavigationMixin:
         if not host.engine or not host.engine.db or not host.engine.state.current_scene_id:
             return
 
-        history = await asyncio.to_thread(
-            host.engine.db.get_scene_history_path,
-            host.engine.state.current_scene_id,
-        )
+        scene_id = host.engine.state.current_scene_id
+        history = host.get_cached_story_history(scene_id)
+        if history is None:
+            history = await asyncio.to_thread(
+                host.engine.db.get_scene_history_path,
+                scene_id,
+            )
+            if history:
+                host.cache_story_history(scene_id, history)
         if not history or not history.get("scenes"):
             return
 
@@ -308,10 +315,15 @@ class NavigationMixin:
         if not engine or not engine.db or not engine.state.story_title:
             return
 
-        tree_data = await asyncio.to_thread(
-            engine.db.get_story_tree,
-            engine.state.story_title,
-        )
+        current_scene_id = engine.state.current_scene_id
+        tree_data = host.get_cached_story_map(current_scene_id)
+        if tree_data is None:
+            tree_data = await asyncio.to_thread(
+                engine.db.get_story_tree,
+                engine.state.story_title,
+            )
+            if tree_data:
+                host.cache_story_map(current_scene_id, tree_data)
         if not tree_data:
             return
 

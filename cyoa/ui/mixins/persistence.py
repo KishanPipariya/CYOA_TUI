@@ -301,6 +301,7 @@ class PersistenceMixin:
         self._clear_restore_runtime_state(host, app)
         ui_state = self._coerce_ui_state(data.get("ui_state"))
         host.engine.load_save_data(data)
+        host.invalidate_scene_caches(keep_scene_id=host.engine.state.current_scene_id)
         host.turn_count = host.engine.state.turn_count
         self._restore_story_state(host, ui_state)
         self._restore_story_widgets(host, app)

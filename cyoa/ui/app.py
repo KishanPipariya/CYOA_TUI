@@ -2,7 +2,8 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
-from typing import Any, ClassVar
+from dataclasses import dataclass
+from typing import Any, ClassVar, Literal
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -40,6 +41,13 @@ from cyoa.ui.mixins import (
 logger = logging.getLogger(__name__)
 
 __all__ = ["CYOAApp"]
+
+
+@dataclass(slots=True)
+class BufferedNotification:
+    message: str
+    severity: Literal["information", "warning", "error"]
+    timeout: float
 
 
 class CYOAApp(
@@ -114,6 +122,14 @@ class CYOAApp(
         self._subscriptions_active: bool = False
         self._is_shutting_down: bool = False
         self._startup_timer: Any | None = None
+        self._post_render_warmup_timer: Any | None = None
+        self._has_rendered_first_scene: bool = False
+        self._optional_runtime_ready: bool = False
+        self._story_history_cache: dict[str, dict[str, Any]] = {}
+        self._story_map_cache: dict[str, dict[str, Any]] = {}
+        self._scene_cache_limit: int = 8
+        self._notification_buffer: list[BufferedNotification] = []
+        self._notification_timer: Any | None = None
 
         # Typewriter Narrator state
         self._typewriter_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -157,6 +173,8 @@ class CYOAApp(
 
     async def on_mount(self) -> None:
         self._is_shutting_down = False
+        self._has_rendered_first_scene = False
+        self._optional_runtime_ready = False
         self.query_one("#choices-container", Container).border_title = "Choices"
         self.query_one("#story-container", VerticalScroll).border_title = "Story"
 
@@ -192,6 +210,12 @@ class CYOAApp(
         if self._startup_timer is not None:
             self._startup_timer.stop()
             self._startup_timer = None
+        if self._post_render_warmup_timer is not None:
+            self._post_render_warmup_timer.stop()
+            self._post_render_warmup_timer = None
+        if self._notification_timer is not None:
+            self._notification_timer.stop()
+            self._notification_timer = None
         self._cancel_background_workers()
         self._close_runtime_resources()
         self._unsubscribe_engine_events()
@@ -241,6 +265,140 @@ class CYOAApp(
             self.generator.close()
             self.generator = None
         self.engine = None
+
+    def cache_story_history(self, scene_id: str | None, history: dict[str, Any]) -> None:
+        """Memoize branch-history payloads for the active scene."""
+        if not scene_id:
+            return
+        self._story_history_cache[scene_id] = history
+        self._evict_scene_cache(self._story_history_cache)
+
+    def get_cached_story_history(self, scene_id: str | None) -> dict[str, Any] | None:
+        if not scene_id:
+            return None
+        return self._story_history_cache.get(scene_id)
+
+    def cache_story_map(self, scene_id: str | None, tree_data: dict[str, Any]) -> None:
+        """Memoize story-map payloads for the active scene."""
+        if not scene_id:
+            return
+        self._story_map_cache[scene_id] = tree_data
+        self._evict_scene_cache(self._story_map_cache)
+
+    def get_cached_story_map(self, scene_id: str | None) -> dict[str, Any] | None:
+        if not scene_id:
+            return None
+        return self._story_map_cache.get(scene_id)
+
+    def invalidate_scene_caches(self, keep_scene_id: str | None = None) -> None:
+        """Drop memoized panel data except for the current scene when desired."""
+        if keep_scene_id is None:
+            self._story_history_cache.clear()
+            self._story_map_cache.clear()
+            return
+
+        self._story_history_cache = {
+            scene_id: payload
+            for scene_id, payload in self._story_history_cache.items()
+            if scene_id == keep_scene_id
+        }
+        self._story_map_cache = {
+            scene_id: payload
+            for scene_id, payload in self._story_map_cache.items()
+            if scene_id == keep_scene_id
+        }
+
+    def mark_first_scene_rendered(self) -> None:
+        """Schedule deferred warmups once the first scene is visible."""
+        if self._has_rendered_first_scene or not self.is_runtime_active():
+            return
+        self._has_rendered_first_scene = True
+        self._post_render_warmup_timer = self.set_timer(0.05, self._schedule_optional_runtime_warmup)
+
+    def queue_notification(
+        self,
+        message: str,
+        *,
+        severity: Literal["information", "warning", "error"] = "information",
+        timeout: float = 3,
+        batch: bool = True,
+    ) -> None:
+        """Coalesce bursty notifications into a single popup."""
+        if not message or not self.is_runtime_active():
+            return
+        if not batch:
+            self.notify(message, severity=severity, timeout=timeout)
+            return
+
+        entry = BufferedNotification(message=message, severity=severity, timeout=timeout)
+        if self._notification_buffer and self._notification_buffer[-1] == entry:
+            return
+        self._notification_buffer.append(entry)
+        if self._notification_timer is None:
+            self._notification_timer = self.set_timer(0.18, self._flush_buffered_notifications)
+
+    def _evict_scene_cache(self, cache: dict[str, dict[str, Any]]) -> None:
+        while len(cache) > self._scene_cache_limit:
+            oldest_key = next(iter(cache))
+            del cache[oldest_key]
+
+    def _flush_buffered_notifications(self) -> None:
+        self._notification_timer = None
+        if not self._notification_buffer or not self.is_runtime_active():
+            self._notification_buffer.clear()
+            return
+
+        buffered = self._notification_buffer
+        self._notification_buffer = []
+        if len(buffered) == 1:
+            item = buffered[0]
+            self.notify(item.message, severity=item.severity, timeout=item.timeout)
+            return
+
+        severity_order = {"error": 3, "warning": 2, "information": 1}
+        strongest = max(buffered, key=lambda item: severity_order.get(item.severity, 0))
+        messages: list[str] = []
+        for item in buffered:
+            if item.message not in messages:
+                messages.append(item.message)
+        if len(messages) > 3:
+            summary = " | ".join(messages[:3]) + f" | +{len(messages) - 3} more"
+        else:
+            summary = " | ".join(messages)
+        self.notify(summary, severity=strongest.severity, timeout=max(item.timeout for item in buffered))
+
+    def _schedule_optional_runtime_warmup(self) -> None:
+        self._post_render_warmup_timer = None
+        if self.is_runtime_active():
+            self.run_worker(self._warm_optional_runtime_services(), exclusive=False, group="runtime-warmup")
+
+    async def _warm_optional_runtime_services(self) -> None:
+        """Run optional startup checks only after the first scene is visible."""
+        if not self.engine or self._optional_runtime_ready or not self.is_runtime_active():
+            return
+
+        self._optional_runtime_ready = True
+        if self.engine.db:
+            is_online = await self.engine.db.verify_connectivity_async()
+            if not self.is_runtime_active():
+                return
+            if not is_online:
+                self.queue_notification(
+                    "Graph DB not found. Proceeding with ephemeral memory only.",
+                    severity="warning",
+                    timeout=5,
+                )
+
+        if self.is_runtime_active() and not self.engine.rag.memory.is_online:
+            self.queue_notification(
+                "RAG Engine unavailable. Basic memory fallback active.",
+                severity="warning",
+                timeout=5,
+            )
+
+        story_map_panel = self.query_one("#story-map-panel", Container)
+        if not story_map_panel.has_class("panel-collapsed"):
+            self.update_story_map()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle journal selection: jump to and highlight the corresponding turn."""
@@ -298,6 +456,8 @@ class CYOAApp(
             return
 
         start_time = time.perf_counter()
+        self._optional_runtime_ready = False
+        self.invalidate_scene_caches()
         self.show_loading()
         await asyncio.sleep(0.2)
         if not self.is_runtime_active():
@@ -321,25 +481,6 @@ class CYOAApp(
                     db=CYOAGraphDB(),
                     initial_world_state=getattr(self, "_initial_world_state", {}),
                     initial_prompt_config=getattr(self, "_initial_prompt_config", {}),
-                )
-
-            # 2. Check for Graceful Degradation (Graph / RAG)
-            if self.engine.db:
-                # A. Verify Graph DB connectivity asynchronously (non-blocking)
-                is_online = await self.engine.db.verify_connectivity_async()
-                if not is_online:
-                    self.notify(
-                        "Graph DB not found. Proceeding with ephemeral memory only.",
-                        severity="warning",
-                        timeout=5
-                    )
-
-            # Check Chroma availability without forcing model download if it's lazy
-            if not self.engine.rag.memory.is_online:
-                self.notify(
-                    "RAG Engine unavailable. Basic memory fallback active.",
-                    severity="warning",
-                    timeout=5
                 )
 
             await self.engine.initialize()

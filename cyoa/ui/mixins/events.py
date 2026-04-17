@@ -20,12 +20,14 @@ class EventsMixin:
         host.mood = "default"
         host._last_stats_snapshot = None
         host._reset_story_segments("")
+        host.invalidate_scene_caches()
         app.query_one("#journal-list", ListView).clear()
 
     def _handle_engine_restarted(self) -> None:
-        if not as_mixin_host(self).is_runtime_active():
+        host = as_mixin_host(self)
+        if not host.is_runtime_active():
             return
-        as_textual_app(self).notify("Adventure Reset.", severity="information", timeout=2)
+        host.queue_notification("Adventure Reset.", severity="information", timeout=2, batch=False)
 
     def _handle_choice_made(self, choice_text: str) -> None:
         as_mixin_host(self).action_skip_typewriter()
@@ -41,13 +43,19 @@ class EventsMixin:
         host = as_mixin_host(self)
         if not host.is_runtime_active():
             return
+        first_scene_render = not host._has_rendered_first_scene
         if host.engine:
             host.turn_count = host.engine.state.turn_count
+            host.invalidate_scene_caches(keep_scene_id=host.engine.state.current_scene_id)
         host.display_node(node)
+        host.mark_first_scene_rendered()
         # Avoid DB/UI work when the panel is hidden.
         story_map_panel = app.query_one("#story-map-panel", Container)
         if not story_map_panel.has_class("panel-collapsed"):
-            host.update_story_map()
+            if first_scene_render:
+                app.call_after_refresh(host.update_story_map)
+            else:
+                host.update_story_map()
 
     def _handle_stats_updated(self, stats: dict[str, int]) -> None:
         app = as_textual_app(self)
@@ -80,7 +88,7 @@ class EventsMixin:
                 severity: Literal["information", "warning", "error"] = (
                     "warning" if health_delta < 0 else "information"
                 )
-                app.notify(" | ".join(deltas), severity=severity, timeout=2)
+                host.queue_notification(" | ".join(deltas), severity=severity, timeout=2)
 
         host._last_stats_snapshot = {
             "health": stats.get("health", 100),
@@ -112,14 +120,16 @@ class EventsMixin:
         app.query_one(StatusDisplay).objectives = objectives
 
     def _handle_title_generated(self, title: str) -> None:
-        if not as_mixin_host(self).is_runtime_active():
+        host = as_mixin_host(self)
+        if not host.is_runtime_active():
             return
-        as_textual_app(self).notify(f"New Chapter: {title}", severity="information", timeout=5)
+        host.queue_notification(f"New Chapter: {title}", severity="information", timeout=5)
 
     def _handle_ending_reached(self, node: StoryNode) -> None:
-        if not as_mixin_host(self).is_runtime_active():
+        host = as_mixin_host(self)
+        if not host.is_runtime_active():
             return
-        as_textual_app(self).notify("The Story Ends.", severity="information", timeout=10)
+        host.queue_notification("The Story Ends.", severity="information", timeout=10)
 
     def _handle_error(self, error: str) -> None:
         app = as_textual_app(self)
@@ -129,6 +139,7 @@ class EventsMixin:
         app.query_one("#loading", Static).add_class("hidden")
 
     def _handle_status_message(self, message: str) -> None:
-        if not as_mixin_host(self).is_runtime_active():
+        host = as_mixin_host(self)
+        if not host.is_runtime_active():
             return
-        as_textual_app(self).notify(message, severity="information", timeout=4)
+        host.queue_notification(message, severity="information", timeout=4)
