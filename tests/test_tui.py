@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -477,6 +478,99 @@ async def test_startup_failure_closes_runtime_resources() -> None:
     generator.close.assert_called_once_with()
     assert app.generator is None
     assert app.engine is None
+
+
+@pytest.mark.asyncio
+async def test_quit_during_initial_generation_ignores_late_node() -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    release_generation = asyncio.Event()
+    generator = MagicMock()
+    generator.token_budget = 2048
+    generator.provider = MagicMock()
+    generator.provider.count_tokens = MagicMock(return_value=10)
+    generator.update_story_summaries_async = AsyncMock()
+    generator.save_state_async = AsyncMock(return_value=None)
+    generator.load_state_async = AsyncMock()
+
+    async def delayed_generate(context, *args, **kwargs):
+        await release_generation.wait()
+        return StoryNode(
+            narrative="Late startup node",
+            choices=[Choice(text="Continue"), Choice(text="Wait")],
+            title="Test Adventure",
+        )
+
+    generator.generate_next_node_async = AsyncMock(side_effect=delayed_generate)
+
+    db = MagicMock()
+    db.verify_connectivity_async = AsyncMock(return_value=True)
+    db.create_story_node_and_get_title.return_value = "Test Adventure"
+    db.save_scene_async = AsyncMock(return_value="scene-1")
+
+    with (
+        patch("cyoa.ui.app.ModelBroker", return_value=generator),
+        patch("cyoa.ui.app.CYOAGraphDB", return_value=db),
+    ):
+        async with app.run_test() as pilot:
+            await pilot.pause(0.5)
+            app.on_unmount()
+            release_generation.set()
+            await pilot.pause(0.2)
+
+    assert "Late startup node" not in app._current_story
+    generator.close.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_quit_before_startup_timer_fires_skips_model_creation() -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    with (
+        patch("cyoa.ui.app.ModelBroker") as broker_cls,
+        patch("cyoa.ui.app.CYOAGraphDB") as db_cls,
+    ):
+        async with app.run_test() as pilot:
+            await pilot.pause(0.02)
+            app.on_unmount()
+            await pilot.pause(0.2)
+
+    broker_cls.assert_not_called()
+    db_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_quit_during_scene_persistence_ignores_late_turn(mock_app_dependencies) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+    app.speculate_all_choices = MagicMock()
+
+    save_reached = asyncio.Event()
+    release_save = asyncio.Event()
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        assert app.engine is not None
+        assert app.engine.db is not None
+
+        original_save = app.engine.db.save_scene_async
+
+        async def delayed_save_scene_async(*args, **kwargs):
+            if kwargs.get("choice_text") == "Go North":
+                save_reached.set()
+                await release_save.wait()
+            return await original_save(*args, **kwargs)
+
+        app.engine.db.save_scene_async = AsyncMock(side_effect=delayed_save_scene_async)
+
+        choice_task = asyncio.create_task(app._trigger_choice(0))
+        await asyncio.wait_for(save_reached.wait(), timeout=1.0)
+
+        app.on_unmount()
+        release_save.set()
+        await asyncio.wait_for(choice_task, timeout=1.0)
+        await pilot.pause(0.1)
+
+    assert "You went North." not in app._current_story
 
 
 @pytest.mark.asyncio
