@@ -17,6 +17,7 @@ TARGETS = (
     CoverageTarget("cyoa/core", "cyoa/core/", 83.0),
     CoverageTarget("cyoa/llm", "cyoa/llm/", 74.0),
     CoverageTarget("cyoa/db", "cyoa/db/", 68.0),
+    CoverageTarget("cyoa/ui", "cyoa/ui/", 85.0),
 )
 
 

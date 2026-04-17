@@ -31,6 +31,9 @@ def test_check_coverage_passes_when_targets_meet_thresholds(tmp_path, monkeypatc
                     "cyoa/db/graph_db.py": {
                         "summary": {"num_statements": 100, "missing_lines": 30}
                     },
+                    "cyoa/ui/app.py": {
+                        "summary": {"num_statements": 100, "missing_lines": 15}
+                    },
                 }
             }
         ),
@@ -57,6 +60,9 @@ def test_check_coverage_fails_when_target_is_below_threshold(tmp_path, monkeypat
                     },
                     "cyoa/db/graph_db.py": {
                         "summary": {"num_statements": 100, "missing_lines": 20}
+                    },
+                    "cyoa/ui/app.py": {
+                        "summary": {"num_statements": 100, "missing_lines": 16}
                     },
                 }
             }
