@@ -126,6 +126,10 @@ class RAGManager:
 
     async def reset(self) -> None:
         """Clear and close all current session memories to prevent leaks."""
+        self.reset_sync()
+
+    def reset_sync(self) -> None:
+        """Clear and recreate all current session memories synchronously."""
         if hasattr(self.memory, "close"):
             self.memory.close()
         if hasattr(self.npc_memory, "close"):

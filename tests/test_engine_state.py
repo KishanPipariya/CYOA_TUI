@@ -209,6 +209,78 @@ async def test_engine_shutdown_cancels_summarization_and_closes_resources():
     db.close.assert_called_once_with()
 
 
+@pytest.mark.asyncio
+async def test_engine_restart_resets_rag_and_cancels_inflight_summarization():
+    broker, _provider = _make_broker_with_mock_provider()
+    engine = StoryEngine(broker=broker, starting_prompt="Start")
+    engine.initialize = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    engine.rag.reset = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    task = asyncio.create_task(asyncio.sleep(10))
+    engine._pending_summarization_task = task
+
+    await engine.restart()
+    await asyncio.sleep(0)
+
+    engine.rag.reset.assert_awaited_once_with()
+    engine.initialize.assert_awaited_once_with()
+    assert task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_engine_generate_next_ignores_runtime_event_subscriber_failures():
+    broker, _provider = _make_broker_with_mock_provider()
+    broker.generate_next_node_async = AsyncMock(  # type: ignore[method-assign]
+        side_effect=lambda _ctx, on_token_chunk: (
+            on_token_chunk("chunk"),
+            StoryNode(narrative="Recovered", choices=[Choice(text="A"), Choice(text="B")]),
+        )[1]
+    )
+    broker.save_state_async = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    engine = StoryEngine(broker=broker, starting_prompt="Start")
+    engine.story_context = StoryContext("Start", token_counter=lambda _x: 1)
+    engine.state.turn_count = 2
+    engine.rag.retrieve_memories = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    engine.rag.index_node = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    bus.subscribe(Events.TOKEN_STREAMED, lambda token: (_ for _ in ()).throw(RuntimeError(token)))
+    bus.subscribe(Events.NODE_COMPLETED, lambda node: (_ for _ in ()).throw(RuntimeError(node.narrative)))
+
+    await engine._generate_next(choice_text="anything")
+
+    assert engine.state.current_node is not None
+    assert engine.state.current_node.narrative == "Recovered"
+
+
+@pytest.mark.asyncio
+async def test_engine_make_choice_ignores_runtime_event_subscriber_failures():
+    broker, _provider = _make_broker_with_mock_provider()
+    broker.generate_next_node_async = AsyncMock(  # type: ignore[method-assign]
+        return_value=StoryNode(narrative="After choice", choices=[Choice(text="A"), Choice(text="B")])
+    )
+    broker.save_state_async = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    engine = StoryEngine(broker=broker, starting_prompt="Start")
+    engine.story_context = StoryContext("Start", token_counter=lambda _x: 1)
+    engine.state.current_node = _make_story_node("Current")
+    engine.state.current_scene_id = "scene-1"
+    engine.state.turn_count = 1
+    engine.rag.retrieve_memories = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    engine.rag.index_node = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    bus.subscribe(
+        Events.CHOICE_MADE,
+        lambda choice_text: (_ for _ in ()).throw(RuntimeError(choice_text)),
+    )
+
+    await engine.make_choice("Go North")
+
+    assert engine.state.turn_count == 2
+    assert engine.state.last_choice_text == "Go North"
+    assert engine.state.current_node is not None
+    assert engine.state.current_node.narrative == "After choice"
+
+
 def test_engine_load_save_data_accepts_versionless_payload():
     broker, _provider = _make_broker_with_mock_provider()
     loaded = StoryEngine(broker=broker, starting_prompt="IgnoreThis")

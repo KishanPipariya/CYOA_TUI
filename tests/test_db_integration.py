@@ -125,9 +125,10 @@ def test_offline_fallback():
 
 @pytest.mark.asyncio
 async def test_verify_connectivity_async_handles_no_driver():
-    db = CYOAGraphDB(uri="bolt://localhost:9999")
+    with patch("cyoa.db.graph_db.GraphDatabase.driver", side_effect=Exception("offline")):
+        db = CYOAGraphDB(uri="bolt://localhost:9999")
 
-    assert await db.verify_connectivity_async() is False
+        assert await db.verify_connectivity_async() is False
 
 
 @pytest.mark.asyncio
@@ -151,7 +152,6 @@ async def test_verify_connectivity_async_auth_failure_disables_driver(mock_neo4j
         db.driver.verify_connectivity = MagicMock(side_effect=AuthError("bad auth"))
 
         assert await db.verify_connectivity_async() is False
-        assert db.driver is None
         assert db.cb.failure_count == 1
 
 
@@ -164,14 +164,14 @@ async def test_verify_connectivity_async_service_unavailable_disables_driver(moc
         db.driver.verify_connectivity = MagicMock(side_effect=ServiceUnavailable("offline"))
 
         assert await db.verify_connectivity_async() is False
-        assert db.driver is None
         assert db.cb.failure_count == 1
 
 
 def test_close_noops_without_driver():
-    db = CYOAGraphDB(uri="bolt://localhost:9999")
+    with patch("cyoa.db.graph_db.GraphDatabase.driver", side_effect=Exception("offline")):
+        db = CYOAGraphDB(uri="bolt://localhost:9999")
 
-    db.close()
+        db.close()
 
 
 def test_close_closes_driver(mock_neo4j):
@@ -450,14 +450,29 @@ def test_create_scene_node_uses_defaults_when_optional_fields_missing(mock_neo4j
 
 @pytest.mark.asyncio
 async def test_save_scene_async_only_links_when_source_and_choice_present():
-    db = CYOAGraphDB(uri="bolt://localhost:9999")
-    db.create_scene_node = MagicMock(return_value="new-scene")
-    db.create_choice_edge = MagicMock()
+    with patch("cyoa.db.graph_db.GraphDatabase.driver"):
+        db = CYOAGraphDB(uri="bolt://localhost:9999")
+        db.create_scene_node = MagicMock(return_value="new-scene")
+        db.create_choice_edge = MagicMock()
 
-    scene_id = await db.save_scene_async("Narrative", ["Go"], "Story", None, "Go")
+        scene_id = await db.save_scene_async("Narrative", ["Go"], "Story", None, "Go")
 
-    assert scene_id == "new-scene"
-    db.create_choice_edge.assert_not_called()
+        assert scene_id == "new-scene"
+        db.create_choice_edge.assert_not_called()
+
+
+def test_custom_localhost_port_still_initializes_driver():
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        driver = mock_driver_call.return_value
+
+        db = CYOAGraphDB(uri="bolt://localhost:9999", user="u", password="p")
+
+        assert db.driver is driver
+        mock_driver_call.assert_called_once_with(
+            "bolt://localhost:9999",
+            auth=("u", "p"),
+            connection_timeout=1.0,
+        )
 
 
 def test_get_all_story_scenes_returns_empty_on_query_error(mock_neo4j):

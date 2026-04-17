@@ -29,7 +29,14 @@ class EventBus:
         if event_name in self._subscribers and callback in self._subscribers[event_name]:
             self._subscribers[event_name].remove(callback)
 
-    def emit(self, event_name: str, **kwargs: Any) -> None:
+    def emit(
+        self,
+        event_name: str,
+        *,
+        raise_on_error: bool = True,
+        unsubscribe_failed: bool = True,
+        **kwargs: Any,
+    ) -> None:
         """Broadcast an event, calling all registered callbacks with kwargs."""
         # Snapshot the list so callbacks that unsubscribe themselves during
         # emit cannot cause RuntimeError or silently skip other callbacks.
@@ -44,12 +51,22 @@ class EventBus:
                     getattr(callback, "__name__", repr(callback)),
                     event_name,
                 )
-        for callback in failed_callbacks:
-            self.unsubscribe(event_name, callback)
-        if failed_callbacks:
+        if unsubscribe_failed:
+            for callback in failed_callbacks:
+                self.unsubscribe(event_name, callback)
+        if failed_callbacks and raise_on_error:
             raise EventDispatchError(
                 f"{len(failed_callbacks)} callback(s) failed while dispatching {event_name!r}."
             )
+
+    def emit_runtime(self, event_name: str, **kwargs: Any) -> None:
+        """Broadcast a non-fatal runtime event without mutating subscriptions."""
+        self.emit(
+            event_name,
+            raise_on_error=False,
+            unsubscribe_failed=False,
+            **kwargs,
+        )
 
     def clear(self) -> None:
         """Clear all subscribers (mainly useful for isolating test environments)."""

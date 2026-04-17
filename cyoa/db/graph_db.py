@@ -49,13 +49,9 @@ class CYOAGraphDB:
         try:
             # Cast uri to str because the Neo4j driver expects a non-None URI
             uri_str = str(uri)
-            if "localhost" in uri_str and int(uri_str.split(":")[-1]) > 9000:
-                # Special case for testing: if port > 9000, assume it's a dummy/offline test
-                self.driver = None
-            else:
-                self.driver = GraphDatabase.driver(
-                    uri_str, auth=(str(user or ""), str(password or "")), connection_timeout=1.0
-                )
+            self.driver = GraphDatabase.driver(
+                uri_str, auth=(str(user or ""), str(password or "")), connection_timeout=1.0
+            )
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 f"Failed to create Neo4j driver. Graph persistence disabled. Error: {e}"
@@ -72,22 +68,18 @@ class CYOAGraphDB:
 
         import asyncio
         try:
-            await asyncio.to_thread(self.driver.verify_connectivity)
+            await asyncio.to_thread(self.cb.call, self.driver.verify_connectivity)
             logger.info("Successfully connected to Neo4j.")
             return True
         except AuthError:
             logger.error(
                 "Failed to connect to Neo4j: Authentication failed. Check username and password."
             )
-            self.driver = None
-            self.cb._on_failure(Exception("Authentication failed"))
             return False
-        except (ServiceUnavailable, Exception) as e:  # noqa: BLE001
+        except (CircuitBreakerOpenError, ServiceUnavailable, Exception) as e:  # noqa: BLE001
             logger.warning(
                 f"Graph DB is offline. Proceeding without graph persistence. Error: {e}"
             )
-            self.cb._on_failure(e)
-            self.driver = None
             return False
 
     @property

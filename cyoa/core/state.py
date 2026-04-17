@@ -64,7 +64,7 @@ class GameState:
                 stats_changed = True
 
         if stats_changed:
-            bus.emit(Events.STATS_UPDATED, stats=dict(self.player_stats))
+            bus.emit_runtime(Events.STATS_UPDATED, stats=dict(self.player_stats))
 
         # 2. Update Inventory
         inv_changed = False
@@ -78,11 +78,11 @@ class GameState:
                 inv_changed = True
 
         if inv_changed:
-            bus.emit(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
+            bus.emit_runtime(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
 
         world_state_changed = self._apply_world_updates(node)
         if world_state_changed:
-            bus.emit(Events.WORLD_STATE_UPDATED, state=self.get_world_state())
+            bus.emit_runtime(Events.WORLD_STATE_UPDATED, state=self.get_world_state())
 
         # 3. Advance state
         self.current_node = node
@@ -130,13 +130,13 @@ class GameState:
         self._undo_snapshot = None
 
         # Emit refresh events
-        bus.emit(Events.STATS_UPDATED, stats=dict(self.player_stats))
-        bus.emit(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
-        bus.emit(Events.WORLD_STATE_UPDATED, state=self.get_world_state())
+        bus.emit_runtime(Events.STATS_UPDATED, stats=dict(self.player_stats))
+        bus.emit_runtime(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
+        bus.emit_runtime(Events.WORLD_STATE_UPDATED, state=self.get_world_state())
 
         # Refresh narrative node
         if self.current_node:
-            bus.emit(Events.NODE_COMPLETED, node=self.current_node)
+            bus.emit_runtime(Events.NODE_COMPLETED, node=self.current_node)
 
         return True
 
@@ -185,13 +185,13 @@ class GameState:
                 logger.warning("Ignoring malformed current_node in save payload.")
                 self.current_node = None
 
-        bus.emit(Events.STATS_UPDATED, stats=dict(self.player_stats))
-        bus.emit(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
-        bus.emit(Events.WORLD_STATE_UPDATED, state=self.get_world_state())
+        bus.emit_runtime(Events.STATS_UPDATED, stats=dict(self.player_stats))
+        bus.emit_runtime(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
+        bus.emit_runtime(Events.WORLD_STATE_UPDATED, state=self.get_world_state())
         if self.current_node:
-            bus.emit(Events.NODE_COMPLETED, node=self.current_node)
+            bus.emit_runtime(Events.NODE_COMPLETED, node=self.current_node)
 
-        bus.emit(Events.STORY_TITLE_GENERATED, title=self.story_title)
+        bus.emit_runtime(Events.STORY_TITLE_GENERATED, title=self.story_title)
 
     def _coerce_positive_int(self, value: Any, *, default: int) -> int:
         """Return a positive integer fallback when save data is malformed."""

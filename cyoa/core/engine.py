@@ -54,6 +54,47 @@ class StoryEngine:
         # is triggered; completed tasks are released automatically.
         self._pending_summarization_task: asyncio.Task[None] | None = None
 
+    async def _cancel_pending_summarization_task(self) -> None:
+        """Cancel and drain any in-flight summarization task."""
+        task = self._pending_summarization_task
+        if task is None:
+            return
+
+        self._pending_summarization_task = None
+        if not task.done():
+            task.cancel()
+
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logger.debug("Pending summarization task ended during lifecycle reset: %s", exc)
+
+    async def _prepare_for_restart(self) -> None:
+        """Reset transient runtime state before starting a fresh adventure."""
+        self.speculation_cache.clear_all()
+        await self._cancel_pending_summarization_task()
+        await self.rag.reset()
+
+    async def _prepare_for_history_restore(self) -> None:
+        """Cancel stale background work before restoring saved or branched state."""
+        await self._cancel_pending_summarization_task()
+        await self.rag.reset()
+
+    def _prepare_for_load(self) -> None:
+        """Synchronously clear stale runtime state before hydrating a save."""
+        task = self._pending_summarization_task
+        self._pending_summarization_task = None
+        if task is not None and not task.done():
+            task.cancel()
+        self.speculation_cache.clear_all()
+        self.rag.reset_sync()
+
+    def _emit_runtime_event(self, event_name: str, **kwargs: Any) -> None:
+        """Emit an engine runtime event without letting subscriber failures abort the turn."""
+        bus.emit_runtime(event_name, **kwargs)
+
     async def initialize(self) -> None:
         """Start a brand-new adventure."""
         with EngineObservedSession("initialize"):
@@ -66,19 +107,18 @@ class StoryEngine:
             # Reset extracted state
             self.state.reset()
             self._apply_initial_state()
-            bus.emit(Events.STATS_UPDATED, stats=dict(self.state.player_stats))
-            bus.emit(Events.INVENTORY_UPDATED, inventory=list(self.state.inventory))
-            bus.emit(Events.WORLD_STATE_UPDATED, state=self.state.get_world_state())
+            self._emit_runtime_event(Events.STATS_UPDATED, stats=dict(self.state.player_stats))
+            self._emit_runtime_event(Events.INVENTORY_UPDATED, inventory=list(self.state.inventory))
+            self._emit_runtime_event(Events.WORLD_STATE_UPDATED, state=self.state.get_world_state())
 
-            bus.emit(Events.ENGINE_STARTED)
+            self._emit_runtime_event(Events.ENGINE_STARTED)
             await self._generate_next()
 
     async def restart(self) -> None:
         """Restart the engine with the same configuration."""
-        # Clear engine-level caches
-        self.speculation_cache.clear_all()
+        await self._prepare_for_restart()
         await self.initialize()
-        bus.emit(Events.ENGINE_RESTARTED)
+        self._emit_runtime_event(Events.ENGINE_RESTARTED)
 
     async def make_choice(self, choice_text: str) -> None:
         """Process a player's choice and advance the story."""
@@ -95,7 +135,7 @@ class StoryEngine:
                 "story_context_history": [msg.copy() for msg in self.story_context.history]
             })
 
-            bus.emit(Events.CHOICE_MADE, choice_text=choice_text)
+            self._emit_runtime_event(Events.CHOICE_MADE, choice_text=choice_text)
 
             # Update the LLM context (history and state)
             self.story_context.add_turn(
@@ -122,7 +162,7 @@ class StoryEngine:
         await self.rag.retrieve_memories(self.state.current_node, self.story_context)
 
         if self.story_context.needs_summarization():
-            bus.emit(Events.SUMMARIZATION_STARTED)
+            self._emit_runtime_event(Events.SUMMARIZATION_STARTED)
             self._pending_summarization_task = asyncio.create_task(
                 self._run_summarization_in_background(self.story_context)
             )
@@ -142,7 +182,7 @@ class StoryEngine:
         """Use speculative cache when available, otherwise generate a fresh node."""
         cached_node = self._get_cached_node(choice_text)
         if cached_node:
-            bus.emit(Events.STATUS_MESSAGE, message="✨ Recalling future memories...")
+            self._emit_runtime_event(Events.STATUS_MESSAGE, message="✨ Recalling future memories...")
             await asyncio.sleep(0.1)
             if session.span:
                 session.span.set_attribute("engine.cache_hit", True)
@@ -170,7 +210,7 @@ class StoryEngine:
             )
         else:
             self.state.story_title = generated_title
-        bus.emit(Events.STORY_TITLE_GENERATED, title=self.state.story_title)
+        self._emit_runtime_event(Events.STORY_TITLE_GENERATED, title=self.state.story_title)
 
     async def _persist_generated_node(
         self,
@@ -209,20 +249,20 @@ class StoryEngine:
 
     def _emit_generation_events(self, node: StoryNode) -> None:
         """Emit post-generation events in the established UI order."""
-        bus.emit(Events.NODE_COMPLETED, node=node)
+        self._emit_runtime_event(Events.NODE_COMPLETED, node=node)
         if node.is_ending:
-            bus.emit(Events.ENDING_REACHED, node=node)
+            self._emit_runtime_event(Events.ENDING_REACHED, node=node)
 
     async def _generate_next(self, choice_text: str | None = None) -> None:
         """Orchestrate the generation of the next story node, including RAG and DB saving."""
         if not self.story_context:
             return
 
-        bus.emit(Events.NODE_GENERATING)
+        self._emit_runtime_event(Events.NODE_GENERATING)
         await self._prepare_generation_context()
 
         def on_token(token: str) -> None:
-            bus.emit(Events.TOKEN_STREAMED, token=token)
+            self._emit_runtime_event(Events.TOKEN_STREAMED, token=token)
 
         try:
             with EngineObservedSession("process_turn") as session:
@@ -232,7 +272,7 @@ class StoryEngine:
 
         except Exception as e:
             logger.error(f"Story Engine error: {e}", exc_info=True)
-            bus.emit(Events.ERROR_OCCURRED, error=str(e))
+            self._emit_runtime_event(Events.ERROR_OCCURRED, error=str(e))
 
     async def _run_summarization_in_background(self, context: StoryContext) -> None:
         """Run hierarchical summarization as a fire-and-forget background task.
@@ -241,20 +281,28 @@ class StoryEngine:
         never contributes to Time-to-First-Token latency. The updated summary
         will be available in `context` by the time the *next* turn is generated.
         """
+        task = asyncio.current_task()
         try:
-            bus.emit(Events.STATUS_MESSAGE, message="📜 Archiving old chapters...")
+            self._emit_runtime_event(Events.STATUS_MESSAGE, message="📜 Archiving old chapters...")
             await self.broker.update_story_summaries_async(context)
             logger.debug("Background summarization completed successfully.")
+        except asyncio.CancelledError:
+            logger.debug("Background summarization cancelled.")
+            raise
         except Exception as exc:
             # Failure is non-fatal — the next turn will simply run without a
             # fresh summary, which is preferable to blocking or crashing.
             logger.warning("Background summarization failed (non-fatal): %s", exc)
+        finally:
+            if self._pending_summarization_task is task:
+                self._pending_summarization_task = None
 
     def shutdown(self) -> None:
         """Cancel engine-owned background work and release external resources."""
-        if self._pending_summarization_task is not None:
-            self._pending_summarization_task.cancel()
-            self._pending_summarization_task = None
+        task = self._pending_summarization_task
+        self._pending_summarization_task = None
+        if task is not None:
+            task.cancel()
 
         self.rag.memory.close()
         self.rag.npc_memory.close()
@@ -290,6 +338,8 @@ class StoryEngine:
 
     def load_save_data(self, data: dict[str, Any]) -> None:
         """Hydrate engine state from a save data dictionary."""
+        self._prepare_for_load()
+
         # Hydrate state manager
         self.state.load_save_data(data)
 
@@ -319,6 +369,7 @@ class StoryEngine:
 
     async def branch_to_scene(self, idx: int, history: dict[str, Any]) -> None:
         """Restore the engine state to a specific scene from the history."""
+        await self._prepare_for_history_restore()
         source_scene_id = self.state.current_scene_id
 
         # 1. Rebuild user-facing context history
@@ -368,10 +419,10 @@ class StoryEngine:
         self._sync_story_context_state()
 
         # Emit events so UI can refresh stats/inventory/narrative
-        bus.emit(Events.STATS_UPDATED, stats=self.state.player_stats)
-        bus.emit(Events.INVENTORY_UPDATED, inventory=self.state.inventory)
-        bus.emit(Events.WORLD_STATE_UPDATED, state=self.state.get_world_state())
-        bus.emit(Events.NODE_COMPLETED, node=node)
+        self._emit_runtime_event(Events.STATS_UPDATED, stats=self.state.player_stats)
+        self._emit_runtime_event(Events.INVENTORY_UPDATED, inventory=self.state.inventory)
+        self._emit_runtime_event(Events.WORLD_STATE_UPDATED, state=self.state.get_world_state())
+        self._emit_runtime_event(Events.NODE_COMPLETED, node=node)
 
     def _apply_initial_state(self) -> None:
         objectives = []

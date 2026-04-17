@@ -185,6 +185,26 @@ def test_event_bus_removes_failing_callbacks_after_dispatch_error() -> None:
     assert received == [1, 2]
 
 
+def test_event_bus_emit_runtime_logs_failures_without_unsubscribing() -> None:
+    event_bus = EventBus()
+    received: list[int] = []
+
+    def broken(value: int) -> None:
+        raise RuntimeError("boom")
+
+    def healthy(value: int) -> None:
+        received.append(value)
+
+    event_bus.subscribe("tick", broken)
+    event_bus.subscribe("tick", healthy)
+
+    event_bus.emit_runtime("tick", value=1)
+    event_bus.emit_runtime("tick", value=2)
+
+    assert event_bus.subscriber_count("tick") == 2
+    assert received == [1, 2]
+
+
 @pytest.mark.asyncio
 async def test_stats_display_reflects_player_stats(mock_app_dependencies):
     """Test that the stats display updates with different color codes depending on health."""
