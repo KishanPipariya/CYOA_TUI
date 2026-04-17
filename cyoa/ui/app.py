@@ -132,7 +132,7 @@ class CYOAApp(
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Horizontal():
+        with Horizontal(id="workspace"):
             with Container(id="main-container"):
                 with VerticalScroll(id="story-container"):
                     yield Markdown(constants.LOADING_ART, classes="story-turn", id="initial-turn")

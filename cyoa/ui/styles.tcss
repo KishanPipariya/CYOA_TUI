@@ -8,41 +8,37 @@ Screen {
 }
 
 /* ── Main Layout Containers ──────────────────────────────────── */
+#workspace {
+    height: 1fr;
+}
+
 #main-container {
-    width: 2fr;
+    width: 1fr;
+    min-width: 64;
+    padding-right: 1;
 }
 
 #journal-panel, #story-map-panel {
-    width: 32%;
-    min-width: 26;
-    max-width: 40;
+    width: 34;
     border-left: vkey $secondary;
     padding: 1;
     background: $surface;
-    /* Smooth slide-in/out transition with fade. Note: padding/margin cannot be animated. */
-    transition: width 300ms in_out_cubic, opacity 300ms;
-    overflow-x: hidden;
-    opacity: 1;
+    overflow: hidden auto;
 }
 
 #journal-panel.panel-collapsed, #story-map-panel.panel-collapsed {
-    display: block; /* Override default hidden behavior to allow width animation */
-    width: 0;
-    padding: 0;
-    margin: 0;
-    border: none;
-    opacity: 0;
+    display: none;
 }
 
 /* Narrow terminals: prioritize readable story width. */
 .compact-layout #main-container {
     width: 1fr;
+    min-width: 0;
+    padding-right: 0;
 }
 
 .compact-layout #journal-panel, .compact-layout #story-map-panel {
-    width: 48%;
-    min-width: 24;
-    max-width: 34;
+    width: 28;
 }
 
 
@@ -71,22 +67,22 @@ Screen {
 /* ── Story Panel ───────────────────────────────────────────── */
 #story-container {
     height: 1fr;
-    padding: 0 1;
+    padding: 0 1 0 0;
     margin: 1 1 0 1;
 }
 
 .story-turn {
     background: $panel;
-    padding: 1 2;
-    margin: 1 0;
+    padding: 1 1;
+    margin: 0 0 1 0;
     border-left: vkey $accent;
 }
 
 .player-choice {
     background: $boost;
     color: $text-muted;
-    padding: 1 2;
-    margin: 1 0 1 2;
+    padding: 1 1;
+    margin: 0 0 1 2;
     border-right: vkey $secondary;
     text-align: right;
 }
@@ -104,7 +100,7 @@ Screen {
 /* ── Status Bar (two-row stats + inventory) ──────────────── */
 #status-bar {
     height: auto;
-    padding: 0 1;
+    padding: 0;
     margin: 0 1;
 }
 
@@ -113,7 +109,7 @@ StatusDisplay {
     background: $boost 10%;
     border-top: tall $accent 30%;
     padding: 0 1;
-    margin: 0 1;
+    margin: 0;
 }
 
 #stats-row {
@@ -168,7 +164,6 @@ ThemeSpinner {
 /* Fix #3: Cap height to prevent overflow on small terminals */
 #choices-container {
     height: auto;
-    /* Fix #3: hard cap so choices never crush the story panel */
     max-height: 40%;
     border: solid $secondary;
     padding: 1;
@@ -179,9 +174,16 @@ ThemeSpinner {
 /* ── Buttons ────────────────────────────────────────────────── */
 Button {
     width: 100%;
-    margin-bottom: 1;
+    margin-bottom: 0;
     height: auto;
     min-height: 3;
+}
+
+#choices-container Button {
+    margin-bottom: 1;
+    background: $panel;
+    color: $text;
+    border: round $secondary 30%;
 }
 
 Button > .textual-button--label {
@@ -194,10 +196,16 @@ Button > .textual-button--label {
 }
 
 #choices-container Button:focus {
-    background: $accent 25%;
-    border: tall $accent;
+    background: $accent 15%;
+    border: round $accent;
     color: $text;
     text-style: bold;
+}
+
+#choices-container Button:disabled {
+    background: $surface;
+    color: $text-muted;
+    border: round $secondary 20%;
 }
 
 /* ── Footer ────────────────────────────────────────────────── */

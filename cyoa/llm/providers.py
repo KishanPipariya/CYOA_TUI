@@ -136,6 +136,9 @@ class LlamaCppProvider(LLMProvider):
             verbose=False,
         )
         self._lock = threading.Lock()
+        self._stream_events_lock = threading.Lock()
+        self._active_cancel_events: set[threading.Event] = set()
+        self._closing = False
 
     def count_tokens(self, text: str) -> int:
         """Measure tokens exactly using the GGUF's own tokenizer."""
@@ -186,6 +189,23 @@ class LlamaCppProvider(LLMProvider):
 
     def _start_generation_session(self) -> LLMObservedSession:
         return LLMObservedSession(model_name=self.model_path, task="generation").start()
+
+    def _register_cancel_event(self, cancel_event: threading.Event) -> None:
+        with self._stream_events_lock:
+            self._active_cancel_events.add(cancel_event)
+            if self._closing:
+                cancel_event.set()
+
+    def _unregister_cancel_event(self, cancel_event: threading.Event) -> None:
+        with self._stream_events_lock:
+            self._active_cancel_events.discard(cancel_event)
+
+    def _signal_active_streams(self) -> None:
+        with self._stream_events_lock:
+            self._closing = True
+            active_events = tuple(self._active_cancel_events)
+        for cancel_event in active_events:
+            cancel_event.set()
 
     def _stream_completion(
         self,
@@ -267,6 +287,7 @@ class LlamaCppProvider(LLMProvider):
         loop = asyncio.get_running_loop()
         q: asyncio.Queue[str | None] = asyncio.Queue()
         cancel_event = threading.Event()
+        self._register_cancel_event(cancel_event)
 
         loop.run_in_executor(
             None,
@@ -288,6 +309,7 @@ class LlamaCppProvider(LLMProvider):
                 yield token
         finally:
             cancel_event.set()
+            self._unregister_cancel_event(cancel_event)
 
     async def generate_text(
         self,
@@ -360,18 +382,17 @@ class LlamaCppProvider(LLMProvider):
 
     def close(self) -> None:
         """Clear the LLM instance to release memory/threads."""
-        # Use a short timeout to avoid hanging the UI shutdown if a thread is stuck
-        acquired = self._lock.acquire(timeout=0.5)
+        self._signal_active_streams()
+
+        # Give interrupted generation a short window to exit before tearing down the model.
+        acquired = self._lock.acquire(timeout=2.0)
         try:
             if hasattr(self, "llm"):
-                # If we couldn't get the lock, it means a thread is still running.
-                # Since we are likely shutting down the app, we prefer to skip
-                # the explicit 'del' rather than hanging the process.
                 if acquired:
                     del self.llm
                 else:
                     logger.warning(
-                        "LlamaCpp lock held during close(); skipping explicit cleanup to avoid hang."
+                        "LlamaCpp lock held during close(); active generation did not stop in time."
                     )
         finally:
             if acquired:

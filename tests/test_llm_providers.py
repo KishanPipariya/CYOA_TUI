@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -200,6 +201,17 @@ def test_llama_cpp_close_skips_cleanup_when_lock_is_held(mock_llama) -> None:
         assert hasattr(provider, "llm")
     finally:
         provider._lock.release()
+
+
+def test_llama_cpp_close_signals_active_streams(mock_llama) -> None:
+    provider = LlamaCppProvider(model_path="dummy.gguf")
+    cancel_event = threading.Event()
+    provider._register_cancel_event(cancel_event)
+
+    provider.close()
+
+    assert cancel_event.is_set()
+    assert not hasattr(provider, "llm")
 
 # ── OllamaProvider Tests ─────────────────────────────────────────────────────
 
