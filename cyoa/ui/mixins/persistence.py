@@ -18,6 +18,28 @@ class PersistenceMixin:
     """Mixin for save/load game persistence."""
 
     @staticmethod
+    def _resolve_save_title(host: object) -> str | None:
+        """Return a stable title for save payloads even if startup title generation lags."""
+        mixin_host = as_mixin_host(host)
+        if not mixin_host.engine:
+            return None
+
+        story_title = mixin_host.engine.state.story_title
+        if isinstance(story_title, str) and story_title.strip():
+            return story_title
+
+        current_node = mixin_host.engine.state.current_node
+        node_title = current_node.title if current_node is not None else None
+        if isinstance(node_title, str) and node_title.strip():
+            mixin_host.engine.state.story_title = node_title
+            return node_title
+
+        fallback_title = "Untitled Adventure" if current_node is not None else None
+        if fallback_title is not None:
+            mixin_host.engine.state.story_title = fallback_title
+        return fallback_title
+
+    @staticmethod
     def _query_optional_container(app: object, selector: str) -> Container | None:
         """Return a mounted container when available, otherwise tolerate early restore timing."""
         textual_app = as_textual_app(app)
@@ -227,13 +249,18 @@ class PersistenceMixin:
         """Serialize the current game state to a JSON save file."""
         app = as_textual_app(self)
         host = as_mixin_host(self)
-        if not host.engine or not host.engine.state.story_title or not host.engine.state.current_node:
+        if not host.engine or not host.engine.state.current_node:
+            app.notify("Nothing to save yet.", severity="warning", timeout=2)
+            return
+
+        save_title = self._resolve_save_title(host)
+        if not save_title:
             app.notify("Nothing to save yet.", severity="warning", timeout=2)
             return
 
         os.makedirs(constants.SAVES_DIR, exist_ok=True)
         safe_title = "".join(
-            c if c.isalnum() or c in " _-" else "_" for c in host.engine.state.story_title
+            c if c.isalnum() or c in " _-" else "_" for c in save_title
         )
         save_path = os.path.join(
             constants.SAVES_DIR,

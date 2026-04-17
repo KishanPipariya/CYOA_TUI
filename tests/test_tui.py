@@ -862,6 +862,35 @@ async def test_save_and_load_game(mock_app_dependencies, tmp_path, monkeypatch):
         assert app.turn_count == 1
 
 
+@pytest.mark.asyncio
+async def test_save_game_succeeds_before_story_title_is_persisted(
+    mock_app_dependencies, tmp_path, monkeypatch
+):
+    """Saving should not fail if the current node exists before title generation settles."""
+    from cyoa.core import constants
+
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await _wait_for(lambda: app.engine is not None and app.engine.state.current_node is not None)
+
+        assert app.engine is not None
+        app.engine.state.story_title = None
+        app.engine.state.current_node.title = "Recovered Save Title"
+
+        await pilot.press("s")
+        await _wait_for(lambda: len([f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]) == 1)
+
+        save_files = [f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]
+        assert save_files == ["Recovered Save Title_turn1.json"]
+
+        with open(os.path.join(str(tmp_path), save_files[0]), encoding="utf-8") as f:
+            payload = json.load(f)
+        assert payload["story_title"] == "Recovered Save Title"
+
+
 @pytest.mark.smoke
 @pytest.mark.asyncio
 async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeypatch):
