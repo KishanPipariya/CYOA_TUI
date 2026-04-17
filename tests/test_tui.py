@@ -5,10 +5,10 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from textual.css.query import NoMatches
 from textual.containers import Container
-from textual.widgets._toast import Toast
+from textual.css.query import NoMatches
 from textual.widgets import Button, Label, ListView, Markdown
+from textual.widgets._toast import Toast
 from textual.worker import WorkerFailed
 
 from cyoa.core.events import EventBus, EventDispatchError, Events, bus
@@ -420,6 +420,35 @@ async def test_choice_selection_via_click(mock_app_dependencies):
         assert len(buttons) == 2
         assert str(buttons[0].label) == "1  Open Door"
         assert str(buttons[1].label) == "2  Go Back"
+
+
+@pytest.mark.asyncio
+async def test_choice_focus_moves_with_arrow_keys(mock_app_dependencies):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+
+        choices_container = app.query_one("#choices-container", Container)
+        buttons = list(choices_container.query(Button))
+        assert len(buttons) == 2
+        assert app.focused is buttons[0]
+
+        await pilot.press("down")
+        await pilot.pause(0.1)
+        assert app.focused is buttons[1]
+
+        await pilot.press("up")
+        await pilot.pause(0.1)
+        assert app.focused is buttons[0]
+
+        await pilot.press("down", "enter")
+        await pilot.pause(1.0)
+        app.action_skip_typewriter()
+
+        journal_list = app.query_one("#journal-list", ListView)
+        journal_text = "".join(str(label.render()) for label in journal_list.query(Label))
+        assert "Go South" in journal_text
 
 
 @pytest.mark.asyncio
@@ -939,7 +968,7 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
 
         # Create a new app instance to simulate loading fresh
         app2 = CYOAApp(model_path="dummy_path.gguf")
-        async with app2.run_test() as pilot2:
+        async with app2.run_test():
             await _wait_for(lambda: app2.engine is not None and app2.engine.state.current_node is not None)
 
             # Find the save file

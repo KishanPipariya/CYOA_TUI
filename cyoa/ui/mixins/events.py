@@ -1,7 +1,7 @@
 from typing import Literal
 
-from textual.css.query import NoMatches
 from textual.containers import Container
+from textual.css.query import NoMatches
 from textual.widgets import ListView, Static
 
 from cyoa.core.models import StoryNode

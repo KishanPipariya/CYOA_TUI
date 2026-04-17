@@ -4,8 +4,8 @@ import logging
 import os
 from queue import Empty
 
-from textual.css.query import NoMatches
 from textual.containers import Container, VerticalScroll
+from textual.css.query import NoMatches
 from textual.widgets import Button, Label, ListView, Markdown
 
 from cyoa.core import constants

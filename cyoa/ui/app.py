@@ -68,6 +68,8 @@ class CYOAApp(
     dark = True
 
     BINDINGS: ClassVar[list[Any]] = [
+        Binding("up", "focus_previous_choice", "Prev Choice", show=False),
+        Binding("down", "focus_next_choice", "Next Choice", show=False),
         Binding("d", "toggle_dark", "Theme", show=True),
         Binding("b", "branch_past", "Branch", show=True),
         Binding("j", "toggle_journal", "Journal", show=True),
@@ -616,3 +618,36 @@ class CYOAApp(
             if btn.id and btn.id.startswith(prefix) and btn.id.endswith(f"-{idx}"):
                 await self._trigger_choice(idx, selected_button_id=btn.id)
                 return
+
+    def _enabled_choice_buttons(self) -> list[Button]:
+        """Return enabled choice buttons for the current turn in render order."""
+        prefix = f"choice-t{self.turn_count}-"
+        return [
+            btn
+            for btn in self.query("#choices-container Button")
+            if isinstance(btn, Button) and btn.id and btn.id.startswith(prefix) and not btn.disabled
+        ]
+
+    def _move_choice_focus(self, step: int) -> None:
+        """Move focus between available choice buttons."""
+        buttons = self._enabled_choice_buttons()
+        if not buttons:
+            return
+
+        focused = self.focused
+        try:
+            current_index = buttons.index(focused) if isinstance(focused, Button) else -1
+        except ValueError:
+            current_index = -1
+
+        if current_index == -1:
+            target = buttons[0] if step > 0 else buttons[-1]
+        else:
+            target = buttons[(current_index + step) % len(buttons)]
+        target.focus()
+
+    def action_focus_next_choice(self) -> None:
+        self._move_choice_focus(1)
+
+    def action_focus_previous_choice(self) -> None:
+        self._move_choice_focus(-1)

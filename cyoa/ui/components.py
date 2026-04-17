@@ -211,6 +211,8 @@ HELP_TEXT = """\
 | Key | Action |
 |:---:|:-------|
 | [b][reverse] 1 – 4 [/reverse][/b] | Select a choice by number |
+| [b][reverse] ↑ / ↓ [/reverse][/b] | Move between choices |
+| [b][reverse]ENTER[/reverse][/b] | Confirm focused choice |
 | [b][reverse]  D  [/reverse][/b] | Change Theme (Dark/Light) |
 | [b][reverse]  J  [/reverse][/b] | Toggle Journal panel |
 | [b][reverse]  M  [/reverse][/b] | Toggle Story Map panel |
