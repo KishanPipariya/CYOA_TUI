@@ -3,6 +3,7 @@ from collections import deque
 from typing import Any, ClassVar
 
 from cyoa.core.events import Events, bus
+from cyoa.core.mementos import GameStateSnapshot, StoryContextMemento
 from cyoa.core.models import Objective, StoryNode
 
 logger = logging.getLogger(__name__)
@@ -37,10 +38,10 @@ class GameState:
         self.faction_reputation: dict[str, int] = {}
         self.npc_affinity: dict[str, int] = {}
         self.story_flags: set[str] = set()
-        self._undo_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_DEPTH)
-        self._redo_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_DEPTH)
-        self._bookmarks: dict[str, dict[str, Any]] = {}
-        self._last_restored_snapshot: dict[str, Any] | None = None
+        self._undo_history: deque[GameStateSnapshot] = deque(maxlen=MAX_HISTORY_DEPTH)
+        self._redo_history: deque[GameStateSnapshot] = deque(maxlen=MAX_HISTORY_DEPTH)
+        self._bookmarks: dict[str, GameStateSnapshot] = {}
+        self._last_restored_snapshot: GameStateSnapshot | None = None
 
     def reset(self) -> None:
         """Reset the game state to its initial state."""
@@ -94,66 +95,47 @@ class GameState:
         # 3. Advance state
         self.current_node = node
 
-    def _build_snapshot(self, extra_data: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _build_snapshot(self, extra_data: dict[str, Any] | None = None) -> GameStateSnapshot:
         """Capture the current state in a serializable snapshot."""
-        snapshot: dict[str, Any] = {
-            "turn_count": self.turn_count,
-            "current_node": self.current_node,
-            "inventory": list(self.inventory),
-            "player_stats": dict(self.player_stats),
-            "story_title": self.story_title,
-            "current_scene_id": self.current_scene_id,
-            "last_choice_text": self.last_choice_text,
-            "timeline_metadata": [entry.copy() for entry in self.timeline_metadata],
-            "objectives": [objective.model_dump() for objective in self.objectives],
-            "faction_reputation": dict(self.faction_reputation),
-            "npc_affinity": dict(self.npc_affinity),
-            "story_flags": sorted(self.story_flags),
-        }
-        if extra_data:
-            snapshot.update(extra_data)
-        return snapshot
-
-    def _serialize_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
-        """Convert in-memory snapshot values into JSON-safe data."""
-        serialized = snapshot.copy()
-        current_node = serialized.get("current_node")
-        serialized["current_node"] = current_node.model_dump() if isinstance(current_node, StoryNode) else None
-        return serialized
-
-    def _deserialize_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
-        """Convert persisted snapshot data back into in-memory values."""
-        restored = snapshot.copy()
-        node_data = restored.get("current_node")
-        if isinstance(node_data, dict):
-            try:
-                restored["current_node"] = StoryNode(**node_data)
-            except Exception:
-                restored["current_node"] = None
-        else:
-            restored["current_node"] = None
-        return restored
+        story_context = StoryContextMemento.from_payload(
+            extra_data.get("story_context_history") if isinstance(extra_data, dict) else None
+        )
+        return GameStateSnapshot(
+            turn_count=self.turn_count,
+            current_node=self.current_node.model_copy() if self.current_node is not None else None,
+            inventory=list(self.inventory),
+            player_stats=dict(self.player_stats),
+            story_title=self.story_title,
+            current_scene_id=self.current_scene_id,
+            last_choice_text=self.last_choice_text,
+            timeline_metadata=[entry.copy() for entry in self.timeline_metadata],
+            objectives=[objective.model_copy() for objective in self.objectives],
+            faction_reputation=dict(self.faction_reputation),
+            npc_affinity=dict(self.npc_affinity),
+            story_flags=set(self.story_flags),
+            story_context=story_context,
+        )
 
     def create_undo_snapshot(self, extra_data: dict[str, Any] | None = None) -> None:
         """Capture the current state to allow future undo/redo operations."""
         self._undo_history.append(self._build_snapshot(extra_data))
         self._redo_history.clear()
 
-    def _restore_snapshot(self, snap: dict[str, Any]) -> None:
+    def _restore_snapshot(self, snap: GameStateSnapshot) -> None:
         """Restore state from a previously captured snapshot."""
-        self.turn_count = snap["turn_count"]
-        self.current_node = snap["current_node"]
-        self.inventory = list(snap["inventory"])
-        self.player_stats = dict(snap["player_stats"])
-        self.story_title = snap["story_title"]
-        self.current_scene_id = snap["current_scene_id"]
-        self.last_choice_text = snap["last_choice_text"]
-        self.timeline_metadata = [entry.copy() for entry in snap.get("timeline_metadata", [])]
-        self.objectives = self._coerce_objectives(snap.get("objectives"))
-        self.faction_reputation = self._coerce_relationships(snap.get("faction_reputation"))
-        self.npc_affinity = self._coerce_relationships(snap.get("npc_affinity"))
-        self.story_flags = self._coerce_story_flags(snap.get("story_flags"))
-        self._last_restored_snapshot = snap.copy()
+        self.turn_count = snap.turn_count
+        self.current_node = snap.current_node.model_copy() if snap.current_node is not None else None
+        self.inventory = list(snap.inventory)
+        self.player_stats = dict(snap.player_stats)
+        self.story_title = snap.story_title
+        self.current_scene_id = snap.current_scene_id
+        self.last_choice_text = snap.last_choice_text
+        self.timeline_metadata = [entry.copy() for entry in snap.timeline_metadata]
+        self.objectives = [objective.model_copy() for objective in snap.objectives]
+        self.faction_reputation = dict(snap.faction_reputation)
+        self.npc_affinity = dict(snap.npc_affinity)
+        self.story_flags = set(snap.story_flags)
+        self._last_restored_snapshot = snap.clone()
 
     def _emit_state_refresh_events(self) -> None:
         """Emit events after non-incremental state restoration."""
@@ -227,11 +209,9 @@ class GameState:
             "faction_reputation": dict(self.faction_reputation),
             "npc_affinity": dict(self.npc_affinity),
             "story_flags": sorted(self.story_flags),
-            "undo_history": [self._serialize_snapshot(snapshot) for snapshot in self._undo_history],
-            "redo_history": [self._serialize_snapshot(snapshot) for snapshot in self._redo_history],
-            "bookmarks": {
-                name: self._serialize_snapshot(snapshot) for name, snapshot in self._bookmarks.items()
-            },
+            "undo_history": [snapshot.to_payload() for snapshot in self._undo_history],
+            "redo_history": [snapshot.to_payload() for snapshot in self._redo_history],
+            "bookmarks": {name: snapshot.to_payload() for name, snapshot in self._bookmarks.items()},
         }
 
     def load_save_data(self, data: dict[str, Any]) -> None:
@@ -443,25 +423,58 @@ class GameState:
                 continue
         return objectives
 
-    def _coerce_snapshot_list(self, value: Any) -> list[dict[str, Any]]:
+    def _coerce_snapshot_list(self, value: Any) -> list[GameStateSnapshot]:
         """Normalize saved undo/redo stacks."""
         if not isinstance(value, list):
             return []
-        snapshots: list[dict[str, Any]] = []
+        snapshots: list[GameStateSnapshot] = []
         for entry in value:
-            if isinstance(entry, dict):
-                snapshots.append(self._deserialize_snapshot(entry))
+            snapshot = self._coerce_snapshot(entry)
+            if snapshot is not None:
+                snapshots.append(snapshot)
         return snapshots
 
-    def _coerce_bookmarks(self, value: Any) -> dict[str, dict[str, Any]]:
+    def _coerce_bookmarks(self, value: Any) -> dict[str, GameStateSnapshot]:
         """Normalize saved bookmark checkpoints."""
         if not isinstance(value, dict):
             return {}
-        bookmarks: dict[str, dict[str, Any]] = {}
+        bookmarks: dict[str, GameStateSnapshot] = {}
         for name, snapshot in value.items():
-            if isinstance(name, str) and isinstance(snapshot, dict):
-                bookmarks[name] = self._deserialize_snapshot(snapshot)
+            if not isinstance(name, str):
+                continue
+            normalized_snapshot = self._coerce_snapshot(snapshot)
+            if normalized_snapshot is not None:
+                bookmarks[name] = normalized_snapshot
         return bookmarks
+
+    def _coerce_snapshot(self, value: Any) -> GameStateSnapshot | None:
+        """Normalize a persisted snapshot payload into a typed memento."""
+        if not isinstance(value, dict):
+            return None
+
+        node: StoryNode | None = None
+        node_data = value.get("current_node")
+        if isinstance(node_data, dict):
+            try:
+                node = StoryNode(**node_data)
+            except Exception:
+                node = None
+
+        return GameStateSnapshot(
+            turn_count=self._coerce_positive_int(value.get("turn_count"), default=1),
+            current_node=node,
+            inventory=self._coerce_inventory(value.get("inventory")),
+            player_stats=self._coerce_player_stats(value.get("player_stats")),
+            story_title=value.get("story_title") if isinstance(value.get("story_title"), str) else None,
+            current_scene_id=value.get("current_scene_id") if isinstance(value.get("current_scene_id"), str) else None,
+            last_choice_text=value.get("last_choice_text") if isinstance(value.get("last_choice_text"), str) else None,
+            timeline_metadata=self._coerce_timeline_metadata(value.get("timeline_metadata")),
+            objectives=self._coerce_objectives(value.get("objectives")),
+            faction_reputation=self._coerce_relationships(value.get("faction_reputation")),
+            npc_affinity=self._coerce_relationships(value.get("npc_affinity")),
+            story_flags=self._coerce_story_flags(value.get("story_flags")),
+            story_context=StoryContextMemento.from_payload(value.get("story_context_history")),
+        )
 
     def _coerce_relationships(self, value: Any) -> dict[str, int]:
         relationships: dict[str, int] = {}

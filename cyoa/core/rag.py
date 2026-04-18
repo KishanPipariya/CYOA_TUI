@@ -2,6 +2,12 @@ import logging
 from typing import Any
 
 from cyoa.core.models import StoryNode
+from cyoa.core.ports import (
+    NarrativeMemoryFactory,
+    NarrativeMemoryStore,
+    NPCMemoryFactory,
+    NPCMemoryStore,
+)
 from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
 from cyoa.llm.broker import MemoryEntry, StoryContext
 
@@ -37,11 +43,15 @@ class RAGManager:
 
     def __init__(
         self,
-        memory: NarrativeMemory | None = None,
-        npc_memory: NPCMemory | None = None,
+        memory: NarrativeMemoryStore | None = None,
+        npc_memory: NPCMemoryStore | None = None,
+        memory_factory: NarrativeMemoryFactory | None = None,
+        npc_memory_factory: NPCMemoryFactory | None = None,
     ) -> None:
-        self.memory = memory or NarrativeMemory()
-        self.npc_memory = npc_memory or NPCMemory()
+        self._memory_factory = memory_factory or (lambda: NarrativeMemory())
+        self._npc_memory_factory = npc_memory_factory or (lambda: NPCMemory())
+        self.memory = memory or self._memory_factory()
+        self.npc_memory = npc_memory or self._npc_memory_factory()
 
     async def retrieve_memories(
         self,
@@ -134,8 +144,8 @@ class RAGManager:
             self.memory.close()
         if hasattr(self.npc_memory, "close"):
             self.npc_memory.close()
-        self.memory = NarrativeMemory()
-        self.npc_memory = NPCMemory()
+        self.memory = self._memory_factory()
+        self.npc_memory = self._npc_memory_factory()
 
     async def rebuild_async(self, history_scenes: list[dict[str, Any]]) -> None:
         """Rebuild memory from a list of past scenes."""

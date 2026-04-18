@@ -7,6 +7,7 @@ import pytest
 from cyoa.core.engine import StoryEngine
 from cyoa.core.events import Events, bus
 from cyoa.core.models import Choice, Objective, StoryNode
+from cyoa.core.runtime import EnginePhase
 from cyoa.core.state import GameState
 from cyoa.llm.broker import ModelBroker, StoryContext
 from cyoa.llm.providers import LLMProvider
@@ -593,3 +594,30 @@ def test_game_state_load_save_data_coerces_extended_world_fields():
     assert state.npc_affinity == {"Mira": 2}
     assert state.story_flags == {"met_mira"}
     assert state.current_node is None
+
+
+def test_engine_load_save_data_tracks_phase_transitions():
+    broker, _provider = _make_broker_with_mock_provider()
+    engine = StoryEngine(broker=broker, starting_prompt="Fallback")
+
+    transitions: list[tuple[str, str, str]] = []
+    bus.subscribe(
+        Events.ENGINE_PHASE_CHANGED,
+        lambda transition: transitions.append(
+            (transition.from_phase.value, transition.to_phase.value, transition.reason)
+        ),
+    )
+
+    engine.load_save_data(
+        {
+            "starting_prompt": "Start",
+            "context_history": [{"role": "user", "content": "Start"}],
+            "turn_count": 2,
+        }
+    )
+
+    assert transitions == [
+        ("idle", "restoring", "load_save_data"),
+        ("restoring", "ready", "load_completed"),
+    ]
+    assert engine.phase is EnginePhase.READY

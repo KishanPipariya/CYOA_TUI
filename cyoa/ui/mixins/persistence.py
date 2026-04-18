@@ -11,6 +11,7 @@ from textual.css.query import NoMatches
 from textual.widgets import Button, Label, ListView, Markdown
 
 from cyoa.core import constants
+from cyoa.ui.commands import ExportStoryCommand, SaveGameCommand, UICommandContext
 from cyoa.ui.components import JournalListItem
 from cyoa.ui.mixins.contracts import as_mixin_host, as_textual_app
 
@@ -268,35 +269,9 @@ class PersistenceMixin:
 
     def action_save_game(self) -> None:
         """Serialize the current game state to a JSON save file."""
-        app = as_textual_app(self)
-        host = as_mixin_host(self)
-        if not host.engine or not host.engine.state.current_node:
-            app.notify("Nothing to save yet.", severity="warning", timeout=2)
-            return
-
-        save_title = self._resolve_save_title(host)
-        if not save_title:
-            app.notify("Nothing to save yet.", severity="warning", timeout=2)
-            return
-
-        os.makedirs(constants.SAVES_DIR, exist_ok=True)
-        safe_title = "".join(
-            c if c.isalnum() or c in " _-" else "_" for c in save_title
+        SaveGameCommand().execute(
+            UICommandContext(app=as_textual_app(self), host=as_mixin_host(self), owner=self)
         )
-        save_path = os.path.join(
-            constants.SAVES_DIR,
-            f"{safe_title}_turn{host.engine.state.turn_count}.json",
-        )
-        save_data = self._build_save_payload(host, app)
-
-        try:
-            self._write_json_payload(save_path, save_data)
-            host._last_manual_save_turn = host.engine.state.turn_count
-            host._last_manual_save_scene_id = host.engine.state.current_scene_id
-            self._discard_autosave()
-            app.notify(f"Game saved to {save_path}", severity="information", timeout=3)
-        except OSError as e:
-            app.notify(f"Save failed: {e}", severity="error", timeout=3)
 
     def action_load_game(self) -> None:
         """Show available save files and load a selected one."""
@@ -495,15 +470,9 @@ class PersistenceMixin:
 
     def action_export_story(self) -> None:
         """Export the current live session to Markdown and JSON timeline files."""
-        app = as_textual_app(self)
-        host = as_mixin_host(self)
-        if not host.engine or host.engine.state.current_node is None:
-            app.notify("Nothing to export yet.", severity="warning", timeout=2)
-            return
-
-        payload = self._build_save_payload(host, app)
-        markdown_path, json_path = self._write_export_files(payload, self._resolve_save_title(host) or "adventure")
-        app.notify(f"Exported story to {markdown_path} and {json_path}", severity="information", timeout=4)
+        ExportStoryCommand().execute(
+            UICommandContext(app=as_textual_app(self), host=as_mixin_host(self), owner=self)
+        )
 
     def export_save_file(self, save_path: str) -> tuple[str, str]:
         """Export an existing named save file into Markdown and JSON timeline files."""

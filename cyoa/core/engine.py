@@ -9,10 +9,10 @@ from cyoa.core.observability import (
     EngineObservedSession,
     record_provider_cache_state_restore,
 )
+from cyoa.core.ports import NarrativeMemoryStore, NPCMemoryStore, StoryRepository
 from cyoa.core.rag import RAGManager
+from cyoa.core.runtime import EnginePhase, EngineTransition
 from cyoa.core.state import GameState
-from cyoa.db.graph_db import CYOAGraphDB
-from cyoa.db.rag_memory import NarrativeMemory, NPCMemory
 from cyoa.llm.broker import ModelBroker, SpeculationCache, StoryContext
 
 logger = logging.getLogger(__name__)
@@ -29,9 +29,9 @@ class StoryEngine:
         self,
         broker: ModelBroker,
         starting_prompt: str,
-        db: CYOAGraphDB | None = None,
-        memory: NarrativeMemory | None = None,
-        npc_memory: NPCMemory | None = None,
+        db: StoryRepository | None = None,
+        memory: NarrativeMemoryStore | None = None,
+        npc_memory: NPCMemoryStore | None = None,
         initial_world_state: dict[str, Any] | None = None,
         initial_prompt_config: dict[str, Any] | None = None,
     ) -> None:
@@ -48,6 +48,7 @@ class StoryEngine:
         self.story_context: StoryContext | None = None
         self.initial_world_state = initial_world_state or {}
         self.initial_prompt_config = initial_prompt_config or {}
+        self.phase = EnginePhase.IDLE
 
         # Background summarization task — kept alive to prevent GC and allow
         # inspection. A new task replaces this reference each time summarization
@@ -95,9 +96,24 @@ class StoryEngine:
         """Emit an engine runtime event without letting subscriber failures abort the turn."""
         bus.emit_runtime(event_name, **kwargs)
 
+    def _transition_phase(self, next_phase: EnginePhase, reason: str, **metadata: Any) -> None:
+        """Track engine lifecycle explicitly and notify subscribers of phase changes."""
+        previous_phase = self.phase
+        if previous_phase == next_phase:
+            return
+        self.phase = next_phase
+        transition = EngineTransition(
+            from_phase=previous_phase,
+            to_phase=next_phase,
+            reason=reason,
+            metadata=metadata or None,
+        )
+        self._emit_runtime_event(Events.ENGINE_PHASE_CHANGED, transition=transition)
+
     async def initialize(self) -> None:
         """Start a brand-new adventure."""
         with EngineObservedSession("initialize"):
+            self._transition_phase(EnginePhase.INITIALIZING, "initialize")
             self.story_context = StoryContext(
                 starting_prompt=self.starting_prompt,
                 token_budget=self.broker.token_budget,
@@ -116,6 +132,7 @@ class StoryEngine:
 
     async def restart(self) -> None:
         """Restart the engine with the same configuration."""
+        self._transition_phase(EnginePhase.INITIALIZING, "restart")
         await self._prepare_for_restart()
         await self.initialize()
         self._emit_runtime_event(Events.ENGINE_RESTARTED)
@@ -258,6 +275,7 @@ class StoryEngine:
         if not self.story_context:
             return
 
+        self._transition_phase(EnginePhase.GENERATING, "generate_next", choice_text=choice_text)
         self._emit_runtime_event(Events.NODE_GENERATING)
         await self._prepare_generation_context()
 
@@ -269,9 +287,11 @@ class StoryEngine:
                 node = await self._resolve_next_node(choice_text, on_token, session)
                 await self._persist_generated_node(node, choice_text)
                 self._emit_generation_events(node)
+                self._transition_phase(EnginePhase.READY, "generation_completed", scene_id=self.state.current_scene_id)
 
         except Exception as e:
             logger.error(f"Story Engine error: {e}", exc_info=True)
+            self._transition_phase(EnginePhase.ERROR, "generation_failed", error=str(e))
             self._emit_runtime_event(Events.ERROR_OCCURRED, error=str(e))
 
     async def _run_summarization_in_background(self, context: StoryContext) -> None:
@@ -299,6 +319,7 @@ class StoryEngine:
 
     def shutdown(self) -> None:
         """Cancel engine-owned background work and release external resources."""
+        self._transition_phase(EnginePhase.SHUTDOWN, "shutdown")
         task = self._pending_summarization_task
         self._pending_summarization_task = None
         if task is not None:
@@ -318,10 +339,9 @@ class StoryEngine:
         with EngineObservedSession("undo"):
             if not self.state.undo():
                 return False
-            snapshot = self.state._last_restored_snapshot or {}
-            history = snapshot.get("story_context_history")
-            if isinstance(history, list):
-                self.story_context.history = history
+            snapshot = self.state._last_restored_snapshot
+            if snapshot is not None:
+                self.story_context.history = snapshot.story_context.to_payload()
             self._sync_story_context_state()
             return True
 
@@ -333,10 +353,9 @@ class StoryEngine:
         with EngineObservedSession("redo"):
             if not self.state.redo():
                 return False
-            snapshot = self.state._last_restored_snapshot or {}
-            history = snapshot.get("story_context_history")
-            if isinstance(history, list):
-                self.story_context.history = history
+            snapshot = self.state._last_restored_snapshot
+            if snapshot is not None:
+                self.story_context.history = snapshot.story_context.to_payload()
             self._sync_story_context_state()
             return True
 
@@ -357,10 +376,9 @@ class StoryEngine:
         with EngineObservedSession("restore_bookmark"):
             if not self.state.restore_bookmark(name):
                 return False
-            snapshot = self.state._last_restored_snapshot or {}
-            history = snapshot.get("story_context_history")
-            if isinstance(history, list):
-                self.story_context.history = history
+            snapshot = self.state._last_restored_snapshot
+            if snapshot is not None:
+                self.story_context.history = snapshot.story_context.to_payload()
             self._sync_story_context_state()
             return True
 
@@ -386,6 +404,7 @@ class StoryEngine:
 
     def load_save_data(self, data: dict[str, Any]) -> None:
         """Hydrate engine state from a save data dictionary."""
+        self._transition_phase(EnginePhase.RESTORING, "load_save_data")
         self._prepare_for_load()
 
         # Hydrate state manager
@@ -414,9 +433,11 @@ class StoryEngine:
                     directive for directive in directives if isinstance(directive, str)
                 ]
         self._sync_story_context_state()
+        self._transition_phase(EnginePhase.READY, "load_completed", scene_id=self.state.current_scene_id)
 
     async def branch_to_scene(self, idx: int, history: dict[str, Any]) -> None:
         """Restore the engine state to a specific scene from the history."""
+        self._transition_phase(EnginePhase.RESTORING, "branch_to_scene", target_index=idx)
         await self._prepare_for_history_restore()
         source_scene_id = self.state.current_scene_id
 
@@ -471,6 +492,7 @@ class StoryEngine:
         self._emit_runtime_event(Events.INVENTORY_UPDATED, inventory=self.state.inventory)
         self._emit_runtime_event(Events.WORLD_STATE_UPDATED, state=self.state.get_world_state())
         self._emit_runtime_event(Events.NODE_COMPLETED, node=node)
+        self._transition_phase(EnginePhase.READY, "branch_restore_completed", scene_id=self.state.current_scene_id)
 
     def _apply_initial_state(self) -> None:
         objectives = []

@@ -6,7 +6,7 @@ from textual import work
 from textual.containers import Container, VerticalScroll
 from textual.widgets import Label, ListView, Markdown, Static, Tree
 
-from cyoa.core import constants
+from cyoa.ui.commands import RedoCommand, RestartCommand, UICommandContext, UndoCommand
 from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, JournalListItem
 from cyoa.ui.mixins.contracts import as_mixin_host, as_textual_app
 
@@ -76,40 +76,9 @@ class NavigationMixin:
     @work(exclusive=True)
     async def action_restart(self) -> None:
         """Reset story state via the engine."""
-        app = as_textual_app(self)
-        host = as_mixin_host(self)
-        if not host.engine or not host.is_runtime_active():
-            return
-
-        host.invalidate_scene_caches()
-        host._redo_payloads.clear()
-
-        host._current_story = constants.LOADING_ART
-        host._current_turn_text = constants.LOADING_ART
-        host._reset_story_segments(constants.LOADING_ART)
-
-        container = app.query_one("#story-container", VerticalScroll)
-        await container.query(Markdown).remove()
-
-        new_turn = Markdown(constants.LOADING_ART, classes="story-turn", id="initial-turn")
-        await container.mount(new_turn, before="#scene-art")
-        host._current_turn_widget = new_turn
-
-        app.query_one("#scene-art", Static).update("")
-        app.query_one("#scene-art", Static).add_class("hidden")
-        app.query_one("#choices-container", Container).remove_children()
-        app.query_one("#journal-list", ListView).clear()
-
-        try:
-            from cyoa.ui.components import StatusDisplay
-            status = app.query_one(StatusDisplay)
-            status.health = 100
-            status.gold = 0
-            status.reputation = 0
-            status.inventory = []
-        except Exception as e:
-            logger.debug("Failed to reset status display during restart: %s", e)
-        await host.engine.restart()
+        await RestartCommand().execute(
+            UICommandContext(app=as_textual_app(self), host=as_mixin_host(self), owner=self)
+        )
 
     def action_request_restart(self) -> None:
         """Show a confirmation dialog before restarting the adventure."""
@@ -143,87 +112,11 @@ class NavigationMixin:
 
     def action_undo(self) -> None:
         """Restore the game state to before the last choice was made."""
-        app = as_textual_app(self)
-        host = as_mixin_host(self)
-        persistence = cast(Any, self)
-        if not host.engine:
-            return
-
-        # U4 Fix: Flush typewriter BEFORE DOM manipulation
-        host.action_skip_typewriter()
-        host._redo_payloads.append(persistence._build_save_payload(host, app))
-
-        # Engine handles core state restoration
-        if not host.engine.undo():
-            host._redo_payloads.pop()
-            app.notify("Nothing to undo.", severity="warning", timeout=2)
-            return
-
-        # Find the last separator and truncate back to it.
-        sep = "\n\n> **You chose:**"
-        last_choice_pos = host._current_story.rfind(sep)
-        if last_choice_pos != -1:
-            host._current_story = host._current_story[:last_choice_pos]
-
-        # UI-specific restoration
-        container = app.query_one("#story-container")
-
-        turns = list(container.query(Markdown))
-        choices = list(container.query(".player-choice"))
-
-        if len(turns) > 1:
-            turns[-1].remove()
-            if choices:
-                choices[-1].remove()
-            host._current_turn_widget = turns[-2]
-            host._current_turn_text = (
-                host.engine.state.current_node.narrative if host.engine.state.current_node else ""
-            )
-        else:
-            host._current_turn_text = host._current_story
-            host._current_turn_widget.update(host._current_turn_text)
-
-        self._trim_story_segments_for_undo(host)
-        if not host._story_segments:
-            host._reset_story_segments(host._current_story)
-        else:
-            host._update_current_story_segment(host._current_turn_text)
-
-        # U5 Fix: Re-mount choice buttons for the restored node
-        choices_container = app.query_one("#choices-container", Container)
-        choices_container.remove_children()
-        if host.engine.state.current_node:
-            host._mount_choice_buttons(
-                host.engine.state.current_node,
-                choices_container,
-                is_error=False,
-            )
-
-        app.query_one("#loading", Static).add_class("hidden")
-        host._scroll_to_bottom()
-
-        # Remove the last journal entry
-        journal_list = app.query_one("#journal-list", ListView)
-        children = list(journal_list.children)
-        if children:
-            children[-1].remove()
-
-        # U6 Fix: Update story map to reflect old position
-        host.update_story_map()
-
-        app.notify("↩ Undid last choice.", severity="information", timeout=2)
+        UndoCommand().execute(UICommandContext(app=as_textual_app(self), host=as_mixin_host(self), owner=self))
 
     def action_redo(self) -> None:
         """Re-apply the most recently undone turn."""
-        app = as_textual_app(self)
-        host = as_mixin_host(self)
-        persistence = cast(Any, self)
-        if not host._redo_payloads:
-            app.notify("Nothing to redo.", severity="warning", timeout=2)
-            return
-        payload = host._redo_payloads.pop()
-        persistence._restore_from_payload(payload, source_label="Redid turn")
-        app.notify("↪ Reapplied turn.", severity="information", timeout=2)
+        RedoCommand().execute(UICommandContext(app=as_textual_app(self), host=as_mixin_host(self), owner=self))
 
     def action_create_bookmark(self) -> None:
         """Prompt for a bookmark name and save the current checkpoint."""

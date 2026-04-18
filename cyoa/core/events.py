@@ -86,6 +86,7 @@ class Events:
     # Engine lifecycle
     ENGINE_STARTED = "engine.started"
     ENGINE_RESTARTED = "engine.restarted"
+    ENGINE_PHASE_CHANGED = "engine.phase_changed"
 
     # Narrative flow
     CHOICE_MADE = "engine.choice_made"
