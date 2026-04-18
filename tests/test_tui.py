@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from textual.containers import Container
 from textual.css.query import NoMatches
-from textual.widgets import Button, Label, ListView, Markdown
+from textual.widgets import Button, Input, Label, ListView, Markdown
 from textual.widgets._toast import Toast
 from textual.worker import WorkerFailed
 
@@ -869,6 +869,32 @@ async def test_undo_restores_previous_state(mock_app_dependencies):
 
 
 @pytest.mark.asyncio
+async def test_redo_restores_undone_turn(mock_app_dependencies, tmp_path, monkeypatch):
+    from cyoa.core import constants
+
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        app.action_skip_typewriter()
+        await pilot.press("1")
+        await pilot.pause(1.0)
+        app.action_skip_typewriter()
+        redone_story = app._current_story
+
+        await pilot.press("u")
+        await pilot.pause(0.2)
+        assert app.turn_count == 1
+
+        await pilot.press("y")
+        await pilot.pause(0.3)
+        app.action_skip_typewriter()
+        assert app.turn_count == 2
+        assert app._current_story == redone_story
+
+
+@pytest.mark.asyncio
 async def test_undo_with_no_history(mock_app_dependencies):
     """Test that undoing with nothing to undo shows a warning notification."""
     app = CYOAApp(model_path="dummy_path.gguf")
@@ -939,6 +965,97 @@ async def test_save_and_load_game(mock_app_dependencies, tmp_path, monkeypatch):
         await pilot.pause(1.0)
 
         assert app.turn_count == 1
+
+
+@pytest.mark.asyncio
+async def test_autosave_payload_can_restore_last_session(mock_app_dependencies, tmp_path, monkeypatch):
+    from cyoa.core import constants
+
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        await pilot.press("1")
+        await _wait_for_pilot(
+            pilot,
+            lambda: (
+                app.turn_count == 2
+                and app.engine is not None
+                and app.engine.state.current_node is not None
+                and app.engine.state.current_node.narrative == "You went North."
+            ),
+            timeout=5.0,
+        )
+        app.action_skip_typewriter()
+        autosave_path = tmp_path / "autosave_latest.json"
+        assert autosave_path.exists()
+
+    manual_restore_path = tmp_path / "manual-autosave.json"
+    autosave_path.rename(manual_restore_path)
+
+    app2 = CYOAApp(model_path="dummy_path.gguf")
+    async with app2.run_test() as pilot2:
+        await _wait_for_pilot(
+            pilot2,
+            lambda: app2.engine is not None and app2.engine.state.current_node is not None,
+        )
+        app2._restore_from_save(str(manual_restore_path))
+        await pilot2.pause(0.2)
+        app2.action_skip_typewriter()
+        assert app2.turn_count == 2
+        assert app2.engine is not None
+        assert app2.engine.state.last_choice_text == "Go North"
+
+
+@pytest.mark.asyncio
+async def test_export_story_writes_markdown_and_timeline_json(
+    mock_app_dependencies, tmp_path, monkeypatch
+):
+    from cyoa.core import constants
+
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        await pilot.press("1")
+        await pilot.pause(1.0)
+        await pilot.press("e")
+        await _wait_for_pilot(pilot, lambda: len(list((tmp_path / "exports").glob("*.md"))) == 1)
+
+        markdown_files = list((tmp_path / "exports").glob("*.md"))
+        json_files = list((tmp_path / "exports").glob("*.timeline.json"))
+        assert len(markdown_files) == 1
+        assert len(json_files) == 1
+        assert "## Story" in markdown_files[0].read_text(encoding="utf-8")
+        timeline = json.loads(json_files[0].read_text(encoding="utf-8"))
+        assert timeline["turn_count"] == 2
+        assert timeline["story_segments"]
+
+
+@pytest.mark.asyncio
+async def test_directive_editor_updates_story_context_and_status(
+    mock_app_dependencies, tmp_path, monkeypatch
+):
+    from cyoa.core import constants
+
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        await pilot.press("x")
+        await pilot.pause(0.1)
+        prompt_screen = cast(Any, app.screen)
+        prompt_screen.query_one("#text-prompt-input", Input).value = "No combat, Stealth"
+        prompt_screen.action_submit()
+        await pilot.pause(0.2)
+
+        assert app.engine is not None
+        assert app.engine.story_context is not None
+        assert app.engine.story_context.directives == ["No combat", "Stealth"]
+        assert "No combat" in app.query_one("#directives-label", Label).render().plain
 
 
 @pytest.mark.asyncio
@@ -1461,6 +1578,9 @@ def test_story_map_label_marks_branch_restore_turns() -> None:
         mood="heroic",
         current_scene_id="scene-3",
         branch_targets={"scene-2": [2, 2, 4]},
+        turn=2,
+        depth=1,
+        is_ending=False,
     )
 
     assert "[H]" in label
@@ -1474,6 +1594,9 @@ def test_story_map_label_marks_current_scene_restore_turns() -> None:
         mood="heroic",
         current_scene_id="scene-2",
         branch_targets={"scene-2": [2]},
+        turn=2,
+        depth=1,
+        is_ending=False,
     )
 
     assert "[reverse]" in label

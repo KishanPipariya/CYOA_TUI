@@ -13,6 +13,7 @@ def _args(**overrides: str | None) -> argparse.Namespace:
         "theme": "dark_dungeon",
         "prompt": None,
         "preset": None,
+        "runtime_preset": None,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -92,6 +93,18 @@ def test_validate_startup_config_rejects_unknown_preset(
 
     with pytest.raises(main.StartupConfigError, match="Unsupported preset"):
         main.validate_startup_config(_args(preset="chaos"))
+
+
+def test_validate_startup_config_applies_runtime_preset_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+
+    config = main.validate_startup_config(_args(runtime_preset="mock-smoke"))
+
+    assert config.runtime_preset == "mock-smoke"
+    assert config.provider == "mock"
+    assert config.preset == "precise"
 
 
 @pytest.mark.smoke

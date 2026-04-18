@@ -29,7 +29,7 @@ def test_check_coverage_passes_when_targets_meet_thresholds(tmp_path, monkeypatc
                         "summary": {"num_statements": 100, "missing_lines": 20}
                     },
                     "cyoa/db/graph_db.py": {
-                        "summary": {"num_statements": 100, "missing_lines": 30}
+                        "summary": {"num_statements": 100, "missing_lines": 28}
                     },
                     "cyoa/ui/app.py": {
                         "summary": {"num_statements": 100, "missing_lines": 15}

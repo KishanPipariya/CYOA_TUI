@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from textual.containers import Container
 from textual.css.query import NoMatches
@@ -20,9 +20,13 @@ class EventsMixin:
         host.turn_count = 1
         host.mood = "default"
         host._last_stats_snapshot = None
+        host._last_manual_save_turn = None
+        host._last_manual_save_scene_id = None
         host._reset_story_segments("")
         host.invalidate_scene_caches()
         app.query_one("#journal-list", ListView).clear()
+        persistence: Any = self
+        persistence._sync_prompt_status(host, app)
 
     def _handle_engine_restarted(self) -> None:
         host = as_mixin_host(self)
@@ -49,6 +53,9 @@ class EventsMixin:
             host.turn_count = host.engine.state.turn_count
             host.invalidate_scene_caches(keep_scene_id=host.engine.state.current_scene_id)
         host.display_node(node)
+        persistence: Any = self
+        persistence._sync_prompt_status(host, app)
+        persistence._create_autosave(host, app)
         host.mark_first_scene_rendered()
         # Avoid DB/UI work when the panel is hidden.
         try:

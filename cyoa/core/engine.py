@@ -312,13 +312,61 @@ class StoryEngine:
 
     def undo(self) -> bool:
         """Revert to the previous turn's state."""
-        if not self.state._undo_snapshot or not self.story_context:
+        if not self.story_context:
             return False
 
         with EngineObservedSession("undo"):
-            # Restore LLM context history from snapshot before delegating to GameState
-            self.story_context.history = self.state._undo_snapshot["story_context_history"]
-            return self.state.undo()
+            if not self.state.undo():
+                return False
+            snapshot = self.state._last_restored_snapshot or {}
+            history = snapshot.get("story_context_history")
+            if isinstance(history, list):
+                self.story_context.history = history
+            self._sync_story_context_state()
+            return True
+
+    def redo(self) -> bool:
+        """Re-apply the most recently undone turn."""
+        if not self.story_context:
+            return False
+
+        with EngineObservedSession("redo"):
+            if not self.state.redo():
+                return False
+            snapshot = self.state._last_restored_snapshot or {}
+            history = snapshot.get("story_context_history")
+            if isinstance(history, list):
+                self.story_context.history = history
+            self._sync_story_context_state()
+            return True
+
+    def create_bookmark(self, name: str) -> bool:
+        """Capture a named checkpoint for later restoration."""
+        if not self.story_context:
+            return False
+        return self.state.create_bookmark(
+            name,
+            extra_data={"story_context_history": [msg.copy() for msg in self.story_context.history]},
+        )
+
+    def restore_bookmark(self, name: str) -> bool:
+        """Restore a named checkpoint."""
+        if not self.story_context:
+            return False
+
+        with EngineObservedSession("restore_bookmark"):
+            if not self.state.restore_bookmark(name):
+                return False
+            snapshot = self.state._last_restored_snapshot or {}
+            history = snapshot.get("story_context_history")
+            if isinstance(history, list):
+                self.story_context.history = history
+            self._sync_story_context_state()
+            return True
+
+    def list_bookmarks(self) -> list[str]:
+        """Return bookmark names available in the current run."""
+        return self.state.list_bookmarks()
 
     def get_save_data(self) -> dict[str, Any]:
         """Produce a dictionary of the current state for saving."""

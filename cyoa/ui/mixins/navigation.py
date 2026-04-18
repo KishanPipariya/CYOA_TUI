@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any
+from typing import Any, cast
 
 from textual import work
 from textual.containers import Container, VerticalScroll
@@ -35,6 +35,10 @@ class NavigationMixin:
         mood: str,
         current_scene_id: str | None,
         branch_targets: dict[str, list[int]],
+        *,
+        turn: int,
+        depth: int,
+        is_ending: bool,
     ) -> str:
         """Render a map label with mood and branch restore markers."""
         mood_map = {
@@ -53,10 +57,12 @@ class NavigationMixin:
         if restored_turns:
             unique_turns = ", ".join(str(turn) for turn in sorted(set(restored_turns)))
             branch_marker = f" [cyan]⟲ T{unique_turns}[/cyan]"
+        meta = f" [dim]T{turn}·D{depth}[/dim]"
+        ending_marker = " [red]✦[/red]" if is_ending else ""
 
         if scene_id == current_scene_id:
-            return f"[b][reverse][{marker}] {preview}[/reverse][/b]{branch_marker}"
-        return f"[{color}][{marker}][/{color}] {preview}{branch_marker}"
+            return f"[b][reverse][{marker}] {preview}[/reverse][/b]{meta}{branch_marker}{ending_marker}"
+        return f"[{color}][{marker}][/{color}] {preview}{meta}{branch_marker}{ending_marker}"
 
     @staticmethod
     def _trim_story_segments_for_undo(host: Any) -> None:
@@ -76,6 +82,7 @@ class NavigationMixin:
             return
 
         host.invalidate_scene_caches()
+        host._redo_payloads.clear()
 
         host._current_story = constants.LOADING_ART
         host._current_turn_text = constants.LOADING_ART
@@ -138,14 +145,17 @@ class NavigationMixin:
         """Restore the game state to before the last choice was made."""
         app = as_textual_app(self)
         host = as_mixin_host(self)
+        persistence = cast(Any, self)
         if not host.engine:
             return
 
         # U4 Fix: Flush typewriter BEFORE DOM manipulation
         host.action_skip_typewriter()
+        host._redo_payloads.append(persistence._build_save_payload(host, app))
 
         # Engine handles core state restoration
         if not host.engine.undo():
+            host._redo_payloads.pop()
             app.notify("Nothing to undo.", severity="warning", timeout=2)
             return
 
@@ -202,6 +212,68 @@ class NavigationMixin:
         host.update_story_map()
 
         app.notify("↩ Undid last choice.", severity="information", timeout=2)
+
+    def action_redo(self) -> None:
+        """Re-apply the most recently undone turn."""
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        persistence = cast(Any, self)
+        if not host._redo_payloads:
+            app.notify("Nothing to redo.", severity="warning", timeout=2)
+            return
+        payload = host._redo_payloads.pop()
+        persistence._restore_from_payload(payload, source_label="Redid turn")
+        app.notify("↪ Reapplied turn.", severity="information", timeout=2)
+
+    def action_create_bookmark(self) -> None:
+        """Prompt for a bookmark name and save the current checkpoint."""
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        persistence = cast(Any, self)
+        if not host.engine or not host.engine.state.current_node:
+            app.notify("Nothing to bookmark yet.", severity="warning", timeout=2)
+            return
+
+        from cyoa.ui.components import TextPromptScreen
+
+        def on_saved(value: str | None) -> None:
+            if value:
+                host._bookmark_payloads[value] = persistence._build_save_payload(host, app)
+                app.notify(f"Saved bookmark: {value}", severity="information", timeout=2)
+
+        app.push_screen(
+            TextPromptScreen(
+                "[b]Create Bookmark[/b]",
+                value=f"Turn {host.engine.state.turn_count}",
+                placeholder="Checkpoint name",
+            ),
+            on_saved,
+        )
+
+    def action_restore_bookmark(self) -> None:
+        """Restore a named checkpoint from the current run."""
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        persistence = cast(Any, self)
+        if not host.engine:
+            return
+
+        from cyoa.ui.components import OptionListScreen
+
+        def on_selected(name: str | None) -> None:
+            payload = host._bookmark_payloads.get(name or "")
+            if name and payload:
+                persistence._restore_from_payload(payload, source_label=f"Restored bookmark {name}")
+                app.notify(f"Restored bookmark: {name}", severity="information", timeout=3)
+
+        app.push_screen(
+            OptionListScreen(
+                "[b]Restore Bookmark[/b]",
+                list(host._bookmark_payloads),
+                empty_message="No bookmarks yet.",
+            ),
+            on_selected,
+        )
 
     def action_toggle_journal(self) -> None:
         """Slide the journal panel in/out."""
@@ -342,7 +414,7 @@ class NavigationMixin:
         if not root_id:
             return
 
-        def add_children(parent_node: Any, scene_id: str) -> None:
+        def add_children(parent_node: Any, scene_id: str, depth: int, turn: int) -> None:
             scene = nodes[scene_id]
             label = self._format_story_map_label(
                 scene_id=scene_id,
@@ -350,9 +422,23 @@ class NavigationMixin:
                 mood=scene.get("mood", "default"),
                 current_scene_id=engine.state.current_scene_id,
                 branch_targets=branch_targets,
+                turn=turn,
+                depth=depth,
+                is_ending=not bool(scene.get("available_choices")),
             )
 
-            tree_node = parent_node.add(label, expand=True)
+            tree_node = parent_node.add(
+                label,
+                expand=True,
+                data={
+                    "scene_id": scene_id,
+                    "narrative": scene["narrative"],
+                    "mood": scene.get("mood", "default"),
+                    "turn": turn,
+                    "depth": depth,
+                    "is_ending": not bool(scene.get("available_choices")),
+                },
+            )
 
             for edge in edges.get(scene_id, []):
                 choice_text = edge["choice"]
@@ -363,9 +449,9 @@ class NavigationMixin:
                 )
                 choice_label = f"[dim]↳ {choice_preview}[/dim]"
                 choice_node = tree_node.add(choice_label, expand=True)
-                add_children(choice_node, edge["target_id"])
+                add_children(choice_node, edge["target_id"], depth + 1, turn + 1)
 
         tree.root.label = "Adventure Map"
         tree.root.expand()
         if root_id in nodes:
-            add_children(tree.root, root_id)
+            add_children(tree.root, root_id, 0, 1)

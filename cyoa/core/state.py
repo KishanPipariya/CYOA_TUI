@@ -1,10 +1,13 @@
 import logging
+from collections import deque
 from typing import Any, ClassVar
 
 from cyoa.core.events import Events, bus
 from cyoa.core.models import Objective, StoryNode
 
 logger = logging.getLogger(__name__)
+
+MAX_HISTORY_DEPTH = 20
 
 
 class GameState:
@@ -34,9 +37,10 @@ class GameState:
         self.faction_reputation: dict[str, int] = {}
         self.npc_affinity: dict[str, int] = {}
         self.story_flags: set[str] = set()
-
-        # Snapshot for one-level undo
-        self._undo_snapshot: dict[str, Any] | None = None
+        self._undo_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_DEPTH)
+        self._redo_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_DEPTH)
+        self._bookmarks: dict[str, dict[str, Any]] = {}
+        self._last_restored_snapshot: dict[str, Any] | None = None
 
     def reset(self) -> None:
         """Reset the game state to its initial state."""
@@ -52,7 +56,10 @@ class GameState:
         self.faction_reputation = {}
         self.npc_affinity = {}
         self.story_flags = set()
-        self._undo_snapshot = None
+        self._undo_history.clear()
+        self._redo_history.clear()
+        self._bookmarks = {}
+        self._last_restored_snapshot = None
 
     def apply_node_updates(self, node: StoryNode) -> None:
         """Update local state from node feedback (stats, inventory)."""
@@ -87,9 +94,9 @@ class GameState:
         # 3. Advance state
         self.current_node = node
 
-    def create_undo_snapshot(self, extra_data: dict[str, Any] | None = None) -> None:
-        """Capture the current state to allow for a future 'undo' operation."""
-        snapshot = {
+    def _build_snapshot(self, extra_data: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Capture the current state in a serializable snapshot."""
+        snapshot: dict[str, Any] = {
             "turn_count": self.turn_count,
             "current_node": self.current_node,
             "inventory": list(self.inventory),
@@ -105,14 +112,35 @@ class GameState:
         }
         if extra_data:
             snapshot.update(extra_data)
-        self._undo_snapshot = snapshot
+        return snapshot
 
-    def undo(self) -> bool:
-        """Revert the state to the previous snapshot."""
-        if not self._undo_snapshot:
-            return False
+    def _serialize_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        """Convert in-memory snapshot values into JSON-safe data."""
+        serialized = snapshot.copy()
+        current_node = serialized.get("current_node")
+        serialized["current_node"] = current_node.model_dump() if isinstance(current_node, StoryNode) else None
+        return serialized
 
-        snap = self._undo_snapshot
+    def _deserialize_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        """Convert persisted snapshot data back into in-memory values."""
+        restored = snapshot.copy()
+        node_data = restored.get("current_node")
+        if isinstance(node_data, dict):
+            try:
+                restored["current_node"] = StoryNode(**node_data)
+            except Exception:
+                restored["current_node"] = None
+        else:
+            restored["current_node"] = None
+        return restored
+
+    def create_undo_snapshot(self, extra_data: dict[str, Any] | None = None) -> None:
+        """Capture the current state to allow future undo/redo operations."""
+        self._undo_history.append(self._build_snapshot(extra_data))
+        self._redo_history.clear()
+
+    def _restore_snapshot(self, snap: dict[str, Any]) -> None:
+        """Restore state from a previously captured snapshot."""
         self.turn_count = snap["turn_count"]
         self.current_node = snap["current_node"]
         self.inventory = list(snap["inventory"])
@@ -125,20 +153,64 @@ class GameState:
         self.faction_reputation = self._coerce_relationships(snap.get("faction_reputation"))
         self.npc_affinity = self._coerce_relationships(snap.get("npc_affinity"))
         self.story_flags = self._coerce_story_flags(snap.get("story_flags"))
+        self._last_restored_snapshot = snap.copy()
 
-        # Snapshot used; clear it
-        self._undo_snapshot = None
-
-        # Emit refresh events
+    def _emit_state_refresh_events(self) -> None:
+        """Emit events after non-incremental state restoration."""
         bus.emit_runtime(Events.STATS_UPDATED, stats=dict(self.player_stats))
         bus.emit_runtime(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
         bus.emit_runtime(Events.WORLD_STATE_UPDATED, state=self.get_world_state())
 
-        # Refresh narrative node
         if self.current_node:
             bus.emit_runtime(Events.NODE_COMPLETED, node=self.current_node)
 
+    def undo(self) -> bool:
+        """Revert the state to the previous snapshot."""
+        if not self._undo_history:
+            return False
+
+        self._redo_history.append(self._build_snapshot())
+        self._restore_snapshot(self._undo_history.pop())
+        self._emit_state_refresh_events()
         return True
+
+    def redo(self) -> bool:
+        """Re-apply the most recently undone snapshot."""
+        if not self._redo_history:
+            return False
+
+        self._undo_history.append(self._build_snapshot())
+        self._restore_snapshot(self._redo_history.pop())
+        self._emit_state_refresh_events()
+        return True
+
+    def create_bookmark(
+        self,
+        name: str,
+        *,
+        extra_data: dict[str, Any] | None = None,
+    ) -> bool:
+        """Store a named checkpoint for later restoration."""
+        normalized = name.strip()
+        if not normalized:
+            return False
+        self._bookmarks[normalized] = self._build_snapshot(extra_data)
+        return True
+
+    def restore_bookmark(self, name: str) -> bool:
+        """Restore a named checkpoint while preserving undo history."""
+        snap = self._bookmarks.get(name)
+        if snap is None:
+            return False
+        self._undo_history.append(self._build_snapshot())
+        self._redo_history.clear()
+        self._restore_snapshot(snap)
+        self._emit_state_refresh_events()
+        return True
+
+    def list_bookmarks(self) -> list[str]:
+        """Return bookmark names in creation/update order."""
+        return list(self._bookmarks)
 
     def get_save_data(self) -> dict[str, Any]:
         """Convert current state into a serializable dictionary."""
@@ -155,6 +227,11 @@ class GameState:
             "faction_reputation": dict(self.faction_reputation),
             "npc_affinity": dict(self.npc_affinity),
             "story_flags": sorted(self.story_flags),
+            "undo_history": [self._serialize_snapshot(snapshot) for snapshot in self._undo_history],
+            "redo_history": [self._serialize_snapshot(snapshot) for snapshot in self._redo_history],
+            "bookmarks": {
+                name: self._serialize_snapshot(snapshot) for name, snapshot in self._bookmarks.items()
+            },
         }
 
     def load_save_data(self, data: dict[str, Any]) -> None:
@@ -174,6 +251,9 @@ class GameState:
         self.faction_reputation = self._coerce_relationships(data.get("faction_reputation"))
         self.npc_affinity = self._coerce_relationships(data.get("npc_affinity"))
         self.story_flags = self._coerce_story_flags(data.get("story_flags"))
+        self._undo_history = deque(self._coerce_snapshot_list(data.get("undo_history")), maxlen=MAX_HISTORY_DEPTH)
+        self._redo_history = deque(self._coerce_snapshot_list(data.get("redo_history")), maxlen=MAX_HISTORY_DEPTH)
+        self._bookmarks = self._coerce_bookmarks(data.get("bookmarks"))
 
         node_data = data.get("current_node")
         if not isinstance(node_data, dict):
@@ -362,6 +442,26 @@ class GameState:
             except Exception:
                 continue
         return objectives
+
+    def _coerce_snapshot_list(self, value: Any) -> list[dict[str, Any]]:
+        """Normalize saved undo/redo stacks."""
+        if not isinstance(value, list):
+            return []
+        snapshots: list[dict[str, Any]] = []
+        for entry in value:
+            if isinstance(entry, dict):
+                snapshots.append(self._deserialize_snapshot(entry))
+        return snapshots
+
+    def _coerce_bookmarks(self, value: Any) -> dict[str, dict[str, Any]]:
+        """Normalize saved bookmark checkpoints."""
+        if not isinstance(value, dict):
+            return {}
+        bookmarks: dict[str, dict[str, Any]] = {}
+        for name, snapshot in value.items():
+            if isinstance(name, str) and isinstance(snapshot, dict):
+                bookmarks[name] = self._deserialize_snapshot(snapshot)
+        return bookmarks
 
     def _coerce_relationships(self, value: Any) -> dict[str, int]:
         relationships: dict[str, int] = {}

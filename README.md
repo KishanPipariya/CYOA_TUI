@@ -127,6 +127,21 @@ uv run ruff check .
 uv run mypy cyoa
 ```
 
+## Quality Summary
+
+Run the local gates in this order before pushing:
+
+```bash
+bash scripts/run_smoke.sh
+uv run pytest --cov=cyoa --cov-report=term-missing --cov-report=json -q
+uv run python scripts/check_coverage.py
+uv run ruff check .
+uv run mypy cyoa
+uv run mypy .  # optional full-repo check
+```
+
+This matches the staged CI flow: catch startup regressions quickly, collect coverage before enforcing package floors, then run style and typing gates.
+
 ## Project Structure
 
 ```text

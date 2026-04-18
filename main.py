@@ -10,6 +10,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 VALID_PROVIDERS = {"llama_cpp", "ollama", "mock"}
+RUNTIME_PRESETS = {
+    "local-quality": {"provider": "llama_cpp", "generation_preset": "precise"},
+    "local-fast": {"provider": "llama_cpp", "generation_preset": "balanced"},
+    "ollama-dev": {"provider": "ollama", "generation_preset": "balanced"},
+    "mock-smoke": {"provider": "mock", "generation_preset": "precise"},
+}
 
 
 class StartupConfigError(ValueError):
@@ -23,6 +29,7 @@ class StartupConfig:
     theme: str
     prompt: str | None
     preset: str | None
+    runtime_preset: str | None
 
 
 def _build_parser(available_themes: Sequence[str] | None = None) -> argparse.ArgumentParser:
@@ -58,6 +65,12 @@ def _build_parser(available_themes: Sequence[str] | None = None) -> argparse.Arg
         default=os.getenv("LLM_PRESET"),
         help="Generation preset to use at startup (balanced, precise, cinematic).",
     )
+    parser.add_argument(
+        "--runtime-preset",
+        type=str,
+        default=os.getenv("APP_RUNTIME_PRESET"),
+        help="Runtime profile to apply (local-quality, local-fast, ollama-dev, mock-smoke).",
+    )
     return parser
 
 
@@ -92,7 +105,18 @@ def _parse_non_negative_float(name: str) -> None:
 def validate_startup_config(args: argparse.Namespace) -> StartupConfig:
     from cyoa.llm.broker import PRESETS
 
-    provider = os.getenv("LLM_PROVIDER", "llama_cpp").strip().lower()
+    runtime_preset = (
+        args.runtime_preset.strip().lower()
+        if isinstance(args.runtime_preset, str) and args.runtime_preset.strip()
+        else None
+    )
+    if runtime_preset and runtime_preset not in RUNTIME_PRESETS:
+        raise StartupConfigError(
+            f"Unsupported runtime preset {runtime_preset!r}. Expected one of: {', '.join(sorted(RUNTIME_PRESETS))}."
+        )
+
+    runtime_defaults = RUNTIME_PRESETS[runtime_preset] if runtime_preset else {}
+    provider = os.getenv("LLM_PROVIDER", str(runtime_defaults.get("provider", "llama_cpp"))).strip().lower()
     if provider not in VALID_PROVIDERS:
         valid = ", ".join(sorted(VALID_PROVIDERS))
         raise StartupConfigError(
@@ -104,7 +128,8 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:
     _parse_positive_int("LLM_TOKEN_BUDGET")
     _parse_non_negative_float("LLM_TEMPERATURE")
 
-    preset = args.preset.strip().lower() if isinstance(args.preset, str) and args.preset.strip() else None
+    default_preset = str(runtime_defaults.get("generation_preset", "")).strip().lower() or None
+    preset = args.preset.strip().lower() if isinstance(args.preset, str) and args.preset.strip() else default_preset
     if preset and preset not in PRESETS:
         raise StartupConfigError(
             f"Unsupported preset {preset!r}. Expected one of: {', '.join(sorted(PRESETS))}."
@@ -126,6 +151,7 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:
         theme=args.theme,
         prompt=args.prompt,
         preset=preset,
+        runtime_preset=runtime_preset,
     )
 
 
@@ -191,6 +217,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         accent_color=accent_color,
         initial_world_state=initial_world_state,
         initial_prompt_config=initial_prompt_config,
+        runtime_diagnostics={
+            "runtime_preset": config.runtime_preset or "custom",
+            "provider": config.provider,
+            "model": (config.model or "(provider default)") if config.provider != "mock" else "mock",
+        },
     )
 
     try:

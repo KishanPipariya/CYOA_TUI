@@ -12,6 +12,7 @@ from textual.containers import Container, Horizontal, VerticalScroll
 from textual.css.query import NoMatches
 from textual.events import Click, Resize
 from textual.reactive import reactive
+from textual.timer import Timer
 from textual.widgets import (
     Button,
     Footer,
@@ -76,13 +77,18 @@ class CYOAApp(
         Binding("m", "toggle_story_map", "Map", show=True),
         Binding("h", "show_help", "Help", show=True),
         Binding("u", "undo", "Undo", show=True),
+        Binding("y", "redo", "Redo", show=True),
+        Binding("k", "create_bookmark", "Bookmark", show=True),
+        Binding("p", "restore_bookmark", "Restore Mark", show=True),
         Binding("s", "save_game", "Save", show=True),
         Binding("l", "load_game", "Load", show=True),
+        Binding("e", "export_story", "Export", show=True),
         Binding("q", "request_quit", "Quit", show=True),
         Binding("r", "request_restart", "Restart", show=True),
         Binding("t", "toggle_typewriter", "Typewriter", show=True),
         Binding("v", "cycle_typewriter_speed", "Speed", show=True),
         Binding("g", "cycle_generation_preset", "Preset", show=True),
+        Binding("x", "edit_directives", "Directives", show=True),
         Binding("space", "skip_typewriter", "Skip", show=True),
         Binding("1", "choose('1')", "Choice 1", show=False),
         Binding("2", "choose('2')", "Choice 2", show=False),
@@ -105,6 +111,7 @@ class CYOAApp(
         accent_color: str | None = None,
         initial_world_state: dict[str, object] | None = None,
         initial_prompt_config: dict[str, object] | None = None,
+        runtime_diagnostics: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -114,6 +121,7 @@ class CYOAApp(
         self._accent_color = accent_color
         self._initial_world_state = initial_world_state or {}
         self._initial_prompt_config = initial_prompt_config or {}
+        self._runtime_diagnostics = runtime_diagnostics or {}
 
         self.generator: ModelBroker | None = None
         self.engine: StoryEngine | None = None
@@ -124,7 +132,7 @@ class CYOAApp(
         self._unsubscribers: list[Callable[[], None]] = []
         self._subscriptions_active: bool = False
         self._is_shutting_down: bool = False
-        self._startup_timer: Any | None = None
+        self._startup_timer: Timer | None = None
         self._post_render_warmup_timer: Any | None = None
         self._has_rendered_first_scene: bool = False
         self._optional_runtime_ready: bool = False
@@ -133,6 +141,10 @@ class CYOAApp(
         self._scene_cache_limit: int = 8
         self._notification_buffer: list[BufferedNotification] = []
         self._notification_timer: Any | None = None
+        self._redo_payloads: list[dict[str, object]] = []
+        self._bookmark_payloads: dict[str, dict[str, object]] = {}
+        self._last_manual_save_turn: int | None = None
+        self._last_manual_save_scene_id: str | None = None
 
         # Typewriter Narrator state
         self._typewriter_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -184,15 +196,17 @@ class CYOAApp(
         self._current_turn_widget = self.query_one("#initial-turn", Markdown)
         self._set_compact_layout(self.size.width)
         self.query_one(StatusDisplay).generation_preset = "balanced"
+        self._sync_runtime_status()
 
         self._subscribe_engine_events()
 
-        # Start loading indicator immediately
         self.show_loading()
-        # Start the typewriter narrator worker
         self._typewriter_worker()
-        # Short delay to let the UI paint the initial scene before starting the engine
-        self._startup_timer = self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
+        autosave_path = self._autosave_path()
+        if autosave_path is not None and not self.is_headless:
+            self._prompt_autosave_recovery(autosave_path)
+        else:
+            self._startup_timer = self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
 
     def on_resize(self, event: Resize) -> None:
         self._set_compact_layout(event.size.width)
@@ -413,6 +427,22 @@ class CYOAApp(
         if isinstance(event.item, JournalListItem):
             self._jump_to_story_turn(event.item.scene_index)
 
+    def on_tree_node_selected(self, event: Any) -> None:
+        data = event.node.data
+        if not isinstance(data, dict):
+            return
+        narrative = str(data.get("narrative", "")).replace("\n", " ").strip()
+        preview = narrative[:120] + ("…" if len(narrative) > 120 else "")
+        turn = data.get("turn")
+        depth = data.get("depth")
+        mood = data.get("mood")
+        ending = "ending" if data.get("is_ending") else "branch"
+        self.notify(
+            f"Turn {turn} | depth {depth} | {mood} | {ending}: {preview}",
+            severity="information",
+            timeout=4,
+        )
+
     def _jump_to_story_turn(self, scene_index: int) -> None:
         """Scroll story view to a turn and flash-highlight it."""
         story_container = self.query_one("#story-container")
@@ -475,9 +505,7 @@ class CYOAApp(
             if not self.is_runtime_active():
                 self._close_runtime_resources()
                 return
-            self.query_one(StatusDisplay).generation_preset = str(
-                self.generator.runtime_controls()["preset"]
-            )
+            self._sync_runtime_status()
 
             if self.engine is None:
                 # Initialize engine with shared services
@@ -493,6 +521,8 @@ class CYOAApp(
             if not self.is_runtime_active():
                 self._close_runtime_resources()
                 return
+            self._sync_runtime_status()
+            self.queue_notification(self._runtime_summary(), severity="information", timeout=4, batch=False)
             from cyoa.core.observability import record_startup_latency
 
             record_startup_latency((time.perf_counter() - start_time) * 1000, status="success")
@@ -505,6 +535,20 @@ class CYOAApp(
             self.query_one("#loading", ThemeSpinner).add_class("hidden")
             self._close_runtime_resources()
             raise
+
+    def _runtime_summary(self) -> str:
+        profile = self._runtime_diagnostics.get("runtime_preset", "custom")
+        provider = self._runtime_diagnostics.get("provider", "llama_cpp")
+        model = self._runtime_diagnostics.get("model", "default")
+        return f"Runtime {profile} | provider {provider} | model {model}"
+
+    def _sync_runtime_status(self) -> None:
+        display = self.query_one(StatusDisplay)
+        diagnostics = self._runtime_diagnostics
+        display.runtime_profile = diagnostics.get("runtime_preset", "custom")
+        display.provider_label = diagnostics.get("provider", "llama_cpp")
+        if self.generator is not None:
+            display.generation_preset = str(self.generator.runtime_controls()["preset"])
 
     # ------------------------------------------------------------------
     # Speculation
@@ -574,6 +618,32 @@ class CYOAApp(
             f"Generation preset: {controls['preset']} (temp {controls['temperature']}, max {controls['max_tokens']})",
             severity="information",
             timeout=3,
+        )
+
+    def action_edit_directives(self) -> None:
+        """Edit comma-separated player directives for the active run."""
+        if not self.engine or not self.engine.story_context:
+            return
+
+        from cyoa.ui.components import TextPromptScreen
+
+        current = ", ".join(self.engine.story_context.directives)
+
+        def on_saved(value: str | None) -> None:
+            if value is None or not self.engine or not self.engine.story_context:
+                return
+            directives = [part.strip() for part in value.split(",") if part.strip()]
+            self.engine.story_context.directives = directives
+            self.query_one(StatusDisplay).directives = directives
+            self.notify("Updated directives.", severity="information", timeout=2)
+
+        self.push_screen(
+            TextPromptScreen(
+                "[b]Edit Directives[/b]",
+                value=current,
+                placeholder="comma-separated directives",
+            ),
+            on_saved,
         )
 
     def on_click(self, event: Click) -> None:

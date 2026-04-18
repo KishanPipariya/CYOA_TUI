@@ -2,7 +2,9 @@ import asyncio
 import json
 import logging
 import os
+from datetime import UTC, datetime
 from queue import Empty
+from typing import Any, cast
 
 from textual.containers import Container, VerticalScroll
 from textual.css.query import NoMatches
@@ -16,6 +18,14 @@ logger = logging.getLogger(__name__)
 
 class PersistenceMixin:
     """Mixin for save/load game persistence."""
+
+    @staticmethod
+    def _autosave_file_path() -> str:
+        return os.path.join(constants.SAVES_DIR, "autosave_latest.json")
+
+    @staticmethod
+    def _exports_dir() -> str:
+        return os.path.join(constants.SAVES_DIR, "exports")
 
     @staticmethod
     def _resolve_save_title(host: object) -> str | None:
@@ -96,6 +106,17 @@ class PersistenceMixin:
             if isinstance(current_turn_text, str)
             else current_turn_from_segments or mixin_host._current_story
         )
+        engine_node = mixin_host.engine.state.current_node if mixin_host.engine else None
+        if engine_node is not None and engine_node.narrative:
+            mixin_host._current_turn_text = engine_node.narrative
+            if mixin_host._story_segments:
+                for segment in reversed(mixin_host._story_segments):
+                    if segment.get("kind") == "story_turn":
+                        segment["text"] = engine_node.narrative
+                        break
+                mixin_host._current_story = self._render_story_segments(
+                    self._coerce_story_segments(mixin_host._story_segments)
+                )
         mixin_host._update_current_story_segment(mixin_host._current_turn_text)
         mixin_host._loading_suffix_shown = False
         mood = ui_state.get("mood")
@@ -266,35 +287,13 @@ class PersistenceMixin:
             constants.SAVES_DIR,
             f"{safe_title}_turn{host.engine.state.turn_count}.json",
         )
-
-        save_data = host.engine.get_save_data()
-        journal_list = app.query_one("#journal-list", ListView)
-        current_turn_text = (
-            host.engine.state.current_node.narrative
-            if host.engine.state.current_node is not None
-            else host._current_turn_text
-        )
-        save_data["ui_state"] = {
-            "current_story_text": host._current_story,
-            "story_segments": self._snapshot_story_segments(host),
-            "journal_entries": [
-                {
-                    "label": item.label_text,
-                    "scene_index": item.scene_index,
-                    "entry_kind": getattr(item, "entry_kind", "choice"),
-                }
-                for item in journal_list.query(JournalListItem)
-            ],
-            "current_turn_text": current_turn_text,
-            "active_turn": host.engine.state.turn_count,
-            "mood": host.mood,
-            "journal_panel_collapsed": app.query_one("#journal-panel", Container).has_class("panel-collapsed"),
-            "story_map_panel_collapsed": app.query_one("#story-map-panel", Container).has_class("panel-collapsed"),
-        }
+        save_data = self._build_save_payload(host, app)
 
         try:
-            with open(save_path, "w", encoding="utf-8") as f:
-                json.dump(save_data, f, indent=2, ensure_ascii=False)
+            self._write_json_payload(save_path, save_data)
+            host._last_manual_save_turn = host.engine.state.turn_count
+            host._last_manual_save_scene_id = host.engine.state.current_scene_id
+            self._discard_autosave()
             app.notify(f"Game saved to {save_path}", severity="information", timeout=3)
         except OSError as e:
             app.notify(f"Save failed: {e}", severity="error", timeout=3)
@@ -326,14 +325,18 @@ class PersistenceMixin:
     def _restore_from_save(self, save_path: str) -> None:
         """Load game state via the engine."""
         app = as_textual_app(self)
-        host = as_mixin_host(self)
         try:
             with open(save_path, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError) as e:
             app.notify(f"Load failed: {e}", severity="error", timeout=3)
             return
+        self._restore_from_payload(data, source_label="Loaded save")
 
+    def _restore_from_payload(self, data: dict[str, object], *, source_label: str) -> None:
+        """Hydrate the app from an in-memory save payload."""
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
         if not host.engine:
             return
 
@@ -342,10 +345,10 @@ class PersistenceMixin:
         host.engine.load_save_data(data)
         host.invalidate_scene_caches(keep_scene_id=host.engine.state.current_scene_id)
         host.turn_count = host.engine.state.turn_count
+        host._redo_payloads.clear()
         self._restore_story_state(host, ui_state)
         self._restore_story_widgets(host, app)
 
-        # U8 Fix: If loaded node is empty (error case), provide a way out
         choices_container = app.query_one("#choices-container", Container)
         choices_container.remove_children()
         if host.engine.state.current_node:
@@ -357,8 +360,212 @@ class PersistenceMixin:
         if story_map_panel is not None and not story_map_panel.has_class("panel-collapsed"):
             host.update_story_map()
 
-        app.notify(
-            f"Loaded save from Turn {host.engine.state.turn_count}.",
-            severity="information",
-            timeout=3,
+        app.notify(f"{source_label} from Turn {host.engine.state.turn_count}.", severity="information", timeout=3)
+        self._sync_prompt_status(host, app)
+
+    def _build_save_payload(self, host: object, app: object) -> dict[str, object]:
+        """Build a unified save payload for manual saves and autosaves."""
+        mixin_host = as_mixin_host(host)
+        textual_app = as_textual_app(app)
+        if not mixin_host.engine:
+            return {}
+
+        save_data = mixin_host.engine.get_save_data()
+        journal_list = textual_app.query_one("#journal-list", ListView)
+        story_segments = self._snapshot_story_segments(mixin_host)
+        current_turn_text = (
+            mixin_host.engine.state.current_node.narrative
+            if mixin_host.engine.state.current_node is not None
+            else mixin_host._current_turn_text
         )
+        if story_segments:
+            for segment in reversed(story_segments):
+                if segment["kind"] == "story_turn":
+                    segment["text"] = current_turn_text
+                    break
+        current_story_text = self._render_story_segments(story_segments) if story_segments else mixin_host._current_story
+        save_data["ui_state"] = {
+            "current_story_text": current_story_text,
+            "story_segments": story_segments,
+            "journal_entries": [
+                {
+                    "label": item.label_text,
+                    "scene_index": item.scene_index,
+                    "entry_kind": getattr(item, "entry_kind", "choice"),
+                }
+                for item in journal_list.query(JournalListItem)
+            ],
+            "current_turn_text": current_turn_text,
+            "active_turn": mixin_host.engine.state.turn_count,
+            "mood": mixin_host.mood,
+            "journal_panel_collapsed": textual_app.query_one("#journal-panel", Container).has_class(
+                "panel-collapsed"
+            ),
+            "story_map_panel_collapsed": textual_app.query_one("#story-map-panel", Container).has_class(
+                "panel-collapsed"
+            ),
+        }
+        save_data["saved_at"] = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+        return save_data
+
+    @staticmethod
+    def _write_json_payload(path: str, payload: dict[str, object]) -> None:
+        """Persist a JSON payload to disk."""
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+
+    def _sync_prompt_status(self, host: object, app: object) -> None:
+        """Keep the status bar aligned with current prompt directives."""
+        mixin_host = as_mixin_host(host)
+        if not mixin_host.engine or not mixin_host.engine.story_context:
+            return
+        from cyoa.ui.components import StatusDisplay
+
+        textual_app = as_textual_app(app)
+        textual_app.query_one(StatusDisplay).directives = list(mixin_host.engine.story_context.directives)
+
+    def _create_autosave(self, host: object, app: object) -> None:
+        """Persist the latest playable state as an autosave."""
+        mixin_host = as_mixin_host(host)
+        if not mixin_host.engine or mixin_host.engine.state.current_node is None:
+            return
+        if (
+            mixin_host._last_manual_save_turn == mixin_host.engine.state.turn_count
+            and (
+                mixin_host._last_manual_save_scene_id is None
+                or mixin_host._last_manual_save_scene_id == mixin_host.engine.state.current_scene_id
+            )
+        ):
+            return
+
+        mixin_host.action_skip_typewriter()
+        os.makedirs(constants.SAVES_DIR, exist_ok=True)
+        payload = self._build_save_payload(host, app)
+        payload["autosave"] = True
+        self._write_json_payload(self._autosave_file_path(), payload)
+
+    def _autosave_path(self) -> str | None:
+        """Return an existing autosave path when present."""
+        path = self._autosave_file_path()
+        return path if os.path.exists(path) else None
+
+    def _discard_autosave(self) -> None:
+        """Delete the current autosave file when the user rejects recovery."""
+        path = self._autosave_file_path()
+        if os.path.exists(path):
+            os.remove(path)
+
+    def _prompt_autosave_recovery(self, autosave_path: str) -> None:
+        """Ask whether to restore a detected autosave before normal startup."""
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        runtime = cast(Any, self)
+
+        def on_confirm(confirmed: bool | None) -> None:
+            if confirmed:
+                host._startup_timer = app.set_timer(0.1, lambda: self._restore_autosave_session(autosave_path))
+            else:
+                self._discard_autosave()
+                host._startup_timer = app.set_timer(
+                    0.1,
+                    lambda: runtime.initialize_and_start(host.model_path),
+                )
+
+        from cyoa.ui.components import ConfirmScreen
+
+        app.push_screen(
+            ConfirmScreen("[b]Restore autosave?[/b]\n\nResume your last interrupted session or discard it."),
+            on_confirm,
+        )
+
+    async def _restore_autosave_session(self, autosave_path: str) -> None:
+        """Initialize the app and then hydrate from the autosave."""
+        host = as_mixin_host(self)
+        cast(Any, self).initialize_and_start(host.model_path)
+        as_textual_app(self).set_timer(0.8, lambda: self._finish_autosave_restore(autosave_path))
+
+    def _finish_autosave_restore(self, autosave_path: str) -> None:
+        """Retry autosave restoration until the engine is ready."""
+        host = as_mixin_host(self)
+        app = as_textual_app(self)
+        if host.engine is None or host.engine.state.current_node is None:
+            app.set_timer(0.2, lambda: self._finish_autosave_restore(autosave_path))
+            return
+        self._restore_from_save(autosave_path)
+
+    def action_export_story(self) -> None:
+        """Export the current live session to Markdown and JSON timeline files."""
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        if not host.engine or host.engine.state.current_node is None:
+            app.notify("Nothing to export yet.", severity="warning", timeout=2)
+            return
+
+        payload = self._build_save_payload(host, app)
+        markdown_path, json_path = self._write_export_files(payload, self._resolve_save_title(host) or "adventure")
+        app.notify(f"Exported story to {markdown_path} and {json_path}", severity="information", timeout=4)
+
+    def export_save_file(self, save_path: str) -> tuple[str, str]:
+        """Export an existing named save file into Markdown and JSON timeline files."""
+        with open(save_path, encoding="utf-8") as f:
+            payload = json.load(f)
+        title = str(payload.get("story_title") or os.path.splitext(os.path.basename(save_path))[0])
+        return self._write_export_files(payload, title)
+
+    def _write_export_files(self, payload: dict[str, object], title: str) -> tuple[str, str]:
+        """Write paired Markdown and JSON exports for a story payload."""
+        os.makedirs(self._exports_dir(), exist_ok=True)
+        safe_title = "".join(c if c.isalnum() or c in " _-" else "_" for c in title).strip() or "adventure"
+        stem = os.path.join(self._exports_dir(), safe_title)
+        markdown_path = f"{stem}.md"
+        json_path = f"{stem}.timeline.json"
+        markdown = self._render_markdown_export(payload)
+        timeline_payload = self._build_timeline_export(payload)
+        with open(markdown_path, "w", encoding="utf-8") as f:
+            f.write(markdown)
+        self._write_json_payload(json_path, timeline_payload)
+        return markdown_path, json_path
+
+    def _render_markdown_export(self, payload: dict[str, object]) -> str:
+        """Render a readable Markdown export from a save payload."""
+        ui_state = self._coerce_ui_state(payload.get("ui_state"))
+        story_segments = self._coerce_story_segments(ui_state.get("story_segments"))
+        lines = [f"# {payload.get('story_title') or 'Untitled Adventure'}", ""]
+        directives = payload.get("prompt_config", {})
+        if isinstance(directives, dict):
+            active = directives.get("directives")
+            if isinstance(active, list) and active:
+                lines.append("## Active Directives")
+                lines.extend(f"- {directive}" for directive in active if isinstance(directive, str))
+                lines.append("")
+        lines.append("## Story")
+        if story_segments:
+            for segment in story_segments:
+                if segment["kind"] == "player_choice":
+                    lines.append(f"> {segment['text']}")
+                elif segment["kind"] == "branch_marker":
+                    lines.append(f"---\n{segment['text']}")
+                else:
+                    lines.append(segment["text"])
+                lines.append("")
+        else:
+            current_story = ui_state.get("current_story_text")
+            if isinstance(current_story, str) and current_story:
+                lines.append(current_story)
+                lines.append("")
+        return "\n".join(lines).strip() + "\n"
+
+    def _build_timeline_export(self, payload: dict[str, object]) -> dict[str, object]:
+        """Build the machine-readable JSON export."""
+        ui_state = self._coerce_ui_state(payload.get("ui_state"))
+        return {
+            "story_title": payload.get("story_title"),
+            "turn_count": payload.get("turn_count"),
+            "inventory": payload.get("inventory"),
+            "player_stats": payload.get("player_stats"),
+            "timeline_metadata": payload.get("timeline_metadata"),
+            "story_segments": self._coerce_story_segments(ui_state.get("story_segments")),
+            "journal_entries": self._coerce_journal_entries(ui_state.get("journal_entries")),
+            "prompt_config": payload.get("prompt_config"),
+            "saved_at": payload.get("saved_at"),
+        }

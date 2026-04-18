@@ -5,7 +5,7 @@ from textual.containers import Container, Horizontal
 from textual.markup import escape
 from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, ListItem, ListView, Markdown, ProgressBar, Static
+from textual.widgets import Button, Input, Label, ListItem, ListView, Markdown, ProgressBar, Static
 
 __all__ = [
     "BranchScreen",
@@ -13,6 +13,8 @@ __all__ = [
     "ConfirmScreen",
     "HelpScreen",
     "LoadGameScreen",
+    "OptionListScreen",
+    "TextPromptScreen",
     "JournalListItem",
     "SceneListItem",
     "SaveListItem",
@@ -34,6 +36,14 @@ class SaveListItem(ListItem):
     def __init__(self, *args: Any, save_filename: str = "", **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.save_filename = save_filename
+
+
+class OptionListItem(ListItem):
+    """List item that carries an arbitrary string value."""
+
+    def __init__(self, *args: Any, option_value: str = "", **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.option_value = option_value
 
 
 class JournalListItem(ListItem):
@@ -352,6 +362,108 @@ class LoadGameScreen(ModalScreen[str]):
     def action_cancel(self) -> None:
         self.dismiss(None)
 
+
+class OptionListScreen(ModalScreen[str]):
+    """Generic modal selection list used for bookmark restore/export flows."""
+
+    DEFAULT_CSS = LoadGameScreen.DEFAULT_CSS
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, title: str, options: list[str], *, empty_message: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._title = title
+        self._options = options
+        self._empty_message = empty_message
+
+    def compose(self) -> ComposeResult:
+        with Container(id="load-dialog"):
+            yield Label(self._title, id="load-title")
+            yield ListView(id="load-list")
+            yield Button("Cancel [b](Esc)[/b]", id="btn-load-cancel", variant="error")
+
+    def on_mount(self) -> None:
+        list_view = self.query_one("#load-list", ListView)
+        if not self._options:
+            list_view.append(OptionListItem(Label(self._empty_message, classes="save-entry"), option_value=""))
+            return
+        for option in self._options:
+            list_view.append(OptionListItem(Label(option, classes="save-entry"), option_value=option))
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if isinstance(event.item, OptionListItem) and event.item.option_value:
+            self.dismiss(event.item.option_value)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-load-cancel":
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class TextPromptScreen(ModalScreen[str]):
+    """Simple text-entry modal for bookmark/directive editing."""
+
+    DEFAULT_CSS = """
+    TextPromptScreen {
+        align: center middle;
+        background: $background 80%;
+    }
+    #text-prompt-dialog {
+        width: 70;
+        height: auto;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #text-prompt-input {
+        margin: 1 0;
+    }
+    #text-prompt-buttons {
+        align: center middle;
+        height: auto;
+    }
+    #text-prompt-buttons Button {
+        width: auto;
+        min-width: 12;
+        margin: 0 1;
+    }
+    """
+
+    BINDINGS = [("escape", "cancel", "Cancel"), ("enter", "submit", "Submit")]
+
+    def __init__(self, title: str, *, value: str = "", placeholder: str = "", **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._title = title
+        self._value = value
+        self._placeholder = placeholder
+
+    def compose(self) -> ComposeResult:
+        with Container(id="text-prompt-dialog"):
+            yield Label(self._title, id="load-title")
+            yield Input(value=self._value, placeholder=self._placeholder, id="text-prompt-input")
+            with Horizontal(id="text-prompt-buttons"):
+                yield Button("Save", id="btn-prompt-save", variant="primary")
+                yield Button("Cancel", id="btn-prompt-cancel", variant="error")
+
+    def on_mount(self) -> None:
+        self.query_one("#text-prompt-input", Input).focus()
+
+    def _dismiss_with_value(self) -> None:
+        self.dismiss(self.query_one("#text-prompt-input", Input).value)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-prompt-save":
+            self._dismiss_with_value()
+        elif event.button.id == "btn-prompt-cancel":
+            self.dismiss(None)
+
+    def action_submit(self) -> None:
+        self._dismiss_with_value()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
 class StatusDisplay(Static):
     """A reactive status bar that displays player stats and inventory."""
 
@@ -360,7 +472,10 @@ class StatusDisplay(Static):
     reputation = reactive(0)
     inventory: reactive[list[str]] = reactive([])
     objectives: reactive[list[str]] = reactive([])
+    directives: reactive[list[str]] = reactive([])
     generation_preset = reactive("balanced")
+    runtime_profile = reactive("custom")
+    provider_label = reactive("llama_cpp")
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="stats-row"):
@@ -369,6 +484,7 @@ class StatusDisplay(Static):
             yield Label("", id="stats-text")
         yield Label("🎒 Inventory: Empty", id="inventory-label")
         yield Label("🎯 Objectives: None", id="objectives-label")
+        yield Label("🧭 Directives: None", id="directives-label")
 
     def watch_health(self, health: int) -> None:
         self.query_one("#health-bar", ProgressBar).progress = health
@@ -400,9 +516,26 @@ class StatusDisplay(Static):
     def _update_stats_text(self) -> None:
         text = (
             f" ❤️ {self.health}% | 🪙 {self.gold} Gold | 🌟 {self.reputation} Rep"
-            f" | ⚙️ {self.generation_preset}"
+            f" | ⚙️ {self.generation_preset} | 🖧 {self.provider_label} | ⛭ {self.runtime_profile}"
         )
         self.query_one("#stats-text", Label).update(text)
+
+    def watch_directives(self, directives: list[str]) -> None:
+        directive_text = (
+            f"🧭 Directives: {' | '.join(directives[:2])}"
+            if directives
+            else "🧭 Directives: None"
+        )
+        self.query_one("#directives-label", Label).update(directive_text)
+
+    def watch_generation_preset(self, _preset: str) -> None:
+        self._update_stats_text()
+
+    def watch_runtime_profile(self, _profile: str) -> None:
+        self._update_stats_text()
+
+    def watch_provider_label(self, _provider: str) -> None:
+        self._update_stats_text()
 
     def _set_health_class(self, health: int) -> None:
         self.remove_class("health-high", "health-mid", "health-low")

@@ -34,6 +34,12 @@ class CYOAAppMixinContract(Protocol):
     _is_typing: bool
     _has_rendered_first_scene: bool
     _last_stats_snapshot: dict[str, int] | None
+    _startup_timer: Any | None
+    _redo_payloads: list[dict[str, object]]
+    _bookmark_payloads: dict[str, dict[str, object]]
+    _last_manual_save_turn: int | None
+    _last_manual_save_scene_id: str | None
+    model_path: str
 
     def is_runtime_active(self) -> bool: ...
     def action_skip_typewriter(self) -> None: ...
@@ -65,6 +71,7 @@ class CYOAAppMixinContract(Protocol):
     def cache_story_map(self, scene_id: str | None, tree_data: dict[str, Any]) -> None: ...
     def get_cached_story_map(self, scene_id: str | None) -> dict[str, Any] | None: ...
     def invalidate_scene_caches(self, keep_scene_id: str | None = None) -> None: ...
+    def initialize_and_start(self, model_path: str) -> Any: ...
 
 
 def as_textual_app(value: object) -> App[Any]:

@@ -190,6 +190,43 @@ def test_engine_save_payload_uses_current_ui_state_contract():
     assert "current_story_text" not in data
 
 
+def test_game_state_redo_reapplies_last_undone_snapshot():
+    state = GameState()
+    node = _make_story_node("Original")
+    redone = _make_story_node("Redone")
+    state.current_node = node
+    state.turn_count = 2
+    state.create_undo_snapshot({"story_context_history": [{"role": "user", "content": "Start"}]})
+    state.current_node = redone
+    state.turn_count = 3
+
+    assert state.undo() is True
+    assert state.turn_count == 2
+    assert state.current_node == node
+
+    assert state.redo() is True
+    assert state.turn_count == 3
+    assert state.current_node == redone
+
+
+def test_game_state_bookmark_round_trip_survives_save_payload():
+    state = GameState()
+    state.turn_count = 4
+    state.current_node = _make_story_node("Checkpoint")
+    assert state.create_bookmark("Before Boss", extra_data={"story_context_history": []}) is True
+    payload = state.get_save_data()
+
+    restored = GameState()
+    restored.load_save_data(payload)
+    restored.turn_count = 6
+    restored.current_node = _make_story_node("Later")
+
+    assert restored.restore_bookmark("Before Boss") is True
+    assert restored.turn_count == 4
+    assert restored.current_node is not None
+    assert restored.current_node.narrative == "Checkpoint"
+
+
 @pytest.mark.asyncio
 async def test_engine_shutdown_cancels_summarization_and_closes_resources():
     broker, _provider = _make_broker_with_mock_provider()

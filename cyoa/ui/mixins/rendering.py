@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 from uuid import uuid4
 
 from textual.containers import Container, VerticalScroll
@@ -304,5 +305,9 @@ class RenderingMixin:
         app.call_after_refresh(lambda: journal_list.scroll_end(animate=False))
 
         # 3. Cancel speculations and let the engine handle the rest
+        host._redo_payloads.clear()
         app.workers.cancel_group(app, "speculation")
         await host.engine.make_choice(choice_text)
+        host.action_skip_typewriter()
+        persistence: Any = self
+        persistence._create_autosave(host, app)

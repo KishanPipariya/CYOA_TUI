@@ -1,6 +1,6 @@
 import asyncio
-from typing import Any, cast
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -379,6 +379,9 @@ def test_navigation_helpers_collect_branch_targets_and_trim_story_segments():
         mood="heroic",
         current_scene_id="scene-2",
         branch_targets=branch_targets,
+        turn=3,
+        depth=1,
+        is_ending=False,
     )
     host = SimpleNamespace(
         _story_segments=[
@@ -391,6 +394,7 @@ def test_navigation_helpers_collect_branch_targets_and_trim_story_segments():
 
     assert branch_targets == {"scene-2": [3, 1]}
     assert "⟲ T1, 3" in label
+    assert "T3·D1" in label
     assert host._story_segments == []
 
 
@@ -671,9 +675,9 @@ def test_app_marks_first_scene_and_tears_down_runtime(monkeypatch: pytest.Monkey
     warmup_timer = DummyAppTimer()
     notification_timer = DummyAppTimer()
 
-    app._startup_timer = startup_timer
-    app._post_render_warmup_timer = warmup_timer
-    app._notification_timer = notification_timer
+    app._startup_timer = cast(Any, startup_timer)
+    app._post_render_warmup_timer = cast(Any, warmup_timer)
+    app._notification_timer = cast(Any, notification_timer)
     cancel_background_workers = MagicMock()
     close_runtime_resources = MagicMock()
     unsubscribe_engine_events = MagicMock()
