@@ -1,7 +1,7 @@
 [project]
 name = "cyoa-tui"
 version = "0.1.0"
-description = "Add your description here"
+description = "Terminal-first AI choose-your-own-adventure fiction with Textual and local LLM support."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -17,7 +17,6 @@ dependencies = [
     "opentelemetry-sdk>=1.40.0",
     "opentelemetry-semantic-conventions>=0.61b0",
     "pydantic>=2.12.5",
-    "pytest>=9.0.2",
     "python-dotenv>=1.2.2",
     "textual>=8.0.2",
     "tiktoken>=0.12.0",
@@ -27,6 +26,7 @@ dependencies = [
 dev = [
     "genbadge[coverage]>=1.1.2",
     "mypy>=1.19.1",
+    "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.0.0",
     "ruff>=0.15.7",

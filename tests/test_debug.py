@@ -32,6 +32,4 @@ async def test_debug_stats():
                 app.query_one(StatusDisplay).health = 0
             await pilot.pause(0.1)
             label = app.query_one("#stats-text")
-            print(f"\nDEBUG: RAW RENDER: {repr(label.render())}")
-            print(f"\nDEBUG: PLAIN: {repr(label.render().plain)}")
             assert "0%" in label.render().plain

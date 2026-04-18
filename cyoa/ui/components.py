@@ -228,11 +228,16 @@ HELP_TEXT = """\
 | [b][reverse]  M  [/reverse][/b] | Toggle Story Map panel |
 | [b][reverse]  B  [/reverse][/b] | Branch from past scene |
 | [b][reverse]  U  [/reverse][/b] | Undo last choice |
+| [b][reverse]  Y  [/reverse][/b] | Redo last choice |
+| [b][reverse]  K  [/reverse][/b] | Save a bookmark |
+| [b][reverse]  P  [/reverse][/b] | Restore a bookmark |
 | [b][reverse]  S  [/reverse][/b] | Save Game |
 | [b][reverse]  L  [/reverse][/b] | Load Game |
+| [b][reverse]  E  [/reverse][/b] | Export story to Markdown/JSON |
 | [b][reverse]  R  [/reverse][/b] | Restart Adventure |
 | [b][reverse]  T  [/reverse][/b] | Toggle Typewriter |
 | [b][reverse]  G  [/reverse][/b] | Cycle generation preset |
+| [b][reverse]  X  [/reverse][/b] | Edit active directives |
 | [b][reverse]  H  [/reverse][/b] | Show this help screen |
 | [b][reverse]SPACE[/reverse][/b] | Skip typewriter narrator |
 | [b][reverse]  Q  [/reverse][/b] | Quit Game |

@@ -11,6 +11,12 @@ AI-generated choose-your-own-adventure fiction in the terminal, built with `Text
 
 `python` `textual` `llama.cpp` `ollama` `gguf` `terminal-ui` `choose-your-own-adventure` `local-llm`
 
+## Why This Project
+
+Many terminal LLM demos stop at "generate text and print it." This project aims higher: streaming story turns, structured choices, save/load state, bookmarks, export, optional memory retrieval, optional graph persistence, and observable runtime behavior.
+
+It is also easy to demo. `mock` mode gives you a deterministic local showcase path, while the same app can run against `llama.cpp` or `ollama` when you want real model-backed behavior.
+
 ## Overview
 
 This project turns your terminal into a story engine. It streams narrative text, presents branching choices, and supports both local GGUF models through `llama.cpp` and remote/local Ollama models.
@@ -25,9 +31,19 @@ The app can also persist story structure to Neo4j, keep lightweight memory with 
 - `ollama` support for daemon-backed models
 - `mock` provider for development and smoke testing
 - Theme-based story starts plus direct prompt overrides
-- Save/load support and one-step undo
-- Journal, story map, help screen, and typewriter mode
+- Save/load support, undo/redo, bookmarks, and story export
+- Journal, story map, help screen, typewriter controls, and runtime preset cycling
+- Editable story directives during a run
 - Optional Neo4j persistence and observability stack
+
+## Showcase Highlights
+
+- `mock` mode for a no-model-required demo path
+- local GGUF support through `llama.cpp`
+- provider-agnostic runtime with generation presets
+- undo/redo, bookmarks, branch rewind, and story export
+- graceful degradation when optional services are offline
+- strong local quality signals with tests, typing, linting, and coverage floors
 
 ## Quick Start
 
@@ -68,6 +84,18 @@ Supported providers:
 uv run python main.py
 ```
 
+Fastest local demo path:
+
+```bash
+LLM_PROVIDER=mock uv run python main.py --theme dark_dungeon
+```
+
+Preset-driven demo path:
+
+```bash
+LLM_PROVIDER=mock uv run python main.py --runtime-preset mock-smoke
+```
+
 Use a built-in theme:
 
 ```bash
@@ -80,20 +108,67 @@ Override the opening prompt directly:
 LLM_PROVIDER=mock uv run python main.py --prompt "Start in a haunted observatory."
 ```
 
+## Demo Snapshot
+
+```text
++--------------------------------------------------------------+
+| CYOA TUI                                           Turn 3    |
++--------------------------------------------------------------+
+| The lantern hisses as the vault door opens. Frost clings    |
+| to the hinges. Three stairways descend into the dark.       |
+|                                                              |
+| 1. Follow the silver footprints                             |
+| 2. Inspect the broken altar                                 |
+| 3. Call out into the chamber                                |
+| 4. Retreat and bar the door                                 |
++--------------------------------------------------------------+
+| ❤️ 82% | 🪙 14 Gold | 🌟 3 Rep | ⚙️ balanced | 🖧 mock       |
++--------------------------------------------------------------+
+```
+
+The live app also includes a journal, story map, typewriter narration, save/load, bookmarks, export, and optional observability hooks.
+
+## Architecture At A Glance
+
+```text
+main.py
+  -> validates startup config and selects the prompt/runtime profile
+  -> initializes observability and story logging
+  -> launches CYOAApp
+
+CYOAApp
+  -> renders the Textual interface and handles interaction flows
+  -> delegates turn orchestration to StoryEngine
+
+StoryEngine
+  -> manages game state, summaries, retries, branching, and persistence hooks
+  -> uses ModelBroker for provider-agnostic generation
+
+ModelBroker / Providers
+  -> support llama.cpp, ollama, and mock backends
+```
+
 ## Controls
 
 | Key | Action |
 | :--- | :--- |
+| `up` / `down` | Move between choices |
+| `enter` | Confirm focused choice |
 | `1-4` | Select a choice |
 | `space` | Skip current typewriter animation |
 | `t` | Toggle typewriter |
 | `v` | Cycle typewriter speed |
+| `g` | Cycle generation preset |
 | `u` | Undo last choice |
+| `y` | Redo last choice |
 | `b` | Branch from a past scene |
 | `j` | Toggle journal |
 | `m` | Toggle story map |
+| `k` / `p` | Create / restore bookmark |
 | `d` | Toggle dark/light theme |
+| `x` | Edit story directives |
 | `h` | Show help |
+| `e` | Export story |
 | `s` / `l` | Save / load game |
 | `r` | Restart |
 | `q` | Quit |
@@ -142,6 +217,16 @@ uv run mypy .  # optional full-repo check
 
 This matches the staged CI flow: catch startup regressions quickly, collect coverage before enforcing package floors, then run style and typing gates.
 
+## Current Quality Snapshot
+
+- Full test suite: `296 passed`
+- Total coverage in this workspace: `89.46%`
+- Enforced package floors:
+  - `cyoa/core` `94.41%` against `83%`
+  - `cyoa/llm` `94.38%` against `78%`
+  - `cyoa/db` `94.09%` against `72%`
+  - `cyoa/ui` `89.69%` against `85%`
+
 ## Project Structure
 
 ```text
@@ -151,6 +236,12 @@ tests/     Test suite
 monitoring/Telemetry and Grafana/Prometheus config
 main.py    CLI entrypoint
 ```
+
+## Further Reading
+
+- [CODEWIKI.md](CODEWIKI.md) for a code-oriented walkthrough
+- [workflow.md](workflow.md) for the original interaction flow
+- [loading_art.md](loading_art.md) for loading screen content
 
 ## License
 
