@@ -13,7 +13,12 @@ from textual.widgets import Button, Label, ListView, Markdown
 from cyoa.core import constants
 from cyoa.ui.commands import ExportStoryCommand, SaveGameCommand, UICommandContext
 from cyoa.ui.components import JournalListItem
-from cyoa.ui.mixins.contracts import as_mixin_host, as_textual_app
+from cyoa.ui.mixins.contracts import (
+    as_command_host,
+    as_mixin_host,
+    as_persistence_owner,
+    as_textual_app,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -270,7 +275,11 @@ class PersistenceMixin:
     def action_save_game(self) -> None:
         """Serialize the current game state to a JSON save file."""
         SaveGameCommand().execute(
-            UICommandContext(app=as_textual_app(self), host=as_mixin_host(self), owner=self)
+            UICommandContext(
+                app=as_textual_app(self),
+                host=as_command_host(self),
+                owner=as_persistence_owner(self),
+            )
         )
 
     def action_load_game(self) -> None:
@@ -471,7 +480,11 @@ class PersistenceMixin:
     def action_export_story(self) -> None:
         """Export the current live session to Markdown and JSON timeline files."""
         ExportStoryCommand().execute(
-            UICommandContext(app=as_textual_app(self), host=as_mixin_host(self), owner=self)
+            UICommandContext(
+                app=as_textual_app(self),
+                host=as_command_host(self),
+                owner=as_persistence_owner(self),
+            )
         )
 
     def export_save_file(self, save_path: str) -> tuple[str, str]:

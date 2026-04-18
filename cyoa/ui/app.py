@@ -246,6 +246,7 @@ class CYOAApp(
             [
                 bus.subscribe(Events.ENGINE_STARTED, self._handle_engine_started),
                 bus.subscribe(Events.ENGINE_RESTARTED, self._handle_engine_restarted),
+                bus.subscribe(Events.ENGINE_PHASE_CHANGED, self._handle_engine_phase_changed),
                 bus.subscribe(Events.CHOICE_MADE, self._handle_choice_made),
                 bus.subscribe(Events.NODE_GENERATING, self._handle_node_generating),
                 bus.subscribe(Events.TOKEN_STREAMED, self._handle_token_streamed),
@@ -547,6 +548,7 @@ class CYOAApp(
         diagnostics = self._runtime_diagnostics
         display.runtime_profile = diagnostics.get("runtime_preset", "custom")
         display.provider_label = diagnostics.get("provider", "llama_cpp")
+        display.engine_phase = self.engine.phase.value if self.engine is not None else "offline"
         if self.generator is not None:
             display.generation_preset = str(self.generator.runtime_controls()["preset"])
 

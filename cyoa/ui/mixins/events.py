@@ -5,6 +5,7 @@ from textual.css.query import NoMatches
 from textual.widgets import ListView, Static
 
 from cyoa.core.models import StoryNode
+from cyoa.core.runtime import EnginePhase, EngineTransition
 from cyoa.ui.components import StatusDisplay
 from cyoa.ui.mixins.contracts import as_mixin_host, as_textual_app
 
@@ -33,6 +34,23 @@ class EventsMixin:
         if not host.is_runtime_active():
             return
         host.queue_notification("Adventure Reset.", severity="information", timeout=2, batch=False)
+
+    def _handle_engine_phase_changed(self, transition: EngineTransition) -> None:
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        if not host.is_runtime_active():
+            return
+
+        host._sync_runtime_status()
+        loading = app.query_one("#loading", Static)
+        if transition.to_phase in {
+            EnginePhase.INITIALIZING,
+            EnginePhase.GENERATING,
+            EnginePhase.RESTORING,
+        }:
+            loading.remove_class("hidden")
+        else:
+            loading.add_class("hidden")
 
     def _handle_choice_made(self, choice_text: str) -> None:
         as_mixin_host(self).action_skip_typewriter()

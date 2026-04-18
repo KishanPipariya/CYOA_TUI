@@ -1,20 +1,24 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
-from typing import Any
 
+from textual.app import App
 from textual.containers import Container, VerticalScroll
 from textual.widgets import ListView, Markdown, Static
 
 from cyoa.core import constants
+from cyoa.ui.mixins.contracts import PersistenceCommandOwner, UICommandHost
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
 class UICommandContext:
-    app: Any
-    host: Any
-    owner: Any
+    app: App[object]
+    host: UICommandHost
+    owner: PersistenceCommandOwner
 
 
 class RestartCommand:
@@ -51,10 +55,7 @@ class RestartCommand:
             status.reputation = 0
             status.inventory = []
         except Exception as exc:
-            owner = context.owner
-            owner_logger = getattr(owner, "logger", None)
-            if owner_logger is not None:
-                owner_logger.debug("Failed to reset status display during restart: %s", exc)
+            logger.debug("Failed to reset status display during restart: %s", exc)
         await host.engine.restart()
 
 
@@ -95,7 +96,7 @@ class UndoCommand:
             host._current_turn_text = host._current_story
             host._current_turn_widget.update(host._current_turn_text)
 
-        owner._trim_story_segments_for_undo(host)
+        host._trim_story_segments_for_undo(host)
         if not host._story_segments:
             host._reset_story_segments(host._current_story)
         else:

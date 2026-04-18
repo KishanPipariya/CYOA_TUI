@@ -476,6 +476,7 @@ class StatusDisplay(Static):
     generation_preset = reactive("balanced")
     runtime_profile = reactive("custom")
     provider_label = reactive("llama_cpp")
+    engine_phase = reactive("idle")
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="stats-row"):
@@ -516,7 +517,8 @@ class StatusDisplay(Static):
     def _update_stats_text(self) -> None:
         text = (
             f" ❤️ {self.health}% | 🪙 {self.gold} Gold | 🌟 {self.reputation} Rep"
-            f" | ⚙️ {self.generation_preset} | 🖧 {self.provider_label} | ⛭ {self.runtime_profile}"
+            f" | ⚙️ {self.generation_preset} | ⏱ {self.engine_phase}"
+            f" | 🖧 {self.provider_label} | ⛭ {self.runtime_profile}"
         )
         self.query_one("#stats-text", Label).update(text)
 
@@ -535,6 +537,9 @@ class StatusDisplay(Static):
         self._update_stats_text()
 
     def watch_provider_label(self, _provider: str) -> None:
+        self._update_stats_text()
+
+    def watch_engine_phase(self, _phase: str) -> None:
         self._update_stats_text()
 
     def _set_health_class(self, health: int) -> None:

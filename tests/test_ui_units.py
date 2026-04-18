@@ -11,6 +11,7 @@ from textual.widgets import Label, ListView, ProgressBar
 
 from cyoa.core import constants
 from cyoa.core.models import Choice, ChoiceRequirement, StoryNode
+from cyoa.core.runtime import EnginePhase, EngineTransition
 from cyoa.ui.app import BufferedNotification, CYOAApp
 from cyoa.ui.components import BranchScreen, LoadGameScreen, StatusDisplay, ThemeSpinner
 from cyoa.ui.mixins.events import EventsMixin
@@ -183,13 +184,20 @@ class DummyEventsHost(EventsMixin):
         self.runtime_active = True
         self._last_stats_snapshot = {"health": 100, "gold": 1, "reputation": 0}
         self.status_display = SimpleNamespace(health=0, gold=0, reputation=0, objectives=[])
+        self.loading = MagicMock()
         self.notifications: list[tuple[str, str]] = []
+        self.sync_calls = 0
 
     def is_runtime_active(self) -> bool:
         return self.runtime_active
 
     def query_one(self, selector: object, *_args: object) -> object:
+        if selector == "#loading":
+            return self.loading
         return self.status_display
+
+    def _sync_runtime_status(self) -> None:
+        self.sync_calls += 1
 
     def queue_notification(
         self,
@@ -418,6 +426,29 @@ def test_events_stats_and_world_state_handlers_emit_notifications():
     assert host.notifications == [("-15 HP | +3 Gold | +2 Rep", "warning")]
 
 
+def test_events_phase_handler_updates_runtime_status_and_spinner():
+    host = DummyEventsHost()
+
+    host._handle_engine_phase_changed(
+        EngineTransition(
+            from_phase=EnginePhase.IDLE,
+            to_phase=EnginePhase.GENERATING,
+            reason="generate_next",
+        )
+    )
+    host._handle_engine_phase_changed(
+        EngineTransition(
+            from_phase=EnginePhase.GENERATING,
+            to_phase=EnginePhase.READY,
+            reason="generation_completed",
+        )
+    )
+
+    assert host.sync_calls == 2
+    host.loading.remove_class.assert_called_once_with("hidden")
+    host.loading.add_class.assert_called_once_with("hidden")
+
+
 @pytest.mark.asyncio
 async def test_branch_screen_mount_populates_scene_list_and_cancel_dismisses() -> None:
     app = BranchScreenHarness()
@@ -462,12 +493,14 @@ async def test_status_display_watchers_and_spinner_tick() -> None:
         display.inventory = ["Torch", "Key"]
         display.objectives = ["Escape", "Survive", "Ignore"]
         display.generation_preset = "fast"
+        display.engine_phase = "ready"
         display._update_stats_text()
         await pilot.pause(0.1)
 
         assert display.query_one("#health-bar", ProgressBar).progress == 25
         assert "25%" in _render_text(display.query_one("#stats-text", Label))
         assert "fast" in _render_text(display.query_one("#stats-text", Label))
+        assert "ready" in _render_text(display.query_one("#stats-text", Label))
         assert "Torch, Key" in _render_text(display.query_one("#inventory-label", Label))
         assert "Escape | Survive" in _render_text(display.query_one("#objectives-label", Label))
         assert display.has_class("health-low")

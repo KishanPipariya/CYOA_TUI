@@ -8,7 +8,12 @@ from textual.widgets import Label, ListView, Markdown, Static, Tree
 
 from cyoa.ui.commands import RedoCommand, RestartCommand, UICommandContext, UndoCommand
 from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, JournalListItem
-from cyoa.ui.mixins.contracts import as_mixin_host, as_textual_app
+from cyoa.ui.mixins.contracts import (
+    as_command_host,
+    as_mixin_host,
+    as_persistence_owner,
+    as_textual_app,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +82,11 @@ class NavigationMixin:
     async def action_restart(self) -> None:
         """Reset story state via the engine."""
         await RestartCommand().execute(
-            UICommandContext(app=as_textual_app(self), host=as_mixin_host(self), owner=self)
+            UICommandContext(
+                app=as_textual_app(self),
+                host=as_command_host(self),
+                owner=as_persistence_owner(self),
+            )
         )
 
     def action_request_restart(self) -> None:
@@ -112,11 +121,23 @@ class NavigationMixin:
 
     def action_undo(self) -> None:
         """Restore the game state to before the last choice was made."""
-        UndoCommand().execute(UICommandContext(app=as_textual_app(self), host=as_mixin_host(self), owner=self))
+        UndoCommand().execute(
+            UICommandContext(
+                app=as_textual_app(self),
+                host=as_command_host(self),
+                owner=as_persistence_owner(self),
+            )
+        )
 
     def action_redo(self) -> None:
         """Re-apply the most recently undone turn."""
-        RedoCommand().execute(UICommandContext(app=as_textual_app(self), host=as_mixin_host(self), owner=self))
+        RedoCommand().execute(
+            UICommandContext(
+                app=as_textual_app(self),
+                host=as_command_host(self),
+                owner=as_persistence_owner(self),
+            )
+        )
 
     def action_create_bookmark(self) -> None:
         """Prompt for a bookmark name and save the current checkpoint."""

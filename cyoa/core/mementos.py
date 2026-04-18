@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cyoa.core.models import Objective, StoryNode
+
+if TYPE_CHECKING:
+    from cyoa.core.state import GameState
 
 
 @dataclass(slots=True)
@@ -49,6 +52,30 @@ class GameStateSnapshot:
     story_flags: set[str]
     story_context: StoryContextMemento = field(default_factory=StoryContextMemento)
 
+    @classmethod
+    def from_game_state(
+        cls,
+        state: GameState,
+        *,
+        story_context_history: Any = None,
+    ) -> GameStateSnapshot:
+        """Build a typed snapshot from a live game state."""
+        return cls(
+            turn_count=state.turn_count,
+            current_node=state.current_node.model_copy() if state.current_node is not None else None,
+            inventory=list(state.inventory),
+            player_stats=dict(state.player_stats),
+            story_title=state.story_title,
+            current_scene_id=state.current_scene_id,
+            last_choice_text=state.last_choice_text,
+            timeline_metadata=[entry.copy() for entry in state.timeline_metadata],
+            objectives=[objective.model_copy() for objective in state.objectives],
+            faction_reputation=dict(state.faction_reputation),
+            npc_affinity=dict(state.npc_affinity),
+            story_flags=set(state.story_flags),
+            story_context=StoryContextMemento.from_payload(story_context_history),
+        )
+
     def clone(self) -> GameStateSnapshot:
         return GameStateSnapshot(
             turn_count=self.turn_count,
@@ -66,6 +93,21 @@ class GameStateSnapshot:
             story_context=StoryContextMemento(history=self.story_context.to_payload()),
         )
 
+    def restore_game_state(self, state: GameState) -> None:
+        """Apply this snapshot to a live game state."""
+        state.turn_count = self.turn_count
+        state.current_node = self.current_node.model_copy() if self.current_node is not None else None
+        state.inventory = list(self.inventory)
+        state.player_stats = dict(self.player_stats)
+        state.story_title = self.story_title
+        state.current_scene_id = self.current_scene_id
+        state.last_choice_text = self.last_choice_text
+        state.timeline_metadata = [entry.copy() for entry in self.timeline_metadata]
+        state.objectives = [objective.model_copy() for objective in self.objectives]
+        state.faction_reputation = dict(self.faction_reputation)
+        state.npc_affinity = dict(self.npc_affinity)
+        state.story_flags = set(self.story_flags)
+
     def to_payload(self) -> dict[str, Any]:
         return {
             "turn_count": self.turn_count,
@@ -82,4 +124,3 @@ class GameStateSnapshot:
             "story_flags": sorted(self.story_flags),
             "story_context_history": self.story_context.to_payload(),
         }
-

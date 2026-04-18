@@ -142,6 +142,9 @@ async def test_app_startup_and_loading_state(mock_app_dependencies):
         inventory_text = str(inventory_label.render())
         assert "Broken Sword" in inventory_text
 
+        stats_text = app.query_one("#stats-text", Label).render().plain
+        assert "ready" in stats_text
+
 
 def test_event_bus_prevents_duplicate_subscriptions() -> None:
     event_bus = EventBus()

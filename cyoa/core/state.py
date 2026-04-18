@@ -97,23 +97,11 @@ class GameState:
 
     def _build_snapshot(self, extra_data: dict[str, Any] | None = None) -> GameStateSnapshot:
         """Capture the current state in a serializable snapshot."""
-        story_context = StoryContextMemento.from_payload(
-            extra_data.get("story_context_history") if isinstance(extra_data, dict) else None
-        )
-        return GameStateSnapshot(
-            turn_count=self.turn_count,
-            current_node=self.current_node.model_copy() if self.current_node is not None else None,
-            inventory=list(self.inventory),
-            player_stats=dict(self.player_stats),
-            story_title=self.story_title,
-            current_scene_id=self.current_scene_id,
-            last_choice_text=self.last_choice_text,
-            timeline_metadata=[entry.copy() for entry in self.timeline_metadata],
-            objectives=[objective.model_copy() for objective in self.objectives],
-            faction_reputation=dict(self.faction_reputation),
-            npc_affinity=dict(self.npc_affinity),
-            story_flags=set(self.story_flags),
-            story_context=story_context,
+        return GameStateSnapshot.from_game_state(
+            self,
+            story_context_history=(
+                extra_data.get("story_context_history") if isinstance(extra_data, dict) else None
+            ),
         )
 
     def create_undo_snapshot(self, extra_data: dict[str, Any] | None = None) -> None:
@@ -123,18 +111,7 @@ class GameState:
 
     def _restore_snapshot(self, snap: GameStateSnapshot) -> None:
         """Restore state from a previously captured snapshot."""
-        self.turn_count = snap.turn_count
-        self.current_node = snap.current_node.model_copy() if snap.current_node is not None else None
-        self.inventory = list(snap.inventory)
-        self.player_stats = dict(snap.player_stats)
-        self.story_title = snap.story_title
-        self.current_scene_id = snap.current_scene_id
-        self.last_choice_text = snap.last_choice_text
-        self.timeline_metadata = [entry.copy() for entry in snap.timeline_metadata]
-        self.objectives = [objective.model_copy() for objective in snap.objectives]
-        self.faction_reputation = dict(snap.faction_reputation)
-        self.npc_affinity = dict(snap.npc_affinity)
-        self.story_flags = set(snap.story_flags)
+        snap.restore_game_state(self)
         self._last_restored_snapshot = snap.clone()
 
     def _emit_state_refresh_events(self) -> None:
