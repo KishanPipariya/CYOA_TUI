@@ -74,6 +74,8 @@ class BranchScreen(ModalScreen[int]):
     #branch-dialog {
         width: 80%;
         height: 80%;
+        max-width: 90%;
+        max-height: 90%;
         border: thick $primary;
         background: $surface;
         padding: 1;
@@ -166,6 +168,7 @@ class ConfirmScreen(ModalScreen[bool]):
     #confirm-dialog {
         width: 50;
         height: auto;
+        max-width: 90%;
         border: thick $primary;
         background: $surface;
         padding: 1 2;
@@ -270,6 +273,8 @@ class HelpScreen(ModalScreen[None]):
     #help-dialog {
         width: 70;
         height: 80%;
+        max-width: 90%;
+        max-height: 90%;
         border: thick $accent;
         background: $surface;
         padding: 1 2;
@@ -314,6 +319,8 @@ class LoadGameScreen(ModalScreen[str]):
     #load-dialog {
         width: 70;
         height: 70%;
+        max-width: 90%;
+        max-height: 90%;
         border: thick $primary;
         background: $surface;
         padding: 1 2;
@@ -417,6 +424,7 @@ class TextPromptScreen(ModalScreen[str]):
     #text-prompt-dialog {
         width: 70;
         height: auto;
+        max-width: 90%;
         border: thick $primary;
         background: $surface;
         padding: 1 2;

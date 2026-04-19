@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from dataclasses import dataclass
@@ -52,10 +53,29 @@ def summarize_target(
     return covered, statements
 
 
-def main() -> int:
-    report_path = Path("coverage.json")
-    if len(sys.argv) > 1:
-        report_path = Path(sys.argv[1])
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Validate package-level coverage floors from a coverage.py JSON report."
+    )
+    parser.add_argument(
+        "report_path",
+        nargs="?",
+        default=None,
+        help="Path to the coverage JSON report. Defaults to coverage.json.",
+    )
+    parser.add_argument(
+        "--report",
+        dest="report_flag",
+        default=None,
+        help="Explicit path to the coverage JSON report. Overrides the positional path.",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args, _unknown = _build_parser().parse_known_args(argv)
+    report_arg = args.report_flag or args.report_path or "coverage.json"
+    report_path = Path(report_arg)
 
     data = load_coverage_report(report_path)
     files = data.get("files")

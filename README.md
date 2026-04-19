@@ -110,21 +110,9 @@ LLM_PROVIDER=mock uv run python main.py --prompt "Start in a haunted observatory
 
 ## Demo Snapshot
 
-```text
-+--------------------------------------------------------------+
-| CYOA TUI                                           Turn 3    |
-+--------------------------------------------------------------+
-| The lantern hisses as the vault door opens. Frost clings    |
-| to the hinges. Three stairways descend into the dark.       |
-|                                                              |
-| 1. Follow the silver footprints                             |
-| 2. Inspect the broken altar                                 |
-| 3. Call out into the chamber                                |
-| 4. Retreat and bar the door                                 |
-+--------------------------------------------------------------+
-| ❤️ 82% | 🪙 14 Gold | 🌟 3 Rep | ⚙️ balanced | 🖧 mock       |
-+--------------------------------------------------------------+
-```
+![CYOA TUI live screenshot](docs/assets/Screenshot%202026-04-18%20at%205.49.19%E2%80%AFPM.png)
+
+Current README placeholder image stored in `docs/assets`.
 
 The live app also includes a journal, story map, typewriter narration, save/load, bookmarks, export, and optional observability hooks.
 

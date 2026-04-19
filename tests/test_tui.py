@@ -5,7 +5,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from textual.containers import Container
+from textual.containers import Container, VerticalScroll
 from textual.css.query import NoMatches
 from textual.widgets import Button, Input, Label, ListView, Markdown
 from textual.widgets._toast import Toast
@@ -14,7 +14,7 @@ from textual.worker import WorkerFailed
 from cyoa.core.events import EventBus, EventDispatchError, Events, bus
 from cyoa.core.models import Choice, ChoiceRequirement, StoryNode
 from cyoa.ui.app import CYOAApp
-from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen
+from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, LoadGameScreen, TextPromptScreen
 from cyoa.ui.mixins.navigation import NavigationMixin
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -94,6 +94,15 @@ async def _wait_for_pilot(
             return
         await pilot.pause(interval)
     raise AssertionError("Timed out waiting for test condition")
+
+
+def _assert_region_within_screen(widget: Any, screen_size: Any) -> None:
+    """Assert that a widget's full box, including borders, remains on screen."""
+    region = widget.region
+    assert region.x >= 0
+    assert region.y >= 0
+    assert region.right <= screen_size.width
+    assert region.bottom <= screen_size.height
 
 
 @pytest.fixture
@@ -924,6 +933,67 @@ async def test_notifications_use_solid_left_border(mock_app_dependencies) -> Non
 
         toast = app.query_one(Toast)
         assert toast.styles.border_left == ("solid", toast.styles.border_left[1])
+
+
+@pytest.mark.asyncio
+async def test_notifications_remain_fully_visible_on_small_terminals(mock_app_dependencies) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(40, 14), notifications=True) as pilot:
+        await pilot.pause(1.0)
+        app.notify(
+            "This is a fairly long notification message to test clipping at small widths",
+            severity="warning",
+            timeout=10,
+        )
+        await pilot.pause(0.2)
+
+        toast = app.query_one(Toast)
+        _assert_region_within_screen(toast, app.size)
+
+
+@pytest.mark.asyncio
+async def test_story_container_has_default_continuous_border(mock_app_dependencies) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+
+        story = app.query_one("#story-container", VerticalScroll)
+        assert story.styles.border_top == ("solid", story.styles.border_top[1])
+        assert story.styles.border_right == ("solid", story.styles.border_right[1])
+        assert story.styles.border_bottom == ("solid", story.styles.border_bottom[1])
+        assert story.styles.border_left == ("solid", story.styles.border_left[1])
+
+
+@pytest.mark.asyncio
+async def test_modal_dialog_borders_do_not_clip_on_small_terminals(mock_app_dependencies) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(60, 20)) as pilot:
+        await pilot.pause(1.0)
+
+        dialogs = [
+            (HelpScreen(), "#help-dialog"),
+            (ConfirmScreen("Confirm a risky action?"), "#confirm-dialog"),
+            (LoadGameScreen(["autosave_slot_1.json"]), "#load-dialog"),
+            (TextPromptScreen("Rename bookmark", value="turn-3"), "#text-prompt-dialog"),
+            (
+                BranchScreen(
+                    scenes=[{"narrative": "Opening scene", "available_choices": ["Go North"], "inventory": []}],
+                    choices=["Go North"],
+                ),
+                "#branch-dialog",
+            ),
+        ]
+
+        for screen, selector in dialogs:
+            app.push_screen(screen)
+            await pilot.pause(0.1)
+            dialog = app.screen.query_one(selector)
+            _assert_region_within_screen(dialog, app.size)
+            app.pop_screen()
+            await pilot.pause(0.1)
 
 
 @pytest.mark.asyncio

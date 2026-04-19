@@ -40,9 +40,8 @@ def test_check_coverage_passes_when_targets_meet_thresholds(tmp_path, monkeypatc
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(module.sys, "argv", ["check_coverage.py", str(report_path)])
 
-    assert module.main() == 0
+    assert module.main([str(report_path)]) == 0
 
 
 def test_check_coverage_fails_when_target_is_below_threshold(tmp_path, monkeypatch, capsys):
@@ -70,7 +69,35 @@ def test_check_coverage_fails_when_target_is_below_threshold(tmp_path, monkeypat
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(module.sys, "argv", ["check_coverage.py", str(report_path)])
 
-    assert module.main() == 1
+    assert module.main([str(report_path)]) == 1
     assert "FAIL: cyoa/core" in capsys.readouterr().err
+
+
+def test_check_coverage_ignores_unrelated_flags(tmp_path, monkeypatch):
+    module = _load_module()
+    report_path = tmp_path / "coverage.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "files": {
+                    "cyoa/core/engine.py": {
+                        "summary": {"num_statements": 100, "missing_lines": 10}
+                    },
+                    "cyoa/llm/broker.py": {
+                        "summary": {"num_statements": 100, "missing_lines": 20}
+                    },
+                    "cyoa/db/graph_db.py": {
+                        "summary": {"num_statements": 100, "missing_lines": 20}
+                    },
+                    "cyoa/ui/app.py": {
+                        "summary": {"num_statements": 100, "missing_lines": 10}
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert module.main(["--model", "qwen", "--report", str(report_path)]) == 0
