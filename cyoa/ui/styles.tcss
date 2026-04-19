@@ -35,6 +35,31 @@ Screen {
     margin-bottom: 1;
 }
 
+#startup-kicker {
+    width: 100%;
+    text-align: center;
+    text-style: bold;
+    color: $accent;
+    background: $accent 12%;
+    border: round $accent 40%;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+#startup-message {
+    width: 100%;
+    background: $panel;
+    border: solid $secondary 40%;
+    padding: 1 2;
+    margin-bottom: 1;
+}
+
+#startup-hint {
+    width: 100%;
+    color: $text-muted;
+    text-align: center;
+}
+
 .dialog-content {
     height: 1fr;
     overflow-y: auto;
@@ -110,6 +135,15 @@ Toast.-error {
     width: 1fr;
     min-width: 64;
     padding-right: 1;
+}
+
+#action-panel {
+    height: auto;
+    max-height: 40%;
+    border: solid $secondary;
+    margin: 0 1 1 1;
+    padding: 0 1 1 1;
+    background: $surface;
 }
 
 #journal-panel, #story-map-panel {
@@ -195,15 +229,16 @@ Toast.-error {
 /* ── Status Bar (two-row stats + inventory) ──────────────── */
 #status-bar {
     height: auto;
-    padding: 0;
-    margin: 0 1;
+    padding: 0 0 1 0;
+    margin: 0;
+    border-bottom: solid $secondary 40%;
 }
 
 StatusDisplay {
     height: auto;
     background: $boost 10%;
-    border-top: tall $accent 30%;
-    padding: 0 1;
+    border: none;
+    padding: 0;
     margin: 0;
 }
 
@@ -260,9 +295,9 @@ ThemeSpinner {
 #choices-container {
     height: auto;
     max-height: 40%;
-    border: solid $secondary;
-    padding: 1;
-    margin: 0 1 1 1;
+    border: none;
+    padding: 1 0 0 0;
+    margin: 0;
     overflow-y: auto;
 }
 
@@ -345,7 +380,7 @@ Footer > .footer--highlight {
     background: $panel 10%;
 }
 .mood-mysterious #choices-container {
-    border: double $primary;
+    border: none;
 }
 
 /* Heroic: Gold and bright highlights */
@@ -354,7 +389,7 @@ Footer > .footer--highlight {
     background: #FFD700 8%;
 }
 .mood-heroic #choices-container {
-    border: solid #FFD700;
+    border: none;
 }
 
 /* Combat: Red alerts and aggressive borders */
@@ -363,7 +398,7 @@ Footer > .footer--highlight {
     background: $error 8%;
 }
 .mood-combat #choices-container {
-    border: solid $error;
+    border: none;
 }
 
 /* Ethereal: Cyan, celestial glow */
@@ -372,7 +407,7 @@ Footer > .footer--highlight {
     background: cyan 8%;
 }
 .mood-ethereal #choices-container {
-    border: dashed cyan;
+    border: none;
 }
 
 /* Dark: Gritty grays and dim text */
@@ -381,7 +416,7 @@ Footer > .footer--highlight {
     background: gray 8%;
 }
 .mood-dark #choices-container {
-    border: solid gray;
+    border: none;
 }
 
 /* Grimy: Earthy greens and browns */
@@ -390,7 +425,7 @@ Footer > .footer--highlight {
     background: #556B2F 8%;
 }
 .mood-grimy #choices-container {
-    border: solid #556B2F;
+    border: none;
 }
 
 /* ── Utilities ──────────────────────────────────────────────── */

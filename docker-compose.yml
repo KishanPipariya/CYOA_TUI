@@ -20,7 +20,6 @@ services:
     ports:
       - "16686:16686" # Web UI
       - "4317:4317"  # OTLP gRPC
-      - "4318:4318"  # OTLP HTTP
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest

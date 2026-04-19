@@ -16,7 +16,7 @@ exporters:
     endpoint: "jaeger:4317"
     tls:
       insecure: true
-  logging:
+  debug:
     verbosity: detailed
 
 service:
@@ -24,8 +24,8 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp/jaeger, logging]
+      exporters: [otlp/jaeger, debug]
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [prometheus, logging]
+      exporters: [prometheus, debug]

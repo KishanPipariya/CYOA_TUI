@@ -174,7 +174,7 @@ class CYOAApp(
         self._is_shutting_down = False
         self._has_rendered_first_scene = False
         self._optional_runtime_ready = False
-        self.query_one("#choices-container", Container).border_title = "Choices"
+        self.query_one("#action-panel", Container).border_title = "Choices"
         self.query_one("#story-container", VerticalScroll).border_title = "Story"
 
         self._current_turn_widget = self.query_one("#initial-turn", Markdown)

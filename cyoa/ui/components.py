@@ -18,6 +18,7 @@ from cyoa.ui.presenters import (
 )
 
 __all__ = [
+    "ActionPanel",
     "ChoicePanel",
     "BranchScreen",
     "ThemeSpinner",
@@ -108,6 +109,18 @@ class ChoicePanel(Container):
     """Organism that hosts the current turn's available actions."""
 
 
+class ActionPanel(Container):
+    """Shared lower dock for runtime status and available actions."""
+
+    def __init__(self, *, spinner_frames: list[str], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._spinner_frames = spinner_frames
+
+    def compose(self) -> ComposeResult:
+        yield StatusBar(spinner_frames=self._spinner_frames, id="status-bar")
+        yield ChoicePanel(id="choices-container")
+
+
 class JournalPanel(Container):
     """Organism for the in-game journal side panel."""
 
@@ -133,8 +146,7 @@ class MainGamePanel(Container):
 
     def compose(self) -> ComposeResult:
         yield StoryPane()
-        yield StatusBar(spinner_frames=self._spinner_frames, id="status-bar")
-        yield ChoicePanel(id="choices-container")
+        yield ActionPanel(spinner_frames=self._spinner_frames, id="action-panel")
 
 
 class GameWorkspace(Horizontal):
@@ -462,10 +474,16 @@ class StartupChoiceScreen(ModalScreen[str]):
         background: $background 80%;
     }
     #startup-dialog {
-        width: 64;
+        width: 72;
+        max-width: 92%;
+    }
+    #startup-buttons {
+        width: 100%;
+        margin-top: 1;
     }
     #startup-buttons Button {
-        min-width: 18;
+        width: 1fr;
+        min-width: 20;
     }
     """
 
@@ -479,9 +497,14 @@ class StartupChoiceScreen(ModalScreen[str]):
         self._message = message
 
     def compose(self) -> ComposeResult:
-        with DialogFrame(id="startup-dialog", classes="dialog-frame"):
+        with DialogFrame(id="startup-dialog", classes="dialog-frame dialog-frame-accent"):
+            yield Static("AUTOSAVE DETECTED", id="startup-kicker")
             yield Label("[b]Continue or Start Over[/b]", id="startup-title", classes="dialog-title")
-            yield Label(self._message, id="startup-message", classes="dialog-message")
+            yield Static(self._message, id="startup-message", classes="dialog-message")
+            yield Label(
+                "Resume picks up exactly where you left off. New Game discards the autosave.",
+                id="startup-hint",
+            )
             with DialogActions(id="startup-buttons", classes="dialog-actions"):
                 yield Button("[b]R[/b]esume Previous Save", id="btn-startup-resume", variant="primary")
                 yield Button("[b]N[/b]ew Game", id="btn-startup-new", variant="success")
