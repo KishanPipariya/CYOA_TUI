@@ -294,21 +294,27 @@ def test_get_scene_history_path_returns_longest_root_path(mock_neo4j):
                     "id": "root",
                     "narrative": "Start",
                     "available_choices": ["Left", "Right"],
-                    "player_stats": {"health": 100, "gold": 2},
+                    "player_health": 100,
+                    "player_gold": 2,
+                    "player_reputation": 0,
                     "inventory": ["Lantern"],
                 },
                 {
                     "id": "mid",
                     "narrative": "Middle",
                     "available_choices": ["Forward"],
-                    "player_stats": {"health": 90, "gold": 2},
+                    "player_health": 90,
+                    "player_gold": 2,
+                    "player_reputation": 0,
                     "inventory": ["Lantern", "Map"],
                 },
                 {
                     "id": "leaf",
                     "narrative": "Leaf",
                     "available_choices": [],
-                    "player_stats": {"health": 90, "gold": 3},
+                    "player_health": 90,
+                    "player_gold": 3,
+                    "player_reputation": 0,
                     "inventory": ["Lantern", "Map"],
                 },
             ],
@@ -324,21 +330,21 @@ def test_get_scene_history_path_returns_longest_root_path(mock_neo4j):
                     "id": "root",
                     "narrative": "Start",
                     "available_choices": ["Left", "Right"],
-                    "player_stats": {"health": 100, "gold": 2},
+                    "player_stats": {"health": 100, "gold": 2, "reputation": 0},
                     "inventory": ["Lantern"],
                 },
                 {
                     "id": "mid",
                     "narrative": "Middle",
                     "available_choices": ["Forward"],
-                    "player_stats": {"health": 90, "gold": 2},
+                    "player_stats": {"health": 90, "gold": 2, "reputation": 0},
                     "inventory": ["Lantern", "Map"],
                 },
                 {
                     "id": "leaf",
                     "narrative": "Leaf",
                     "available_choices": [],
-                    "player_stats": {"health": 90, "gold": 3},
+                    "player_stats": {"health": 90, "gold": 3, "reputation": 0},
                     "inventory": ["Lantern", "Map"],
                 },
             ],
@@ -444,8 +450,88 @@ def test_create_scene_node_uses_defaults_when_optional_fields_missing(mock_neo4j
 
         assert scene_id
         kwargs = mock_neo4j.run.call_args.kwargs
-        assert kwargs["player_stats"] == {"health": 100, "gold": 0, "reputation": 0}
+        assert kwargs["player_health"] == 100
+        assert kwargs["player_gold"] == 0
+        assert kwargs["player_reputation"] == 0
         assert kwargs["inventory"] == []
+
+
+def test_create_scene_node_flattens_player_stats_for_neo4j(mock_neo4j):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+
+        mock_result = MagicMock()
+        mock_result.single.return_value = {"scene_id": "scene-123"}
+        mock_neo4j.run.return_value = mock_result
+
+        db.create_scene_node(
+            "Darkness...",
+            ["Light lamp"],
+            "Adventure 1",
+            player_stats={"health": 88, "gold": 7, "reputation": 2},
+        )
+
+        query = mock_neo4j.run.call_args.args[0]
+        kwargs = mock_neo4j.run.call_args.kwargs
+        assert "player_stats: $player_stats" not in query
+        assert "player_health: $player_health" in query
+        assert kwargs["player_health"] == 88
+        assert kwargs["player_gold"] == 7
+        assert kwargs["player_reputation"] == 2
+
+
+def test_get_scene_history_path_reconstructs_player_stats_from_flat_scene_properties(mock_neo4j):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+
+        mock_result = MagicMock()
+        mock_result.single.return_value = {
+            "scenes": [
+                {
+                    "id": "root",
+                    "narrative": "Start",
+                    "available_choices": ["Left", "Right"],
+                    "player_health": 100,
+                    "player_gold": 2,
+                    "inventory": ["Lantern"],
+                },
+                {
+                    "id": "leaf",
+                    "narrative": "Leaf",
+                    "available_choices": [],
+                    "player_health": 90,
+                    "player_gold": 3,
+                    "player_reputation": 1,
+                    "inventory": ["Lantern", "Map"],
+                },
+            ],
+            "choices": [{"action_text": "Left"}],
+        }
+        mock_neo4j.run.return_value = mock_result
+
+        history = db.get_scene_history_path("leaf")
+
+        assert history == {
+            "scenes": [
+                {
+                    "id": "root",
+                    "narrative": "Start",
+                    "available_choices": ["Left", "Right"],
+                    "player_stats": {"health": 100, "gold": 2, "reputation": 0},
+                    "inventory": ["Lantern"],
+                },
+                {
+                    "id": "leaf",
+                    "narrative": "Leaf",
+                    "available_choices": [],
+                    "player_stats": {"health": 90, "gold": 3, "reputation": 1},
+                    "inventory": ["Lantern", "Map"],
+                },
+            ],
+            "choices": ["Left"],
+        }
 
 
 @pytest.mark.asyncio

@@ -58,6 +58,27 @@ class CYOAGraphDB:
             )
             self.driver = None
 
+    @staticmethod
+    def _normalize_player_stats(player_stats: dict[str, int] | None) -> dict[str, int]:
+        base_stats = {"health": 100, "gold": 0, "reputation": 0}
+        if player_stats:
+            base_stats.update(player_stats)
+        return base_stats
+
+    @classmethod
+    def _scene_node_player_stats(cls, node: Any) -> dict[str, int]:
+        return cls._normalize_player_stats(
+            {
+                key: value
+                for key, value in {
+                    "health": node.get("player_health"),
+                    "gold": node.get("player_gold"),
+                    "reputation": node.get("player_reputation"),
+                }.items()
+                if isinstance(value, int)
+            }
+        )
+
     async def verify_connectivity_async(self) -> bool:
         """
         Verify connectivity to Neo4j asynchronously.
@@ -313,6 +334,7 @@ class CYOAGraphDB:
             return scene_id
 
         def _work() -> str:
+            normalized_player_stats = self._normalize_player_stats(player_stats)
             query = """
             MATCH (story:Story {title: $story_title})
             CREATE (s:Scene {
@@ -320,7 +342,9 @@ class CYOAGraphDB:
                 narrative: $narrative,
                 available_choices: $available_choices,
                 story_title: $story_title,
-                player_stats: $player_stats,
+                player_health: $player_health,
+                player_gold: $player_gold,
+                player_reputation: $player_reputation,
                 inventory: $inventory,
                 mood: $mood
             })
@@ -335,7 +359,9 @@ class CYOAGraphDB:
                         narrative=narrative,
                         available_choices=available_choices,
                         story_title=story_title,
-                        player_stats=player_stats or {"health": 100, "gold": 0, "reputation": 0},
+                        player_health=normalized_player_stats["health"],
+                        player_gold=normalized_player_stats["gold"],
+                        player_reputation=normalized_player_stats["reputation"],
                         inventory=inventory or [],
                         mood=mood,
                     )
@@ -443,7 +469,7 @@ class CYOAGraphDB:
                         "id": n["id"],
                         "narrative": n["narrative"],
                         "available_choices": n.get("available_choices", []),
-                        "player_stats": dict(n.get("player_stats", {})),
+                        "player_stats": self._scene_node_player_stats(n),
                         "inventory": list(n.get("inventory", [])),
                     }
                     for n in record["scenes"]
