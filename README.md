@@ -172,10 +172,12 @@ docker-compose up -d
 Included services:
 
 - Neo4j
-- Jaeger
+- Jaeger v2
 - OpenTelemetry Collector
 - Prometheus
 - Grafana
+
+The compose stack uses the Jaeger v2 image because Jaeger v1 reached end-of-life on December 31, 2025.
 
 If Neo4j or Chroma are unavailable, the app falls back gracefully instead of failing hard.
 
