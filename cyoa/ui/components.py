@@ -5,7 +5,17 @@ from textual.containers import Container, Horizontal, VerticalScroll
 from textual.markup import escape
 from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, ListItem, ListView, Markdown, ProgressBar, Static, Tree
+from textual.widgets import (
+    Button,
+    Input,
+    Label,
+    ListItem,
+    ListView,
+    Markdown,
+    ProgressBar,
+    Static,
+    Tree,
+)
 
 from cyoa.core import constants
 from cyoa.ui.presenters import (

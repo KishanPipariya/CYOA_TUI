@@ -338,7 +338,14 @@ class PersistenceMixin:
         if host.engine.state.current_node:
             host._mount_choice_buttons(host.engine.state.current_node, choices_container, False)
         else:
-            choices_container.mount(Button("✦ Start a New Adventure", id="btn-new-adventure", variant="success"))
+            choices_container.mount(
+                Button(
+                    "✦ Start a New Adventure",
+                    id="btn-new-adventure",
+                    variant="success",
+                    action="restart",
+                )
+            )
         self._restore_journal_and_panels(app, ui_state)
         story_map_panel = self._query_optional_container(app, "#story-map-panel")
         if story_map_panel is not None and not story_map_panel.has_class("panel-collapsed"):

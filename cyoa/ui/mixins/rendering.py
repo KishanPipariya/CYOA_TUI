@@ -210,7 +210,12 @@ class RenderingMixin:
                 btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="default")
                 choices_container.mount(btn)
         elif node.is_ending:
-            end_btn = Button("✦ Start a New Adventure", id="btn-new-adventure", variant="success")
+            end_btn = Button(
+                "✦ Start a New Adventure",
+                id="btn-new-adventure",
+                variant="success",
+                action="restart",
+            )
             choices_container.mount(end_btn)
         else:
             for i, choice in enumerate(node.choices):

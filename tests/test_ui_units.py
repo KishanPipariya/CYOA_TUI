@@ -13,7 +13,13 @@ from cyoa.core import constants
 from cyoa.core.models import Choice, ChoiceRequirement, StoryNode
 from cyoa.core.runtime import EnginePhase, EngineTransition
 from cyoa.ui.app import BufferedNotification, CYOAApp
-from cyoa.ui.components import BranchScreen, LoadGameScreen, StartupChoiceScreen, StatusDisplay, ThemeSpinner
+from cyoa.ui.components import (
+    BranchScreen,
+    LoadGameScreen,
+    StartupChoiceScreen,
+    StatusDisplay,
+    ThemeSpinner,
+)
 from cyoa.ui.mixins.events import EventsMixin
 from cyoa.ui.mixins.navigation import NavigationMixin
 from cyoa.ui.mixins.persistence import PersistenceMixin
@@ -547,7 +553,7 @@ def test_branch_and_load_screens_handle_selection_events():
 
 
 def test_confirm_and_help_screens_dismiss_expected_values():
-    from cyoa.ui.components import ConfirmScreen, HelpScreen
+    from cyoa.ui.components import ConfirmScreen
 
     confirm = ConfirmScreen("Proceed?")
     confirm.dismiss = MagicMock()

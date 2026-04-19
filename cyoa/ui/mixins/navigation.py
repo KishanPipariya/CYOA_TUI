@@ -78,7 +78,6 @@ class NavigationMixin:
         if host._story_segments and host._story_segments[-1].get("kind") in {"player_choice", "branch_marker"}:
             host._story_segments.pop()
 
-    @work(exclusive=True)
     async def action_restart(self) -> None:
         """Reset story state via the engine."""
         await RestartCommand().execute(
@@ -95,7 +94,7 @@ class NavigationMixin:
 
         def on_confirm(confirmed: bool | None) -> None:
             if confirmed:
-                self.action_restart()
+                app.run_worker(self.action_restart(), exclusive=True)
 
         app.push_screen(
             ConfirmScreen("[b]Restart the adventure?[/b]\n\nAll progress will be lost."),

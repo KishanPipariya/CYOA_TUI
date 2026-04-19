@@ -19,7 +19,6 @@ from textual.widgets import (
     Header,
     ListView,
     Markdown,
-    Static,
 )
 
 from cyoa.core import constants, utils
@@ -635,6 +634,10 @@ class CYOAApp(
     def on_click(self, event: Click) -> None:
         """Typewriter skip shortcut on clicking the story area."""
         try:
+            if isinstance(event.control, Button) and event.control.id == "btn-new-adventure":
+                self.run_worker(self.action_restart(), exclusive=True)
+                return
+
             # U1 Fix: Only skip if clicking within the story container
             story = self.query_one("#story-container", VerticalScroll)
             current = event.control
@@ -647,10 +650,6 @@ class CYOAApp(
             logger.debug("Click handler failed: %s", e)
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "btn-new-adventure":
-            self.action_restart()
-            return
-
         if event.button.id == "btn-retry":
             self.show_loading()
             if self.engine:
