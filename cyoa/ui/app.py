@@ -8,7 +8,7 @@ from typing import Any, ClassVar, Literal
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, VerticalScroll
 from textual.css.query import NoMatches
 from textual.events import Click, Resize
 from textual.reactive import reactive
@@ -17,11 +17,9 @@ from textual.widgets import (
     Button,
     Footer,
     Header,
-    Label,
     ListView,
     Markdown,
     Static,
-    Tree,
 )
 
 from cyoa.core import constants, utils
@@ -30,7 +28,7 @@ from cyoa.core.events import Events, bus
 from cyoa.core.models import StoryNode
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.llm.broker import ModelBroker
-from cyoa.ui.components import JournalListItem, StatusDisplay, ThemeSpinner
+from cyoa.ui.components import GameWorkspace, JournalListItem, StatusDisplay, ThemeSpinner
 from cyoa.ui.mixins import (
     EventsMixin,
     NavigationMixin,
@@ -166,23 +164,7 @@ class CYOAApp(
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Horizontal(id="workspace"):
-            with Container(id="main-container"):
-                with VerticalScroll(id="story-container"):
-                    yield Markdown(constants.LOADING_ART, classes="story-turn", id="initial-turn")
-                    yield Static("", id="scene-art")
-                # Dedicated status bar between story and choices
-                with Container(id="status-bar"):
-                    yield ThemeSpinner(frames=self.spinner_frames, id="loading")
-                    yield StatusDisplay(id="status-display")
-                with Container(id="choices-container"):
-                    pass
-            with Container(id="journal-panel", classes="panel-collapsed"):
-                yield Label("In-Game Journal", id="journal-title")
-                yield ListView(id="journal-list")
-            with Container(id="story-map-panel", classes="panel-collapsed"):
-                yield Label("Story Map", id="story-map-title")
-                yield Tree("Story", id="story-map-tree")
+        yield GameWorkspace(spinner_frames=self.spinner_frames, id="workspace")
         yield Footer()
 
     def watch_turn_count(self, count: int) -> None:

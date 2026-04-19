@@ -10,6 +10,7 @@ from cyoa.core.models import StoryNode
 from cyoa.ui.ascii_art import SCENE_ART
 from cyoa.ui.components import StatusDisplay
 from cyoa.ui.mixins.contracts import as_mixin_host, as_textual_app
+from cyoa.ui.presenters import build_choice_label
 
 logger = logging.getLogger(__name__)
 
@@ -223,9 +224,7 @@ class RenderingMixin:
                         host.engine.state.player_stats,
                         host.engine.state.story_flags,
                     )
-                label = f"[b]{i + 1}[/b]  {choice.text}"
-                if disabled_reason:
-                    label = f"{label} [dim](Locked: {disabled_reason})[/dim]"
+                label = build_choice_label(i, choice.text, disabled_reason)
                 btn = Button(label, id=btn_id, variant="primary", disabled=disabled_reason is not None)
                 choices_container.mount(btn)
 

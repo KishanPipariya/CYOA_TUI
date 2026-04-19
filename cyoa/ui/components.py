@@ -1,20 +1,39 @@
 from typing import Any
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal
+from textual.containers import Container, Horizontal, VerticalScroll
 from textual.markup import escape
 from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, ListItem, ListView, Markdown, ProgressBar, Static
+from textual.widgets import Button, Input, Label, ListItem, ListView, Markdown, ProgressBar, Static, Tree
+
+from cyoa.core import constants
+from cyoa.ui.presenters import (
+    build_branch_preview,
+    format_directives_label,
+    format_inventory_label,
+    format_objectives_label,
+    format_save_display_name,
+    format_stats_text,
+)
 
 __all__ = [
+    "ChoicePanel",
     "BranchScreen",
     "ThemeSpinner",
     "ConfirmScreen",
+    "DialogActions",
+    "DialogFrame",
     "HelpScreen",
     "LoadGameScreen",
+    "GameWorkspace",
     "OptionListScreen",
+    "MainGamePanel",
+    "JournalPanel",
     "StartupChoiceScreen",
+    "StoryMapPanel",
+    "StoryPane",
+    "StatusBar",
     "TextPromptScreen",
     "JournalListItem",
     "SceneListItem",
@@ -64,6 +83,81 @@ class JournalListItem(ListItem):
         self.label_text = label_text
 
 
+class StoryPane(Container):
+    """Organism for the story stream and contextual ASCII art."""
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="story-container"):
+            yield Markdown(constants.LOADING_ART, classes="story-turn", id="initial-turn")
+            yield Static("", id="scene-art")
+
+
+class StatusBar(Container):
+    """Organism for loading state and runtime/player status."""
+
+    def __init__(self, *, spinner_frames: list[str], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._spinner_frames = spinner_frames
+
+    def compose(self) -> ComposeResult:
+        yield ThemeSpinner(frames=self._spinner_frames, id="loading")
+        yield StatusDisplay(id="status-display")
+
+
+class ChoicePanel(Container):
+    """Organism that hosts the current turn's available actions."""
+
+
+class JournalPanel(Container):
+    """Organism for the in-game journal side panel."""
+
+    def compose(self) -> ComposeResult:
+        yield Label("In-Game Journal", id="journal-title")
+        yield ListView(id="journal-list")
+
+
+class StoryMapPanel(Container):
+    """Organism for the branching story-map side panel."""
+
+    def compose(self) -> ComposeResult:
+        yield Label("Story Map", id="story-map-title")
+        yield Tree("Story", id="story-map-tree")
+
+
+class MainGamePanel(Container):
+    """Organism for the main play area within the workspace template."""
+
+    def __init__(self, *, spinner_frames: list[str], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._spinner_frames = spinner_frames
+
+    def compose(self) -> ComposeResult:
+        yield StoryPane()
+        yield StatusBar(spinner_frames=self._spinner_frames, id="status-bar")
+        yield ChoicePanel(id="choices-container")
+
+
+class GameWorkspace(Horizontal):
+    """Template for the primary in-game workspace."""
+
+    def __init__(self, *, spinner_frames: list[str], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._spinner_frames = spinner_frames
+
+    def compose(self) -> ComposeResult:
+        yield MainGamePanel(spinner_frames=self._spinner_frames, id="main-container")
+        yield JournalPanel(id="journal-panel", classes="panel-collapsed")
+        yield StoryMapPanel(id="story-map-panel", classes="panel-collapsed")
+
+
+class DialogFrame(Container):
+    """Reusable modal dialog shell."""
+
+
+class DialogActions(Horizontal):
+    """Reusable modal action row."""
+
+
 class BranchScreen(ModalScreen[int]):
     """Screen to select a past scene to branch from."""
 
@@ -99,26 +193,16 @@ class BranchScreen(ModalScreen[int]):
     @staticmethod
     def _build_scene_preview(scene: dict[str, Any], turn_index: int, choice_text: str) -> str:
         """Build a compact but information-dense branch preview label."""
-        raw = str(scene.get("narrative", "")).replace("\n", " ").strip()
-        preview = (raw[:180].rsplit(" ", 1)[0] + "…") if len(raw) > 180 else raw
-        preview = preview or "No scene summary available."
-        available_choices = scene.get("available_choices")
-        branch_count = len(available_choices) if isinstance(available_choices, list) else 0
-        inventory = scene.get("inventory")
-        item_count = len(inventory) if isinstance(inventory, list) else 0
-        return (
-            f"[b]Turn {turn_index + 1}[/b]  [dim]Next choice: {choice_text}[/dim]\n"
-            f"{preview}\n"
-            f"[dim]{branch_count} future path(s) • {item_count} item(s) carried[/dim]"
-        )
+        return build_branch_preview(scene, turn_index, choice_text)
 
     def compose(self) -> ComposeResult:
-        with Container(id="branch-dialog"):
+        with DialogFrame(id="branch-dialog", classes="dialog-frame dialog-frame-scroll"):
             yield Label(
                 "[b]Rewind & Branch:[/b] Select a past moment to alter your fate.",
                 id="branch-title",
+                classes="dialog-title",
             )
-            list_view = ListView(id="branch-list")
+            list_view = ListView(id="branch-list", classes="dialog-list")
             yield list_view
             yield Button("Cancel", id="cancel-branch", variant="error")
 
@@ -168,24 +252,6 @@ class ConfirmScreen(ModalScreen[bool]):
     }
     #confirm-dialog {
         width: 50;
-        height: auto;
-        max-width: 90%;
-        border: thick $primary;
-        background: $surface;
-        padding: 1 2;
-    }
-    #confirm-message {
-        text-align: center;
-        margin-bottom: 1;
-    }
-    #confirm-buttons {
-        align: center middle;
-        height: auto;
-    }
-    #confirm-buttons Button {
-        width: auto;
-        min-width: 12;
-        margin: 0 1;
     }
     """
 
@@ -200,9 +266,9 @@ class ConfirmScreen(ModalScreen[bool]):
         self._message = message
 
     def compose(self) -> ComposeResult:
-        with Container(id="confirm-dialog"):
-            yield Label(self._message, id="confirm-message")
-            with Horizontal(id="confirm-buttons"):
+        with DialogFrame(id="confirm-dialog", classes="dialog-frame"):
+            yield Label(self._message, id="confirm-message", classes="dialog-message")
+            with DialogActions(id="confirm-buttons", classes="dialog-actions"):
                 yield Button("[b]Y[/b]es", id="btn-confirm-yes", variant="error")
                 yield Button("[b]N[/b]o", id="btn-confirm-no", variant="primary")
 
@@ -274,15 +340,6 @@ class HelpScreen(ModalScreen[None]):
     #help-dialog {
         width: 70;
         height: 80%;
-        max-width: 90%;
-        max-height: 90%;
-        border: thick $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-    #help-content {
-        height: 1fr;
-        overflow-y: auto;
     }
     #btn-help-close {
         width: 100%;
@@ -296,8 +353,8 @@ class HelpScreen(ModalScreen[None]):
     ]
 
     def compose(self) -> ComposeResult:
-        with Container(id="help-dialog"):
-            with Container(id="help-content"):
+        with DialogFrame(id="help-dialog", classes="dialog-frame dialog-frame-scroll dialog-frame-accent"):
+            with Container(id="help-content", classes="dialog-content"):
                 yield Markdown(HELP_TEXT, id="help-text")
             yield Button("Close [b](Esc)[/b]", id="btn-help-close", variant="primary")
 
@@ -320,24 +377,6 @@ class LoadGameScreen(ModalScreen[str]):
     #load-dialog {
         width: 70;
         height: 70%;
-        max-width: 90%;
-        max-height: 90%;
-        border: thick $primary;
-        background: $surface;
-        padding: 1 2;
-    }
-    #load-title {
-        text-align: center;
-        text-style: bold;
-        margin-bottom: 1;
-    }
-    #load-list {
-        height: 1fr;
-        border: solid $secondary;
-        margin-bottom: 1;
-    }
-    .save-entry {
-        padding: 0 1;
     }
     """
 
@@ -350,17 +389,17 @@ class LoadGameScreen(ModalScreen[str]):
         self._save_files = save_files
 
     def compose(self) -> ComposeResult:
-        with Container(id="load-dialog"):
-            yield Label("[b]Load Game[/b] \u2014 Select a save file", id="load-title")
-            yield ListView(id="load-list")
+        with DialogFrame(id="load-dialog", classes="dialog-frame dialog-frame-scroll"):
+            yield Label("[b]Load Game[/b] \u2014 Select a save file", id="load-title", classes="dialog-title")
+            yield ListView(id="load-list", classes="dialog-list")
             yield Button("Cancel [b](Esc)[/b]", id="btn-load-cancel", variant="error")
 
     def on_mount(self) -> None:
         list_view = self.query_one("#load-list", ListView)
         for save_file in self._save_files:
-            display_name = save_file.replace(".json", "").replace("_", " ")
+            display_name = format_save_display_name(save_file)
             item = SaveListItem(
-                Label(display_name, classes="save-entry"), save_filename=save_file
+                Label(display_name, classes="dialog-entry"), save_filename=save_file
             )
             list_view.append(item)
 
@@ -389,18 +428,18 @@ class OptionListScreen(ModalScreen[str]):
         self._empty_message = empty_message
 
     def compose(self) -> ComposeResult:
-        with Container(id="load-dialog"):
-            yield Label(self._title, id="load-title")
-            yield ListView(id="load-list")
+        with DialogFrame(id="load-dialog", classes="dialog-frame dialog-frame-scroll"):
+            yield Label(self._title, id="load-title", classes="dialog-title")
+            yield ListView(id="load-list", classes="dialog-list")
             yield Button("Cancel [b](Esc)[/b]", id="btn-load-cancel", variant="error")
 
     def on_mount(self) -> None:
         list_view = self.query_one("#load-list", ListView)
         if not self._options:
-            list_view.append(OptionListItem(Label(self._empty_message, classes="save-entry"), option_value=""))
+            list_view.append(OptionListItem(Label(self._empty_message, classes="dialog-entry"), option_value=""))
             return
         for option in self._options:
-            list_view.append(OptionListItem(Label(option, classes="save-entry"), option_value=option))
+            list_view.append(OptionListItem(Label(option, classes="dialog-entry"), option_value=option))
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, OptionListItem) and event.item.option_value:
@@ -424,29 +463,9 @@ class StartupChoiceScreen(ModalScreen[str]):
     }
     #startup-dialog {
         width: 64;
-        height: auto;
-        max-width: 90%;
-        border: thick $primary;
-        background: $surface;
-        padding: 1 2;
-    }
-    #startup-title {
-        text-align: center;
-        text-style: bold;
-        margin-bottom: 1;
-    }
-    #startup-message {
-        text-align: center;
-        margin-bottom: 1;
-    }
-    #startup-buttons {
-        align: center middle;
-        height: auto;
     }
     #startup-buttons Button {
-        width: auto;
         min-width: 18;
-        margin: 0 1;
     }
     """
 
@@ -460,10 +479,10 @@ class StartupChoiceScreen(ModalScreen[str]):
         self._message = message
 
     def compose(self) -> ComposeResult:
-        with Container(id="startup-dialog"):
-            yield Label("[b]Continue or Start Over[/b]", id="startup-title")
-            yield Label(self._message, id="startup-message")
-            with Horizontal(id="startup-buttons"):
+        with DialogFrame(id="startup-dialog", classes="dialog-frame"):
+            yield Label("[b]Continue or Start Over[/b]", id="startup-title", classes="dialog-title")
+            yield Label(self._message, id="startup-message", classes="dialog-message")
+            with DialogActions(id="startup-buttons", classes="dialog-actions"):
                 yield Button("[b]R[/b]esume Previous Save", id="btn-startup-resume", variant="primary")
                 yield Button("[b]N[/b]ew Game", id="btn-startup-new", variant="success")
 
@@ -490,23 +509,9 @@ class TextPromptScreen(ModalScreen[str]):
     }
     #text-prompt-dialog {
         width: 70;
-        height: auto;
-        max-width: 90%;
-        border: thick $primary;
-        background: $surface;
-        padding: 1 2;
     }
     #text-prompt-input {
         margin: 1 0;
-    }
-    #text-prompt-buttons {
-        align: center middle;
-        height: auto;
-    }
-    #text-prompt-buttons Button {
-        width: auto;
-        min-width: 12;
-        margin: 0 1;
     }
     """
 
@@ -519,10 +524,10 @@ class TextPromptScreen(ModalScreen[str]):
         self._placeholder = placeholder
 
     def compose(self) -> ComposeResult:
-        with Container(id="text-prompt-dialog"):
-            yield Label(self._title, id="load-title")
+        with DialogFrame(id="text-prompt-dialog", classes="dialog-frame"):
+            yield Label(self._title, id="load-title", classes="dialog-title")
             yield Input(value=self._value, placeholder=self._placeholder, id="text-prompt-input")
-            with Horizontal(id="text-prompt-buttons"):
+            with DialogActions(id="text-prompt-buttons", classes="dialog-actions"):
                 yield Button("Save", id="btn-prompt-save", variant="primary")
                 yield Button("Cancel", id="btn-prompt-cancel", variant="error")
 
@@ -579,36 +584,25 @@ class StatusDisplay(Static):
         self._update_stats_text()
 
     def watch_inventory(self, inventory: list[str]) -> None:
-        inv_str = (
-            f"🎒 Inventory: {', '.join(inventory)}"
-            if inventory
-            else "🎒 Inventory: Empty"
-        )
-        self.query_one("#inventory-label", Label).update(inv_str)
+        self.query_one("#inventory-label", Label).update(format_inventory_label(inventory))
 
     def watch_objectives(self, objectives: list[str]) -> None:
-        objective_text = (
-            f"🎯 Objectives: {' | '.join(objectives[:2])}"
-            if objectives
-            else "🎯 Objectives: None"
-        )
-        self.query_one("#objectives-label", Label).update(objective_text)
+        self.query_one("#objectives-label", Label).update(format_objectives_label(objectives))
 
     def _update_stats_text(self) -> None:
-        text = (
-            f" ❤️ {self.health}% | 🪙 {self.gold} Gold | 🌟 {self.reputation} Rep"
-            f" | ⚙️ {self.generation_preset} | ⏱ {self.engine_phase}"
-            f" | 🖧 {self.provider_label} | ⛭ {self.runtime_profile}"
+        text = format_stats_text(
+            health=self.health,
+            gold=self.gold,
+            reputation=self.reputation,
+            generation_preset=self.generation_preset,
+            engine_phase=self.engine_phase,
+            provider_label=self.provider_label,
+            runtime_profile=self.runtime_profile,
         )
         self.query_one("#stats-text", Label).update(text)
 
     def watch_directives(self, directives: list[str]) -> None:
-        directive_text = (
-            f"🧭 Directives: {' | '.join(directives[:2])}"
-            if directives
-            else "🧭 Directives: None"
-        )
-        self.query_one("#directives-label", Label).update(directive_text)
+        self.query_one("#directives-label", Label).update(format_directives_label(directives))
 
     def watch_generation_preset(self, _preset: str) -> None:
         self._update_stats_text()
