@@ -14,7 +14,14 @@ from textual.worker import WorkerFailed
 from cyoa.core.events import EventBus, EventDispatchError, Events, bus
 from cyoa.core.models import Choice, ChoiceRequirement, StoryNode
 from cyoa.ui.app import CYOAApp
-from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, LoadGameScreen, TextPromptScreen
+from cyoa.ui.components import (
+    BranchScreen,
+    ConfirmScreen,
+    HelpScreen,
+    LoadGameScreen,
+    StartupChoiceScreen,
+    TextPromptScreen,
+)
 from cyoa.ui.mixins.navigation import NavigationMixin
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -1079,6 +1086,45 @@ async def test_autosave_payload_can_restore_last_session(mock_app_dependencies, 
         assert app2.turn_count == 2
         assert app2.engine is not None
         assert app2.engine.state.last_choice_text == "Go North"
+
+
+@pytest.mark.asyncio
+async def test_startup_offers_new_game_or_resume_when_autosave_exists(
+    mock_app_dependencies, tmp_path, monkeypatch
+):
+    from cyoa.core import constants
+
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        await pilot.press("1")
+        await _wait_for_pilot(pilot, lambda: app.turn_count == 2, timeout=5.0)
+        app.action_skip_typewriter()
+        autosave_path = tmp_path / "autosave_latest.json"
+        assert autosave_path.exists()
+
+    restarted = CYOAApp(model_path="dummy_path.gguf", allow_headless_startup_recovery=True)
+    async with restarted.run_test() as pilot3:
+        await _wait_for_pilot(
+            pilot3,
+            lambda: restarted.screen_stack[-1].__class__ is StartupChoiceScreen,
+            timeout=2.0,
+        )
+        restarted.pop_screen()
+        await pilot3.pause(0.1)
+        restarted._discard_autosave()
+        restarted.initialize_and_start(restarted.model_path)
+        await _wait_for_pilot(
+            pilot3,
+            lambda: restarted.turn_count == 1
+            and restarted.engine is not None
+            and restarted.engine.state.current_node is not None
+            and restarted.engine.state.current_node.narrative == "You awaken in a test dungeon.",
+            timeout=5.0,
+        )
+        assert not autosave_path.exists()
 
 
 @pytest.mark.asyncio

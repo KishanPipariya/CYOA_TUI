@@ -112,6 +112,7 @@ class CYOAApp(
         initial_world_state: dict[str, object] | None = None,
         initial_prompt_config: dict[str, object] | None = None,
         runtime_diagnostics: dict[str, str] | None = None,
+        allow_headless_startup_recovery: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -122,6 +123,7 @@ class CYOAApp(
         self._initial_world_state = initial_world_state or {}
         self._initial_prompt_config = initial_prompt_config or {}
         self._runtime_diagnostics = runtime_diagnostics or {}
+        self._allow_headless_startup_recovery = allow_headless_startup_recovery
 
         self.generator: ModelBroker | None = None
         self.engine: StoryEngine | None = None
@@ -203,7 +205,7 @@ class CYOAApp(
         self.show_loading()
         self._typewriter_worker()
         autosave_path = self._autosave_path()
-        if autosave_path is not None and not self.is_headless:
+        if autosave_path is not None and (not self.is_headless or self._allow_headless_startup_recovery):
             self._prompt_autosave_recovery(autosave_path)
         else:
             self._startup_timer = self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))

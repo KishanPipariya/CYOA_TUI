@@ -14,6 +14,7 @@ __all__ = [
     "HelpScreen",
     "LoadGameScreen",
     "OptionListScreen",
+    "StartupChoiceScreen",
     "TextPromptScreen",
     "JournalListItem",
     "SceneListItem",
@@ -411,6 +412,72 @@ class OptionListScreen(ModalScreen[str]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+class StartupChoiceScreen(ModalScreen[str]):
+    """Startup modal that lets the player resume or begin a fresh run."""
+
+    DEFAULT_CSS = """
+    StartupChoiceScreen {
+        align: center middle;
+        background: $background 80%;
+    }
+    #startup-dialog {
+        width: 64;
+        height: auto;
+        max-width: 90%;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #startup-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    #startup-message {
+        text-align: center;
+        margin-bottom: 1;
+    }
+    #startup-buttons {
+        align: center middle;
+        height: auto;
+    }
+    #startup-buttons Button {
+        width: auto;
+        min-width: 18;
+        margin: 0 1;
+    }
+    """
+
+    BINDINGS = [
+        ("r", "resume", "Resume"),
+        ("n", "new_game", "New Game"),
+    ]
+
+    def __init__(self, message: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._message = message
+
+    def compose(self) -> ComposeResult:
+        with Container(id="startup-dialog"):
+            yield Label("[b]Continue or Start Over[/b]", id="startup-title")
+            yield Label(self._message, id="startup-message")
+            with Horizontal(id="startup-buttons"):
+                yield Button("[b]R[/b]esume Previous Save", id="btn-startup-resume", variant="primary")
+                yield Button("[b]N[/b]ew Game", id="btn-startup-new", variant="success")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-startup-resume":
+            self.dismiss("resume")
+        elif event.button.id == "btn-startup-new":
+            self.dismiss("new")
+
+    def action_resume(self) -> None:
+        self.dismiss("resume")
+
+    def action_new_game(self) -> None:
+        self.dismiss("new")
 
 
 class TextPromptScreen(ModalScreen[str]):

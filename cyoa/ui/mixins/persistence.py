@@ -440,29 +440,36 @@ class PersistenceMixin:
             os.remove(path)
 
     def _prompt_autosave_recovery(self, autosave_path: str) -> None:
-        """Ask whether to restore a detected autosave before normal startup."""
+        """Offer startup choices when an autosave is available."""
+        app = as_textual_app(self)
+        def on_selected(selection: str | None) -> None:
+            self._handle_startup_recovery_choice(selection, autosave_path)
+
+        from cyoa.ui.components import StartupChoiceScreen
+
+        app.push_screen(
+            StartupChoiceScreen(
+                "A previous session was found.\n\nResume the saved adventure or start a new game."
+            ),
+            on_selected,
+        )
+
+    def _handle_startup_recovery_choice(self, selection: str | None, autosave_path: str) -> None:
+        """Dispatch the startup choice into restore or fresh-start flow."""
         app = as_textual_app(self)
         host = as_mixin_host(self)
         runtime = cast(Any, self)
 
-        def on_confirm(confirmed: bool | None) -> None:
-            if confirmed:
-                host._startup_timer = app.set_timer(0.1, lambda: self._restore_autosave_session(autosave_path))
-            else:
-                self._discard_autosave()
-                host._startup_timer = app.set_timer(
-                    0.1,
-                    lambda: runtime.initialize_and_start(host.model_path),
-                )
+        if selection == "resume":
+            host._startup_timer = app.set_timer(0.1, lambda: self._restore_autosave_session(autosave_path))
+        elif selection == "new":
+            self._discard_autosave()
+            host._startup_timer = app.set_timer(
+                0.1,
+                lambda: runtime.initialize_and_start(host.model_path),
+            )
 
-        from cyoa.ui.components import ConfirmScreen
-
-        app.push_screen(
-            ConfirmScreen("[b]Restore autosave?[/b]\n\nResume your last interrupted session or discard it."),
-            on_confirm,
-        )
-
-    async def _restore_autosave_session(self, autosave_path: str) -> None:
+    def _restore_autosave_session(self, autosave_path: str) -> None:
         """Initialize the app and then hydrate from the autosave."""
         host = as_mixin_host(self)
         cast(Any, self).initialize_and_start(host.model_path)
