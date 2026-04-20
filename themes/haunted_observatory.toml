@@ -32,3 +32,14 @@ status = "active"
 
 [npc_affinity]
 "Missing Astronomer" = 1
+
+[ui]
+main_surface = "#100d17"
+action_dock_surface = "#171222"
+side_panel_surface = "#181220"
+status_surface = "#1c1628"
+story_card_surface = "#1a1525"
+story_card_muted_surface = "#130f1c"
+player_choice_surface = "#251634"
+choice_surface = "#261b33"
+choice_locked_surface = "#16131b"

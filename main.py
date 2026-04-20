@@ -271,6 +271,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         starting_prompt = config.prompt
         spinner_frames = ["[-]", "[\\]", "[|]", "[/]"]
         accent_color = None
+        ui_theme = {}
         initial_world_state = {}
         initial_prompt_config = {}
     else:
@@ -279,6 +280,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             starting_prompt = theme.get("prompt", DEFAULT_STARTING_PROMPT)
             spinner_frames = theme.get("spinner_frames", ["[-]", "[\\]", "[|]", "[/]"])
             accent_color = theme.get("accent_color")
+            ui_theme = theme.get("ui", {})
             initial_world_state = {
                 "inventory": theme.get("opening_inventory", []),
                 "player_stats": theme.get("opening_stats", {}),
@@ -304,6 +306,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         starting_prompt=starting_prompt,
         spinner_frames=spinner_frames,
         accent_color=accent_color,
+        ui_theme=ui_theme,
         initial_world_state=initial_world_state,
         initial_prompt_config=initial_prompt_config,
         runtime_diagnostics={

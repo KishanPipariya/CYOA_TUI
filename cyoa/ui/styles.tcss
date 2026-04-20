@@ -156,9 +156,9 @@ Toast.-error {
 
 #journal-panel, #story-map-panel {
     width: 34;
-    border-left: solid $secondary 35%;
-    padding: 1 1 1 0;
-    background: $panel 45%;
+    border-left: solid $secondary 20%;
+    padding: 1;
+    background: $surface;
     overflow: hidden auto;
 }
 
@@ -175,30 +175,113 @@ Toast.-error {
 
 .compact-layout #journal-panel, .compact-layout #story-map-panel {
     width: 28;
-    padding-left: 0;
+    padding: 1 0 1 1;
 }
 
+.side-panel-shell {
+    width: 100%;
+    height: 1fr;
+    background: $panel 58%;
+    border: round $secondary 18%;
+    padding: 1;
+}
+
+.side-panel-journal {
+    border-top: wide $accent 45%;
+}
+
+.side-panel-map {
+    border-top: wide $primary 45%;
+}
+
+.side-panel-kicker {
+    width: 100%;
+    color: $text-muted;
+    text-align: center;
+    margin: 0 0 1 0;
+}
+
+.side-panel-body {
+    width: 100%;
+    height: 1fr;
+    background: $surface 70%;
+    border: solid $secondary 12%;
+    padding: 1;
+}
+
+.side-panel-section-title {
+    width: 100%;
+    color: $accent;
+    text-style: bold;
+    margin: 0 0 1 0;
+}
 
 #journal-title, #story-map-title {
     text-align: center;
     text-style: bold;
-    color: $primary;
+    color: $text;
+    background: $background 35%;
+    border: round $secondary 18%;
+    padding: 0 1;
     margin-bottom: 1;
 }
 
 #journal-list {
     height: 1fr;
     background: transparent;
+    border: none;
+}
+
+#journal-list > ListItem {
+    padding: 0 1;
+    margin: 0 0 1 0;
+    background: $panel 55%;
+    border-left: thick $secondary 28%;
+}
+
+#journal-list > ListItem.--highlight,
+#journal-list > ListItem:focus,
+#journal-list > ListItem:hover {
+    background: $accent 12%;
+    border-left: thick $accent 70%;
 }
 
 #journal-list Label {
     width: 100%;
     content-align: left middle;
+    color: $text;
 }
 
 #story-map-tree {
     height: 1fr;
     background: transparent;
+    border: none;
+    padding: 0;
+}
+
+#story-map-tree .tree--guides {
+    color: $secondary;
+}
+
+#story-map-tree .tree--label {
+    color: $text;
+}
+
+#story-map-tree .tree--cursor {
+    background: $accent 16%;
+    color: $text;
+    text-style: bold;
+}
+
+.compact-layout .side-panel-shell {
+    padding: 1 0 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+}
+
+.compact-layout .side-panel-body {
+    padding: 1 0 0 0;
 }
 
 /* ── Story Panel ───────────────────────────────────────────── */

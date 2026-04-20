@@ -142,6 +142,7 @@ class CYOAApp(
         starting_prompt: str = constants.DEFAULT_STARTING_PROMPT,
         spinner_frames: list[str] | None = None,
         accent_color: str | None = None,
+        ui_theme: dict[str, str] | None = None,
         initial_world_state: dict[str, object] | None = None,
         initial_prompt_config: dict[str, object] | None = None,
         runtime_diagnostics: dict[str, str] | None = None,
@@ -153,6 +154,7 @@ class CYOAApp(
         self.starting_prompt = starting_prompt
         self.spinner_frames = spinner_frames or ["[-]", "[\\]", "[|]", "[/]"]
         self._accent_color = accent_color
+        self._ui_theme = ui_theme or {}
         self._initial_world_state = initial_world_state or {}
         self._initial_prompt_config = initial_prompt_config or {}
         self._runtime_diagnostics = runtime_diagnostics or {}
@@ -220,6 +222,7 @@ class CYOAApp(
         self._set_compact_layout(self.size.width)
         self.query_one(StatusDisplay).generation_preset = "balanced"
         self._sync_runtime_status()
+        self.apply_ui_theme()
 
         self._subscribe_engine_events()
         self._typewriter_worker()

@@ -104,6 +104,34 @@ def _validate_opening_objectives(
     validated["opening_objectives"] = normalized_objectives
 
 
+def _validate_required_ui_theme(
+    theme: dict[str, Any],
+    source: str,
+    validated: dict[str, Any],
+) -> None:
+    ui_theme = theme.get("ui")
+    if ui_theme is None:
+        raise ThemeValidationError(f"{source}: ui must be an object.")
+    if not isinstance(ui_theme, dict):
+        raise ThemeValidationError(f"{source}: ui must be an object.")
+
+    required_fields = (
+        "main_surface",
+        "action_dock_surface",
+        "side_panel_surface",
+        "status_surface",
+        "story_card_surface",
+        "story_card_muted_surface",
+        "player_choice_surface",
+        "choice_surface",
+        "choice_locked_surface",
+    )
+    normalized: dict[str, str] = {}
+    for field in required_fields:
+        normalized[field] = _require_non_empty_string(ui_theme.get(field), field, source)
+    validated["ui"] = normalized
+
+
 def validate_theme(theme: dict[str, Any], theme_name: str) -> dict[str, Any]:
     """Validate and normalize a single theme payload."""
     source = f"Theme '{theme_name}'"
@@ -121,6 +149,7 @@ def validate_theme(theme: dict[str, Any], theme_name: str) -> dict[str, Any]:
     _validate_optional_string_lists(theme, source, validated)
     _validate_optional_mappings(theme, source, validated)
     _validate_opening_objectives(theme, source, validated)
+    _validate_required_ui_theme(theme, source, validated)
     return validated
 
 

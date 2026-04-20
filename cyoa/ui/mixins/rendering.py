@@ -128,6 +128,7 @@ class RenderingMixin:
         choices_container = app.query_one("#choices-container", Container)
         choices_container.remove_children()
         self._mount_choice_buttons(node, choices_container, is_error)
+        host.apply_ui_theme()
 
         # 7. Trigger speculation
         host.speculate_all_choices(node)
@@ -292,6 +293,7 @@ class RenderingMixin:
         host._current_turn_widget = new_turn
         host._current_turn_text = ""
         host._refresh_story_timeline_classes()
+        host.apply_ui_theme()
 
         self.show_loading(selected_button_id=selected_button_id)
 

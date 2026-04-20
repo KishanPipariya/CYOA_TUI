@@ -58,6 +58,17 @@ def test_validate_theme_rejects_empty_spinner_frames():
                 "prompt": "Start",
                 "accent_color": "blue",
                 "spinner_frames": [],
+                "ui": {
+                    "main_surface": "#111111",
+                    "action_dock_surface": "#111111",
+                    "side_panel_surface": "#111111",
+                    "status_surface": "#111111",
+                    "story_card_surface": "#111111",
+                    "story_card_muted_surface": "#111111",
+                    "player_choice_surface": "#111111",
+                    "choice_surface": "#111111",
+                    "choice_locked_surface": "#111111",
+                },
             },
             "broken",
         )
@@ -90,6 +101,16 @@ def test_validate_all_themes_rejects_invalid_themes_json(tmp_path, monkeypatch):
                 'accent_color = "blue"',
                 'spinner_frames = ["-", "|"]',
                 'prompt = "Start"',
+                '[ui]',
+                'main_surface = "#111111"',
+                'action_dock_surface = "#121212"',
+                'side_panel_surface = "#131313"',
+                'status_surface = "#141414"',
+                'story_card_surface = "#151515"',
+                'story_card_muted_surface = "#161616"',
+                'player_choice_surface = "#171717"',
+                'choice_surface = "#181818"',
+                'choice_locked_surface = "#191919"',
             ]
         ),
         encoding="utf-8",
@@ -127,6 +148,17 @@ def test_validate_theme_accepts_richer_content_bundle():
             "story_flags": ["met_ada"],
             "content_tags": ["sci_fi"],
             "persona": "Be precise.",
+            "ui": {
+                "main_surface": "#101820",
+                "action_dock_surface": "#111827",
+                "side_panel_surface": "#121a22",
+                "status_surface": "#13202a",
+                "story_card_surface": "#17232c",
+                "story_card_muted_surface": "#0f161d",
+                "player_choice_surface": "#1a2f3d",
+                "choice_surface": "#20303d",
+                "choice_locked_surface": "#16191d",
+            },
         },
         "bundle",
     )
@@ -134,3 +166,43 @@ def test_validate_theme_accepts_richer_content_bundle():
     assert theme["opening_stats"] == {"health": 90}
     assert theme["faction_reputation"] == {"Guild": 2}
     assert theme["opening_objectives"][0]["id"] == "obj"
+    assert theme["ui"]["choice_surface"] == "#20303d"
+
+
+def test_validate_theme_rejects_invalid_ui_bundle():
+    with pytest.raises(ThemeValidationError, match="ui must be an object"):
+        validate_theme(
+            {
+                "name": "Broken",
+                "description": "Bad UI bundle",
+                "prompt": "Start",
+                "accent_color": "blue",
+                "spinner_frames": ["-"],
+                "ui": "cyan",
+            },
+            "broken",
+        )
+
+
+def test_validate_theme_rejects_missing_required_ui_field():
+    with pytest.raises(ThemeValidationError, match="choice_locked_surface"):
+        validate_theme(
+            {
+                "name": "Broken",
+                "description": "Missing ui field",
+                "prompt": "Start",
+                "accent_color": "blue",
+                "spinner_frames": ["-"],
+                "ui": {
+                    "main_surface": "#101010",
+                    "action_dock_surface": "#111111",
+                    "side_panel_surface": "#121212",
+                    "status_surface": "#131313",
+                    "story_card_surface": "#141414",
+                    "story_card_muted_surface": "#151515",
+                    "player_choice_surface": "#161616",
+                    "choice_surface": "#171717",
+                },
+            },
+            "broken",
+        )

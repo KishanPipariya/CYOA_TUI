@@ -32,3 +32,14 @@ status = "active"
 
 [npc_affinity]
 "Wheelman Suri" = 1
+
+[ui]
+main_surface = "#0b1014"
+action_dock_surface = "#101922"
+side_panel_surface = "#10181d"
+status_surface = "#13202b"
+story_card_surface = "#121c24"
+story_card_muted_surface = "#0d1419"
+player_choice_surface = "#1d2d1b"
+choice_surface = "#1d2a18"
+choice_locked_surface = "#151816"

@@ -68,8 +68,17 @@ class DummyThemeHost(ThemeMixin):
         self.dark = True
         self.theme = "textual-dark"
         self.registered_theme_names: list[str] = []
+        self._ui_theme: dict[str, str] = {}
         self.container = MagicMock()
         self.spinner = MagicMock()
+        self.action_panel = MagicMock()
+        self.status_display = MagicMock()
+        self.side_panel = MagicMock()
+        self.story_turn = MagicMock()
+        self.archived_turn = MagicMock()
+        self.player_choice = MagicMock()
+        self.choice_card = MagicMock()
+        self.locked_choice = MagicMock()
 
     def register_theme(self, theme: Theme) -> None:
         self.registered_theme_names.append(theme.name)
@@ -77,9 +86,26 @@ class DummyThemeHost(ThemeMixin):
     def query_one(self, selector: str, *_args: object) -> object:
         if selector == "#main-container":
             return self.container
+        if selector == "#action-panel":
+            return self.action_panel
+        if selector == "#status-display":
+            return self.status_display
         if selector == "#loading":
             return self.spinner
         raise AssertionError(selector)
+
+    def query(self, selector: str) -> list[object]:
+        mapping = {
+            ".side-panel-shell": [self.side_panel],
+            ".story-turn.current-turn": [self.story_turn],
+            ".story-turn.archived-turn": [self.archived_turn],
+            ".player-choice": [self.player_choice],
+            "#choices-container .choice-card-available": [self.choice_card],
+            "#choices-container .choice-card-locked": [self.locked_choice],
+        }
+        if selector not in mapping:
+            raise AssertionError(selector)
+        return mapping[selector]
 
     def update(self, *_args: object, **_kwargs: object) -> None:
         return None
@@ -121,6 +147,9 @@ class DummyRenderingHost(RenderingMixin):
 
     def action_skip_typewriter(self) -> None:
         self._current_story = "old prefix\n\n---\n\nstale"
+
+    def apply_ui_theme(self) -> None:
+        return None
 
 
 class DummyChoiceContainer:
@@ -168,6 +197,9 @@ class DummyRenderingChoiceHost(RenderingMixin):
     def call_after_refresh(self, callback: object) -> None:
         self.pending_refresh_callbacks.append(callback)
 
+    def apply_ui_theme(self) -> None:
+        return None
+
 
 class DummyPersistenceHost:
     def __init__(self) -> None:
@@ -182,6 +214,9 @@ class DummyPersistenceHost:
         self._is_typing = True
         self._typewriter_active_chunk = ["a"]
         self._typewriter_queue: asyncio.Queue[str] = asyncio.Queue()
+
+    def apply_ui_theme(self) -> None:
+        return None
 
 
 class DummyPersistenceApp:
@@ -1022,6 +1057,33 @@ def test_theme_watch_mood_updates_container_spinner_and_theme(monkeypatch: pytes
     host.spinner.update.assert_called_once_with("{")
     assert "mood-heroic" in host.registered_theme_names
     assert host.theme == "mood-heroic"
+
+
+def test_apply_ui_theme_styles_primary_surfaces_and_dynamic_widgets() -> None:
+    host = DummyThemeHost()
+    host._ui_theme = {
+        "main_surface": "#101820",
+        "action_dock_surface": "#111827",
+        "status_surface": "#17212b",
+        "side_panel_surface": "#131a22",
+        "story_card_surface": "#18242d",
+        "story_card_muted_surface": "#0f161d",
+        "player_choice_surface": "#1b3140",
+        "choice_surface": "#213646",
+        "choice_locked_surface": "#15191d",
+    }
+
+    host.apply_ui_theme()
+
+    host.container.set_styles.assert_called_once_with("background: #101820;")
+    host.action_panel.set_styles.assert_called_once_with("background: #111827;")
+    host.status_display.set_styles.assert_called_once_with("background: #17212b;")
+    host.side_panel.set_styles.assert_called_once_with("background: #131a22;")
+    host.story_turn.set_styles.assert_called_once_with("background: #18242d;")
+    host.archived_turn.set_styles.assert_called_once_with("background: #0f161d;")
+    host.player_choice.set_styles.assert_called_once_with("background: #1b3140;")
+    host.choice_card.set_styles.assert_called_once_with("background: #213646;")
+    host.locked_choice.set_styles.assert_called_once_with("background: #15191d;")
 
 
 def test_rendering_show_loading_and_mount_choice_buttons_cover_states():

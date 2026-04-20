@@ -262,6 +262,7 @@ class NavigationMixin:
         host._current_turn_widget = new_turn
         host._current_turn_text = ""
         host._refresh_story_timeline_classes()
+        host.apply_ui_theme()
 
         host._scroll_to_bottom()
 

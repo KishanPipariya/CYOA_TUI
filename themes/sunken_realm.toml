@@ -32,3 +32,14 @@ status = "active"
 
 [npc_affinity]
 "Reef Guide Nara" = 2
+
+[ui]
+main_surface = "#07120f"
+action_dock_surface = "#0d1a18"
+side_panel_surface = "#0d1717"
+status_surface = "#11201f"
+story_card_surface = "#132220"
+story_card_muted_surface = "#0c1716"
+player_choice_surface = "#163126"
+choice_surface = "#173024"
+choice_locked_surface = "#111816"

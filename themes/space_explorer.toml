@@ -32,3 +32,14 @@ status = "active"
 
 [npc_affinity]
 "Shuttle AI" = 2
+
+[ui]
+main_surface = "#081018"
+action_dock_surface = "#0d1824"
+side_panel_surface = "#0d1720"
+status_surface = "#102030"
+story_card_surface = "#10202d"
+story_card_muted_surface = "#0b1620"
+player_choice_surface = "#133040"
+choice_surface = "#153140"
+choice_locked_surface = "#10181d"

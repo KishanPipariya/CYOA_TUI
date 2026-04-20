@@ -349,6 +349,7 @@ class PersistenceMixin:
                     action="restart",
                 )
             )
+        host.apply_ui_theme()
         self._restore_journal_and_panels(app, ui_state)
         story_map_panel = self._query_optional_container(app, "#story-map-panel")
         if story_map_panel is not None and not story_map_panel.has_class("panel-collapsed"):

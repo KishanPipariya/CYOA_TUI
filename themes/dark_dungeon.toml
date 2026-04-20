@@ -32,3 +32,14 @@ status = "active"
 
 [npc_affinity]
 "Unknown Prisoner" = 1
+
+[ui]
+main_surface = "#0b0d12"
+action_dock_surface = "#131722"
+side_panel_surface = "#141923"
+status_surface = "#171d29"
+story_card_surface = "#171b25"
+story_card_muted_surface = "#10141c"
+player_choice_surface = "#182232"
+choice_surface = "#1a2231"
+choice_locked_surface = "#14171d"

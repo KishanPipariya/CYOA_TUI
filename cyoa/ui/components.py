@@ -141,16 +141,24 @@ class JournalPanel(Container):
     """Organism for the in-game journal side panel."""
 
     def compose(self) -> ComposeResult:
-        yield Label("In-Game Journal", id="journal-title")
-        yield ListView(id="journal-list")
+        with Container(classes="side-panel-shell side-panel-journal"):
+            yield Label("In-Game Journal", id="journal-title")
+            yield Label("Recent decisions and fractures", classes="side-panel-kicker")
+            with Container(classes="side-panel-body"):
+                yield Label("Timeline Log", classes="side-panel-section-title")
+                yield ListView(id="journal-list")
 
 
 class StoryMapPanel(Container):
     """Organism for the branching story-map side panel."""
 
     def compose(self) -> ComposeResult:
-        yield Label("Story Map", id="story-map-title")
-        yield Tree("Story", id="story-map-tree")
+        with Container(classes="side-panel-shell side-panel-map"):
+            yield Label("Story Map", id="story-map-title")
+            yield Label("Branch structure and current route", classes="side-panel-kicker")
+            with Container(classes="side-panel-body"):
+                yield Label("Adventure Topology", classes="side-panel-section-title")
+                yield Tree("Story", id="story-map-tree")
 
 
 class MainGamePanel(Container):
