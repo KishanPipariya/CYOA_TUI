@@ -36,23 +36,24 @@ def format_directives_label(directives: list[str]) -> str:
 
 def format_stats_text(
     *,
-    health: int,
     gold: int,
     reputation: int,
+) -> str:
+    return f"🪙 Gold {gold}  •  🌟 Reputation {reputation}"
+
+
+def format_runtime_text(
+    *,
     generation_preset: str,
     engine_phase: str,
     provider_label: str,
     runtime_profile: str,
 ) -> str:
-    return (
-        f" ❤️ {health}% | 🪙 {gold} Gold | 🌟 {reputation} Rep"
-        f" | ⚙️ {generation_preset} | ⏱ {engine_phase}"
-        f" | 🖧 {provider_label} | ⛭ {runtime_profile}"
-    )
+    return f"⚙️ {generation_preset}  •  ⏱ {engine_phase}  •  🖧 {provider_label}  •  ⛭ {runtime_profile}"
 
 
 def build_choice_label(index: int, choice_text: str, disabled_reason: str | None = None) -> str:
-    label = f"[b]{index + 1}[/b]  {choice_text}"
+    label = f"[reverse]{index + 1}[/reverse]  {choice_text}"
     if disabled_reason:
         return f"{label} [dim](Locked: {disabled_reason})[/dim]"
     return label

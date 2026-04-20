@@ -158,8 +158,8 @@ async def test_app_startup_and_loading_state(mock_app_dependencies):
         inventory_text = str(inventory_label.render())
         assert "Broken Sword" in inventory_text
 
-        stats_text = app.query_one("#stats-text", Label).render().plain
-        assert "ready" in stats_text
+        runtime_text = app.query_one("#runtime-text", Label).render().plain
+        assert "ready" in runtime_text
 
 
 def test_event_bus_prevents_duplicate_subscriptions() -> None:
@@ -233,28 +233,29 @@ async def test_stats_display_reflects_player_stats(mock_app_dependencies):
         await pilot.pause(1.0)
         status_display = app.query_one("#status-display")
         stats_label = app.query_one("#stats-text", Label)
+        health_value = app.query_one("#health-value", Label)
 
         # Initial stats: Health 100 (high)
-        assert "100%" in str(stats_label.render())
+        assert "100%" in str(health_value.render())
         assert status_display.has_class("health-high")
 
         # Update stats to mid-health
         app.query_one("StatusDisplay").health = 50
         await pilot.pause(0.1) # Wait for reactive update
-        assert "50%" in str(stats_label.render())
+        assert "50%" in str(health_value.render())
         assert status_display.has_class("health-mid")
 
         # Update stats to low-health
         app.query_one("StatusDisplay").health = 20
         await pilot.pause(0.1)
-        assert "20%" in str(stats_label.render())
+        assert "20%" in str(health_value.render())
         assert status_display.has_class("health-low")
 
         # Update stats to dead
         app.query_one("StatusDisplay").health = 0
         await pilot.pause(0.1)
         # Use .plain to get the text without markup/formatting
-        rendered_text = stats_label.render().plain
+        rendered_text = health_value.render().plain
         assert "0%" in rendered_text
         assert status_display.has_class("health-low")
 
@@ -443,8 +444,8 @@ async def test_choice_selection_via_keyboard(mock_app_dependencies):
         # Verify stats updated (now in separate #stats-text label)
         stats_label = app.query_one("#stats-text", Label)
         stats_text = str(stats_label.render())
-        assert "90%" in stats_text
-        assert "50 Gold" in stats_text
+        assert "Gold 50" in stats_text
+        assert "Reputation" in stats_text
 
         # Verify journal updated
         journal_list = app.query_one("#journal-list", ListView)
@@ -1276,8 +1277,8 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
             assert app2._current_turn_text == "A unique story begins."
             story_turns = list(app2.query_one("#story-container").query(".story-turn"))
             assert len(story_turns) == 1
-            stats_label2_text = app2.query_one("#stats-text").render().plain
-            assert "88%" in stats_label2_text
+            health_value_text = app2.query_one("#health-value").render().plain
+            assert "88%" in health_value_text
 
 
 @pytest.mark.asyncio

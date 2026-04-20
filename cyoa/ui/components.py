@@ -24,6 +24,7 @@ from cyoa.ui.presenters import (
     format_directives_label,
     format_inventory_label,
     format_objectives_label,
+    format_runtime_text,
     format_save_display_name,
     format_stats_text,
 )
@@ -131,8 +132,9 @@ class ActionPanel(Container):
         self._spinner_frames = spinner_frames
 
     def compose(self) -> ComposeResult:
-        yield StatusBar(spinner_frames=self._spinner_frames, id="status-bar")
-        yield ChoicePanel(id="choices-container")
+        with Container(id="action-dock"):
+            yield StatusBar(spinner_frames=self._spinner_frames, id="status-bar")
+            yield ChoicePanel(id="choices-container")
 
 
 class JournalPanel(Container):
@@ -1052,7 +1054,7 @@ class TextPromptScreen(ModalScreen[str]):
         self.dismiss(None)
 
 class StatusDisplay(Static):
-    """A reactive status bar that displays player stats and inventory."""
+    """A reactive status area that groups player state and runtime metadata."""
 
     health = reactive(100)
     gold = reactive(0)
@@ -1069,13 +1071,17 @@ class StatusDisplay(Static):
         with Horizontal(id="stats-row"):
             yield Label("❤️ Health", id="health-label")
             yield ProgressBar(total=100, show_percentage=False, show_eta=False, id="health-bar")
+            yield Label("100%", id="health-value")
+        with Horizontal(id="status-meta-row"):
             yield Label("", id="stats-text")
+            yield Label("", id="runtime-text")
         yield Label("🎒 Inventory: Empty", id="inventory-label")
         yield Label("🎯 Objectives: None", id="objectives-label")
         yield Label("🧭 Directives: None", id="directives-label")
 
     def watch_health(self, health: int) -> None:
         self.query_one("#health-bar", ProgressBar).progress = health
+        self.query_one("#health-value", Label).update(f"{health}%")
         self._update_stats_text()
         self._set_health_class(health)
 
@@ -1092,16 +1098,26 @@ class StatusDisplay(Static):
         self.query_one("#objectives-label", Label).update(format_objectives_label(objectives))
 
     def _update_stats_text(self) -> None:
-        text = format_stats_text(
-            health=self.health,
-            gold=self.gold,
-            reputation=self.reputation,
-            generation_preset=self.generation_preset,
-            engine_phase=self.engine_phase,
-            provider_label=self.provider_label,
-            runtime_profile=self.runtime_profile,
+        self.query_one(
+            "#stats-text",
+            Label,
+        ).update(
+            format_stats_text(
+                gold=self.gold,
+                reputation=self.reputation,
+            )
         )
-        self.query_one("#stats-text", Label).update(text)
+        self.query_one(
+            "#runtime-text",
+            Label,
+        ).update(
+            format_runtime_text(
+                generation_preset=self.generation_preset,
+                engine_phase=self.engine_phase,
+                provider_label=self.provider_label,
+                runtime_profile=self.runtime_profile,
+            )
+        )
 
     def watch_directives(self, directives: list[str]) -> None:
         self.query_one("#directives-label", Label).update(format_directives_label(directives))

@@ -208,6 +208,8 @@ class RenderingMixin:
                 # Unique ID per mount to avoid collisions if previous buttons haven't fully unmounted
                 btn_id = f"choice-t{as_mixin_host(self).turn_count}-{uuid4().hex[:6]}-{i}"
                 btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="default")
+                btn.add_class("choice-card")
+                btn.add_class("choice-card-error")
                 choices_container.mount(btn)
         elif node.is_ending:
             end_btn = Button(
@@ -216,6 +218,8 @@ class RenderingMixin:
                 variant="success",
                 action="restart",
             )
+            end_btn.add_class("choice-card")
+            end_btn.add_class("choice-card-ending")
             choices_container.mount(end_btn)
         else:
             for i, choice in enumerate(node.choices):
@@ -228,9 +232,14 @@ class RenderingMixin:
                         host.engine.state.inventory,
                         host.engine.state.player_stats,
                         host.engine.state.story_flags,
-                    )
+                )
                 label = build_choice_label(i, choice.text, disabled_reason)
                 btn = Button(label, id=btn_id, variant="primary", disabled=disabled_reason is not None)
+                btn.add_class("choice-card")
+                if disabled_reason is None:
+                    btn.add_class("choice-card-available")
+                else:
+                    btn.add_class("choice-card-locked")
                 choices_container.mount(btn)
 
         self._focus_first_choice_button(choices_container)

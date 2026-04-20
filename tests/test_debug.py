@@ -31,5 +31,5 @@ async def test_debug_stats():
                 from cyoa.ui.components import StatusDisplay
                 app.query_one(StatusDisplay).health = 0
             await pilot.pause(0.1)
-            label = app.query_one("#stats-text")
+            label = app.query_one("#health-value")
             assert "0%" in label.render().plain

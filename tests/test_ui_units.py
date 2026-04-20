@@ -563,17 +563,23 @@ async def test_status_display_watchers_and_spinner_tick() -> None:
         display.reputation = 3
         display.inventory = ["Torch", "Key"]
         display.objectives = ["Escape", "Survive", "Ignore"]
+        display.directives = ["No combat", "Stay hidden", "Ignore"]
         display.generation_preset = "fast"
+        display.runtime_profile = "balanced-runtime-profile"
+        display.provider_label = "provider-with-a-very-long-name"
         display.engine_phase = "ready"
         display._update_stats_text()
         await pilot.pause(0.1)
 
         assert display.query_one("#health-bar", ProgressBar).progress == 25
-        assert "25%" in _render_text(display.query_one("#stats-text", Label))
-        assert "fast" in _render_text(display.query_one("#stats-text", Label))
-        assert "ready" in _render_text(display.query_one("#stats-text", Label))
+        assert "25%" in _render_text(display.query_one("#health-value", Label))
+        assert "Gold 9" in _render_text(display.query_one("#stats-text", Label))
+        assert "fast" in _render_text(display.query_one("#runtime-text", Label))
+        assert "ready" in _render_text(display.query_one("#runtime-text", Label))
+        assert "provider-with-a-very-long-name" in _render_text(display.query_one("#runtime-text", Label))
         assert "Torch, Key" in _render_text(display.query_one("#inventory-label", Label))
         assert "Escape | Survive" in _render_text(display.query_one("#objectives-label", Label))
+        assert "No combat | Stay hidden" in _render_text(display.query_one("#directives-label", Label))
         assert display.has_class("health-low")
 
     spinner_app = SpinnerHarness()
