@@ -49,20 +49,35 @@ The app can also persist story structure to Neo4j, keep lightweight memory with 
 
 - Python `3.13+`
 - `uv`
-- One of:
-  - a GGUF model for `llama_cpp`
-  - `LLM_PROVIDER=mock` for local development
+- Optional extras depending on what you want to use:
+  - base install: Textual app with `mock` mode
+  - `local-llm`: local GGUF inference and guided model download
+  - `graph`: Neo4j persistence
+  - `memory`: Chroma-backed memory retrieval
+  - `observability`: OpenTelemetry export
 
 ### Install
 
 ```bash
 uv sync
-cp .env.example .env
+```
+
+Install optional integrations only when you need them:
+
+```bash
+uv sync --extra local-llm
+uv sync --extra graph --extra memory --extra observability
+```
+
+Build tooling for standalone binaries is also optional:
+
+```bash
+uv sync --extra packaging
 ```
 
 ### Configure
 
-Set the provider in `.env`:
+Set the provider in `.env` if you want to force a specific backend:
 
 ```env
 LLM_PROVIDER=llama_cpp
@@ -77,25 +92,25 @@ Supported providers:
 ### Run
 
 ```bash
-uv run python main.py
+uv run cyoa-tui
 ```
 
 Fastest local demo path:
 
 ```bash
-LLM_PROVIDER=mock uv run python main.py --theme dark_dungeon
+LLM_PROVIDER=mock uv run cyoa-tui --theme dark_dungeon
 ```
 
 Preset-driven demo path:
 
 ```bash
-LLM_PROVIDER=mock uv run python main.py --runtime-preset mock-smoke
+LLM_PROVIDER=mock uv run cyoa-tui --runtime-preset mock-smoke
 ```
 
 Use a built-in theme:
 
 ```bash
-uv run python main.py --theme space_explorer
+uv run cyoa-tui --theme space_explorer
 ```
 
 Other built-in themes include `dark_dungeon`, `haunted_observatory`, `neon_heist`, and `sunken_realm`.
@@ -103,7 +118,7 @@ Other built-in themes include `dark_dungeon`, `haunted_observatory`, `neon_heist
 Override the opening prompt directly:
 
 ```bash
-LLM_PROVIDER=mock uv run python main.py --prompt "Start in a haunted observatory."
+LLM_PROVIDER=mock uv run cyoa-tui --prompt "Start in a haunted observatory."
 ```
 
 ## Demo Snapshot
@@ -182,13 +197,30 @@ If Neo4j or Chroma are unavailable, the app falls back gracefully instead of fai
 ## Development
 
 ```bash
-uv sync --group dev
+uv sync --extra all --group dev
 uv run python scripts/validate_themes.py
 bash scripts/run_smoke.sh
 uv run pytest -q
 uv run ruff check .
 uv run mypy cyoa
 ```
+
+## Packaged Builds
+
+Build a standalone terminal app for macOS or Linux with PyInstaller:
+
+```bash
+uv sync --extra packaging
+uv run python scripts/build_binary.py
+```
+
+The script emits an onedir build under `dist/pyinstaller/cyoa-tui/` and bundles:
+
+- `themes/`
+- `cyoa/llm/templates/`
+- `cyoa/ui/styles.tcss`
+
+The packaged entrypoint still uses normal user app-data directories for saves, logs, config, and downloaded models.
 
 ## Quality Summary
 

@@ -376,6 +376,24 @@ def test_setup_observability_returns_early_when_disabled(
 
     obs.setup_observability()
 
+
+def test_setup_observability_warns_when_optional_dependency_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    tracer_provider_factory = MagicMock()
+    meter_provider_factory = MagicMock()
+
+    monkeypatch.setenv("CYOA_ENABLE_OBSERVABILITY", "1")
+    monkeypatch.setattr(obs, "_OTEL_AVAILABLE", False)
+    monkeypatch.setattr(obs, "TracerProvider", tracer_provider_factory, raising=False)
+    monkeypatch.setattr(obs, "MeterProvider", meter_provider_factory, raising=False)
+
+    with caplog.at_level("WARNING"):
+        obs.setup_observability()
+
+    assert "Install the 'observability' extra" in caplog.text
+
     tracer_provider_factory.assert_not_called()
     meter_provider_factory.assert_not_called()
 

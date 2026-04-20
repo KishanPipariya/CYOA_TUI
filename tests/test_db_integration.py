@@ -52,6 +52,19 @@ def test_graph_db_is_disabled_by_default_for_consumer_startup(
     driver_factory.assert_not_called()
 
 
+def test_graph_db_warns_when_optional_dependency_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr("cyoa.db.graph_db._NEO4J_AVAILABLE", False)
+
+    with caplog.at_level("WARNING"):
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+
+    assert db.driver is None
+    assert "Install the 'graph' extra" in caplog.text
+
+
 def test_db_create_story_node_resolves_title_collisions(mock_neo4j):
     with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
         mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
@@ -76,7 +89,7 @@ def test_db_create_story_node_resolves_title_collisions(mock_neo4j):
 def test_db_create_scene_node(mock_neo4j):
     with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
         mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
-        db = CYOAGraphDB()
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
 
         # Mocking CREATE result
         mock_result = MagicMock()
@@ -94,7 +107,7 @@ def test_db_create_scene_node(mock_neo4j):
 def test_db_create_scene_node_with_mood(mock_neo4j):
     with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
         mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
-        db = CYOAGraphDB()
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
 
         # Mocking CREATE result
         mock_result = MagicMock()
@@ -115,7 +128,7 @@ def test_db_create_scene_node_with_mood(mock_neo4j):
 def test_db_create_choice_edge(mock_neo4j):
     with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
         mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
-        db = CYOAGraphDB()
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
 
         db.create_choice_edge("src-id", "dst-id", "Go North")
 

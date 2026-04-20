@@ -10,10 +10,38 @@ readme = "README.md"
 requires-python = ">=3.13"
 scripts = { cyoa-tui = "cyoa.cli:main" }
 dependencies = [
-    "chromadb>=1.5.5",
-    "huggingface-hub[cli]==0.24.6",
     "jinja2>=3.1.6",
     "jiter>=0.13.0",
+    "pydantic>=2.12.5",
+    "python-dotenv>=1.2.2",
+    "textual>=8.0.2",
+    "tiktoken>=0.12.0",
+]
+
+[project.optional-dependencies]
+local-llm = [
+    "huggingface-hub[cli]==0.24.6",
+    "llama-cpp-python>=0.3.16",
+]
+memory = [
+    "chromadb>=1.5.5",
+]
+graph = [
+    "neo4j>=6.1.0",
+]
+observability = [
+    "opentelemetry-api>=1.40.0",
+    "opentelemetry-exporter-otlp>=1.40.0",
+    "opentelemetry-instrumentation>=0.61b0",
+    "opentelemetry-sdk>=1.40.0",
+    "opentelemetry-semantic-conventions>=0.61b0",
+]
+packaging = [
+    "pyinstaller>=6.16.0",
+]
+all = [
+    "chromadb>=1.5.5",
+    "huggingface-hub[cli]==0.24.6",
     "llama-cpp-python>=0.3.16",
     "neo4j>=6.1.0",
     "opentelemetry-api>=1.40.0",
@@ -21,10 +49,6 @@ dependencies = [
     "opentelemetry-instrumentation>=0.61b0",
     "opentelemetry-sdk>=1.40.0",
     "opentelemetry-semantic-conventions>=0.61b0",
-    "pydantic>=2.12.5",
-    "python-dotenv>=1.2.2",
-    "textual>=8.0.2",
-    "tiktoken>=0.12.0",
 ]
 
 [dependency-groups]

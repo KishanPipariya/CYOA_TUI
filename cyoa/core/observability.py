@@ -2,19 +2,92 @@ import logging
 import os
 import socket
 import time
+from enum import Enum
 from types import TracebackType
 from typing import Self
 from urllib.parse import urlparse
 
-from opentelemetry import metrics, trace
-from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.trace import Span, Status, StatusCode
+try:
+    from opentelemetry import metrics, trace
+    from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.trace import Span, Status, StatusCode
+
+    _OTEL_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised via fallback behavior
+    _OTEL_AVAILABLE = False
+
+    class StatusCode(Enum):
+        ERROR = "ERROR"
+
+    class Status:
+        def __init__(self, status_code: StatusCode):
+            self.status_code = status_code
+
+    class Span:
+        def add_event(self, name: str, attributes: dict[str, object] | None = None) -> None:
+            del name, attributes
+
+        def record_exception(self, exc: BaseException) -> None:
+            del exc
+
+        def set_status(self, status: Status) -> None:
+            del status
+
+        def set_attribute(self, key: str, value: object) -> None:
+            del key, value
+
+        def end(self) -> None:
+            return None
+
+    class _NoopMetric:
+        def record(self, value: float, attributes: dict[str, str] | None = None) -> None:
+            del value, attributes
+
+        def add(self, value: int, attributes: dict[str, str] | None = None) -> None:
+            del value, attributes
+
+    class _NoopMeter:
+        def create_histogram(self, name: str, description: str, unit: str) -> _NoopMetric:
+            del name, description, unit
+            return _NoopMetric()
+
+        def create_counter(self, name: str, description: str) -> _NoopMetric:
+            del name, description
+            return _NoopMetric()
+
+    class _NoopTracer:
+        def start_span(self, name: str, attributes: dict[str, object]) -> Span:
+            del name, attributes
+            return Span()
+
+    class _NoopMetricsAPI:
+        @staticmethod
+        def get_meter(name: str) -> _NoopMeter:
+            del name
+            return _NoopMeter()
+
+        @staticmethod
+        def set_meter_provider(provider: object) -> None:
+            del provider
+
+    class _NoopTraceAPI:
+        @staticmethod
+        def get_tracer(name: str) -> _NoopTracer:
+            del name
+            return _NoopTracer()
+
+        @staticmethod
+        def set_tracer_provider(provider: object) -> None:
+            del provider
+
+    metrics = _NoopMetricsAPI()
+    trace = _NoopTraceAPI()
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +136,12 @@ def setup_observability() -> None:
     otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
     if not (_env_flag_enabled("CYOA_ENABLE_OBSERVABILITY") or otlp_endpoint):
         logger.debug("Observability integrations disabled for default startup.")
+        return
+    if not _OTEL_AVAILABLE:
+        logger.warning(
+            "Observability was requested, but OpenTelemetry dependencies are not installed. "
+            "Install the 'observability' extra to enable OTEL export."
+        )
         return
 
     resource = Resource.create({"service.name": SERVICE_NAME})

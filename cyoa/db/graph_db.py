@@ -4,8 +4,27 @@ import uuid
 from collections.abc import Iterable
 from typing import Any, TypedDict, cast
 
-from neo4j import GraphDatabase
-from neo4j.exceptions import AuthError, ServiceUnavailable
+try:
+    from neo4j import GraphDatabase
+    from neo4j.exceptions import AuthError, ServiceUnavailable
+
+    _NEO4J_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised via fallback behavior
+    _NEO4J_AVAILABLE = False
+
+    class AuthError(Exception):
+        """Fallback when the optional neo4j dependency is absent."""
+
+    class ServiceUnavailable(Exception):
+        """Fallback when the optional neo4j dependency is absent."""
+
+    class GraphDatabase:
+        @staticmethod
+        def driver(*args: Any, **kwargs: Any) -> Any:
+            del args, kwargs
+            raise RuntimeError(
+                "neo4j is not installed. Install the 'graph' extra to enable graph persistence."
+            )
 
 from cyoa.core.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
 from cyoa.core.constants import DEFAULT_NEO4J_URI
@@ -59,6 +78,12 @@ class CYOAGraphDB:
         self.cb: CircuitBreaker = CircuitBreaker("Neo4j", failure_threshold=3, reset_timeout=30.0)
 
         if not self.enabled:
+            return
+        if not _NEO4J_AVAILABLE:
+            logger.warning(
+                "Graph persistence was requested, but the neo4j package is not installed. "
+                "Install the 'graph' extra to enable Neo4j integration."
+            )
             return
 
         try:
