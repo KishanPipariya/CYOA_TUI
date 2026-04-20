@@ -4,7 +4,7 @@
    ═══════════════════════════════════════════════════════════ */
 
 Screen {
-    background: $surface;
+    background: $background;
 }
 
 /* ── Shared Dialog Shells ───────────────────────────────────── */
@@ -129,28 +129,30 @@ Toast.-error {
 /* ── Main Layout Containers ──────────────────────────────────── */
 #workspace {
     height: 1fr;
+    background: $background;
 }
 
 #main-container {
     width: 1fr;
     min-width: 64;
-    padding-right: 1;
+    padding: 1;
+    background: $surface;
 }
 
 #action-panel {
     height: auto;
     max-height: 40%;
-    border: solid $secondary;
-    margin: 0 1 1 1;
-    padding: 0 1 1 1;
-    background: $surface;
+    border-top: solid $secondary 35%;
+    margin: 1 0 0 0;
+    padding: 1 1 0 1;
+    background: $panel 80%;
 }
 
 #journal-panel, #story-map-panel {
     width: 34;
-    border-left: solid $secondary;
-    padding: 1;
-    background: $surface;
+    border-left: solid $secondary 35%;
+    padding: 1 1 1 0;
+    background: $panel 45%;
     overflow: hidden auto;
 }
 
@@ -162,11 +164,12 @@ Toast.-error {
 .compact-layout #main-container {
     width: 1fr;
     min-width: 0;
-    padding-right: 0;
+    padding: 1 0 0 0;
 }
 
 .compact-layout #journal-panel, .compact-layout #story-map-panel {
     width: 28;
+    padding-left: 0;
 }
 
 
@@ -195,24 +198,25 @@ Toast.-error {
 /* ── Story Panel ───────────────────────────────────────────── */
 #story-container {
     height: 1fr;
-    border: solid $secondary;
-    padding: 0 1 0 0;
-    margin: 1 1 0 1;
+    border: none;
+    padding: 1 1 0 1;
+    margin: 0;
+    background: $surface;
 }
 
 .story-turn {
     background: $panel;
-    padding: 1 1;
+    padding: 1 2;
     margin: 0 0 1 0;
-    border-left: solid $accent;
+    border-left: wide $accent 35%;
 }
 
 .player-choice {
-    background: $boost;
+    background: $boost 45%;
     color: $text-muted;
-    padding: 1 1;
-    margin: 0 0 1 2;
-    border-right: solid $secondary;
+    padding: 1 2;
+    margin: 0 0 1 4;
+    border-right: wide $accent 25%;
     text-align: right;
 }
 
@@ -231,14 +235,14 @@ Toast.-error {
     height: auto;
     padding: 0 0 1 0;
     margin: 0;
-    border-bottom: solid $secondary 40%;
+    border: none;
 }
 
 StatusDisplay {
     height: auto;
-    background: $boost 10%;
+    background: $surface 35%;
     border: none;
-    padding: 0;
+    padding: 0 1;
     margin: 0;
 }
 
@@ -299,6 +303,7 @@ ThemeSpinner {
     padding: 1 0 0 0;
     margin: 0;
     overflow-y: auto;
+    background: transparent;
 }
 
 /* ── Buttons ────────────────────────────────────────────────── */
@@ -436,4 +441,23 @@ Footer > .footer--highlight {
 .turn-highlight {
     border: tall $accent;
     background: $accent 15%;
+}
+
+.compact-layout #story-container {
+    padding: 1 0 0 0;
+}
+
+.compact-layout .story-turn {
+    padding: 1 1;
+}
+
+.compact-layout .player-choice {
+    margin-left: 2;
+    padding: 1 1;
+}
+
+.compact-layout #action-panel {
+    max-height: 45%;
+    padding-left: 0;
+    padding-right: 0;
 }

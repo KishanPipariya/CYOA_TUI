@@ -960,17 +960,17 @@ async def test_notifications_remain_fully_visible_on_small_terminals(mock_app_de
 
 
 @pytest.mark.asyncio
-async def test_story_container_has_default_continuous_border(mock_app_dependencies) -> None:
+async def test_story_container_defaults_to_borderless_surface(mock_app_dependencies) -> None:
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
         await pilot.pause(1.0)
 
         story = app.query_one("#story-container", VerticalScroll)
-        assert story.styles.border_top == ("solid", story.styles.border_top[1])
-        assert story.styles.border_right == ("solid", story.styles.border_right[1])
-        assert story.styles.border_bottom == ("solid", story.styles.border_bottom[1])
-        assert story.styles.border_left == ("solid", story.styles.border_left[1])
+        assert story.styles.border_top[0] == ""
+        assert story.styles.border_right[0] == ""
+        assert story.styles.border_bottom[0] == ""
+        assert story.styles.border_left[0] == ""
 
 
 @pytest.mark.asyncio

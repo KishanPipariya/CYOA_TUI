@@ -218,6 +218,7 @@ __marimo__/
 models/
 
 tasks.md
+UI_BEAUTIFICATION_PLAN_LOCAL.md
 REMAINING_PLAN.md
 
 # Secrets — never commit the actual .env, only .env.example
@@ -227,6 +228,7 @@ LLM_ARCHITECTURE_PROPOSAL.md
 UI_UX_IMPROVEMENTS.md
 ROADMAP_PROPOSALS.md
 Improvements.md
+UI_BEAUTIFICATION_PLAN_LOCAL.md
 codebase_analysis.md
 codebase_analysis_v2.md
 codebase_analysis_v3.md
