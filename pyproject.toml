@@ -1,9 +1,14 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "cyoa-tui"
 version = "0.1.0"
 description = "Terminal-first AI choose-your-own-adventure fiction with Textual and local LLM support."
 readme = "README.md"
 requires-python = ">=3.13"
+scripts = { cyoa-tui = "cyoa.cli:main" }
 dependencies = [
     "chromadb>=1.5.5",
     "huggingface-hub[cli]==0.24.6",
@@ -94,3 +99,9 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 check_untyped_defs = false
 warn_unused_ignores = false
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["cyoa*"]

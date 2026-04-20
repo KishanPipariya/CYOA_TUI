@@ -1,4 +1,5 @@
 import argparse
+import tomllib
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -287,3 +288,10 @@ def test_main_persists_resolved_user_config(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert exit_code == 0
     update_config.assert_called_once()
+
+
+def test_pyproject_registers_installed_cli_entrypoint() -> None:
+    with open("pyproject.toml", "rb") as handle:
+        pyproject = tomllib.load(handle)
+
+    assert pyproject["project"]["scripts"]["cyoa-tui"] == "cyoa.cli:main"

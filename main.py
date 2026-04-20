@@ -130,8 +130,8 @@ def _select_safe_default_provider(model: str | None) -> str:
 
 
 def validate_startup_config(args: argparse.Namespace) -> StartupConfig:
-    from cyoa.llm.broker import PRESETS
     from cyoa.core.user_config import load_user_config
+    from cyoa.llm.broker import PRESETS
 
     user_config = load_user_config()
     runtime_preset = (
@@ -162,7 +162,11 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:
 
     default_preset = str(runtime_defaults.get("generation_preset", "")).strip().lower() or None
     preset = (
-        (args.preset.strip().lower() if isinstance(args.preset, str) and args.preset.strip() else None)
+        (
+            args.preset.strip().lower()
+            if isinstance(args.preset, str) and args.preset.strip()
+            else None
+        )
         or os.getenv("LLM_PRESET")
         or user_config.preset
         or default_preset
@@ -299,8 +303,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "directives": theme.get("directives", []),
                 "persona": theme.get("persona"),
             }
-        except (FileNotFoundError, ThemeValidationError) as e:
-            print(f"Error: {e}", file=sys.stderr)
+        except (FileNotFoundError, ThemeValidationError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
             return 2
 
     # Initialize a global log listener
