@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from pathlib import Path
 import threading
 import time
 from collections.abc import Callable
@@ -40,12 +41,20 @@ from cyoa.core.preflight import (
     check_local_model_preflight,
     check_terminal_conditions,
 )
+from cyoa.core.support import reveal_in_file_manager, support_paths
 from cyoa.core.theme_loader import list_themes
-from cyoa.core.user_config import UserConfig, load_user_config, update_user_config
+from cyoa.core.user_config import (
+    UserConfig,
+    load_user_config,
+    reset_user_config,
+    update_user_config,
+)
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import is_rag_diagnostics_enabled
 from cyoa.llm.broker import ModelBroker
+from cyoa.llm.providers import LlamaCppProvider
 from cyoa.ui.components import (
+    ConfirmScreen,
     FirstRunSetupScreen,
     GameWorkspace,
     JournalListItem,
@@ -819,6 +828,9 @@ class CYOAApp(
         def on_saved(payload: dict[str, Any] | None) -> None:
             if not payload:
                 return
+            if "action" in payload:
+                self._handle_settings_action(str(payload["action"]))
+                return
             self._apply_settings(payload)
 
         self.push_screen(
@@ -834,6 +846,23 @@ class CYOAApp(
             ),
             on_saved,
         )
+
+    def _handle_settings_action(self, action: str) -> None:
+        if action == "test_backend":
+            self.run_worker(self._run_backend_connection_test(), exclusive=False, group="settings")
+            return
+        if action == "reveal_saves":
+            self._reveal_save_folder()
+            return
+        if action == "reset_settings":
+            self.push_screen(
+                ConfirmScreen("Reset saved settings to safe defaults?"),
+                self._confirm_settings_reset,
+            )
+
+    def _confirm_settings_reset(self, confirmed: bool) -> None:
+        if confirmed:
+            self._reset_settings_to_safe_defaults()
 
     def _apply_settings(self, payload: dict[str, Any]) -> None:
         """Persist settings and apply the runtime-safe subset immediately."""
@@ -887,6 +916,84 @@ class CYOAApp(
         if pending_changes:
             message = f"Settings saved. Restart to apply: {', '.join(pending_changes)}."
         self.notify(message, severity="information", timeout=4)
+
+    def _reset_settings_to_safe_defaults(self) -> None:
+        self._user_config = reset_user_config(preserve_setup=True)
+        os.environ.pop("CYOA_ENABLE_RAG", None)
+        os.environ.pop("LLM_MODEL_PATH", None)
+
+        self.dark = self._user_config.dark
+        self.typewriter_enabled = self._user_config.typewriter
+        self.typewriter_speed = self._user_config.typewriter_speed
+        self.notify(
+            "Settings reset. Restart to return to safe demo defaults.",
+            severity="information",
+            timeout=4,
+        )
+
+    def _reveal_save_folder(self) -> None:
+        revealed, path = reveal_in_file_manager(Path(support_paths()["saves_dir"]))
+        if revealed:
+            self.notify(f"Opened save folder: {path}", severity="information", timeout=4)
+            return
+        self.notify(
+            f"Save folder: {path}",
+            severity="information",
+            timeout=5,
+        )
+
+    async def _run_backend_connection_test(self) -> None:
+        config = self._user_config
+        provider = (config.provider or "mock").strip().lower()
+
+        if provider == "mock":
+            self.notify("Quick Demo backend is ready.", severity="information", timeout=4)
+            return
+
+        if provider != "llama_cpp":
+            self.notify(
+                f"Backend test is unavailable for provider '{provider}'.",
+                severity="warning",
+                timeout=4,
+            )
+            return
+
+        model_path = config.model_path
+        if not model_path:
+            self.notify(
+                "Local Model is selected, but no GGUF path is saved.",
+                severity="warning",
+                timeout=5,
+            )
+            return
+
+        if not os.path.exists(model_path):
+            self.notify(
+                f"Saved model path was not found: {model_path}",
+                severity="error",
+                timeout=5,
+            )
+            return
+
+        provider_instance: LlamaCppProvider | None = None
+        try:
+            provider_instance = await asyncio.to_thread(LlamaCppProvider, model_path)
+        except Exception as exc:
+            self.notify(
+                f"Local model check failed: {exc}",
+                severity="error",
+                timeout=5,
+            )
+            return
+        finally:
+            if provider_instance is not None:
+                provider_instance.close()
+
+        self.notify(
+            "Local model backend passed startup checks.",
+            severity="information",
+            timeout=4,
+        )
 
     def action_edit_directives(self) -> None:
         """Edit comma-separated player directives for the active run."""

@@ -68,6 +68,9 @@ Available settings include:
 - typewriter on or off
 - typewriter speed
 - diagnostics toggle
+- backend test
+- reveal save folder
+- reset settings to safe defaults
 
 Dark mode and typewriter changes apply immediately. Provider, model path, theme pack, and diagnostics apply after restart.
 
@@ -120,6 +123,16 @@ Resize the terminal. The UI reads best at `100x28` or larger.
 ### The model download option is blocked
 
 The preflight checks found a real constraint, usually low RAM or low disk space. Use `Quick Demo` for now or free space before trying again.
+
+### The app crashed during startup
+
+The app writes a crash log with support breadcrumbs to your normal logs folder:
+
+- macOS: `~/Library/Logs/cyoa-tui/last_crash.log`
+- Linux: `~/.local/state/cyoa-tui/last_crash.log`
+- Windows: `%LOCALAPPDATA%\\cyoa-tui\\Logs\\last_crash.log`
+
+Open Settings and use `Reveal Saves` if you need to inspect your files manually, or `Reset Settings` to go back to safe demo defaults.
 
 ### I want the advanced stack
 

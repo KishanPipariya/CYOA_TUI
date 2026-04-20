@@ -1,4 +1,5 @@
 import argparse
+import io
 import tomllib
 from unittest.mock import MagicMock, patch
 
@@ -257,6 +258,34 @@ def test_main_bootstraps_user_directories(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert exit_code == 0
     ensure_dirs.assert_called_once_with()
+
+
+def test_main_writes_crash_log_for_unexpected_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    logger_service = MagicMock()
+    app = MagicMock()
+    app.run.side_effect = RuntimeError("startup exploded")
+    stderr = io.StringIO()
+
+    with (
+        patch("sys.stderr", stderr),
+        patch("cyoa.core.constants.ensure_user_directories"),
+        patch("cyoa.core.observability.setup_observability"),
+        patch("cyoa.core.theme_loader.list_themes", return_value=["dark_dungeon"]),
+        patch(
+            "cyoa.core.theme_loader.load_theme",
+            return_value={"prompt": "Start", "spinner_frames": ["-"], "accent_color": None},
+        ),
+        patch("cyoa.core.support.write_crash_log", return_value="/tmp/last_crash.log") as write_crash_log,
+        patch("cyoa.db.story_logger.StoryLogger", return_value=logger_service),
+        patch("cyoa.ui.app.CYOAApp", return_value=app),
+    ):
+        exit_code = main.main([])
+
+    assert exit_code == 1
+    assert "Unexpected startup failure. Details were written to /tmp/last_crash.log" in stderr.getvalue()
+    write_crash_log.assert_called_once()
+    logger_service.close.assert_called_once_with()
 
 
 def test_main_persists_resolved_user_config(monkeypatch: pytest.MonkeyPatch) -> None:

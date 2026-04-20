@@ -892,6 +892,17 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 classes="settings-value",
             )
 
+            yield Label("Recovery & Support", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Test Backend", id="btn-settings-test-backend")
+                yield Button("Reveal Saves", id="btn-settings-reveal-saves")
+            with Horizontal(classes="settings-row"):
+                yield Button("Reset Settings", id="btn-settings-reset", variant="warning")
+            yield Label(
+                "Use these tools to verify your configured backend, open the save folder, or return to safe defaults.",
+                classes="settings-value",
+            )
+
             with DialogActions(id="settings-actions", classes="dialog-actions"):
                 yield Button("Save", id="btn-settings-save", variant="primary")
                 yield Button("Cancel", id="btn-settings-cancel", variant="error")
@@ -949,6 +960,15 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             return
         if button_id == "btn-settings-cancel":
             self.dismiss(None)
+            return
+        if button_id == "btn-settings-test-backend":
+            self.dismiss({"action": "test_backend"})
+            return
+        if button_id == "btn-settings-reveal-saves":
+            self.dismiss({"action": "reveal_saves"})
+            return
+        if button_id == "btn-settings-reset":
+            self.dismiss({"action": "reset_settings"})
             return
         if button_id == "btn-settings-provider-mock":
             self._provider = "mock"

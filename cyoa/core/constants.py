@@ -144,6 +144,7 @@ CONFIG_FILE = str(get_user_config_dir() / "config.json")
 SAVES_DIR = str(get_user_data_dir() / "saves")
 MODELS_DIR = str(get_user_data_dir() / "models")
 STORY_LOG_FILE = str(get_user_state_dir() / "story.md")
+CRASH_LOG_FILE = str(get_user_state_dir() / "last_crash.log")
 
 # Error marker used to detect fallback nodes from LLM failures
 ERROR_NARRATIVE_PREFIX = "The universe encounters an anomaly"

@@ -146,3 +146,13 @@ def update_user_config(**changes: Any) -> UserConfig:
             config.extras[key] = value
     save_user_config(config)
     return config
+
+
+def reset_user_config(*, preserve_setup: bool = True) -> UserConfig:
+    current = load_user_config()
+    reset = UserConfig()
+    if preserve_setup:
+        reset.setup_completed = current.setup_completed
+        reset.setup_choice = current.setup_choice
+    save_user_config(reset)
+    return reset

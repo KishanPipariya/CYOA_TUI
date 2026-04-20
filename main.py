@@ -233,6 +233,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Import after .env loading because graph_db reads env at import time.
     from cyoa.core.constants import DEFAULT_STARTING_PROMPT, STORY_LOG_FILE, ensure_user_directories
     from cyoa.core.observability import setup_observability
+    from cyoa.core.support import write_crash_log
     from cyoa.core.theme_loader import ThemeValidationError, list_themes, load_theme
     from cyoa.core.user_config import update_user_config
     from cyoa.db.story_logger import StoryLogger
@@ -317,6 +318,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         app.run()
     except KeyboardInterrupt:
         return 130
+    except Exception as exc:
+        crash_log_path = write_crash_log(
+            exc,
+            resolved_config={
+                "provider": config.provider,
+                "model": config.model,
+                "theme": config.theme,
+                "preset": config.preset,
+                "runtime_preset": config.runtime_preset,
+            },
+            runtime_diagnostics=dict(app._runtime_diagnostics),
+        )
+        print(
+            f"Unexpected startup failure. Details were written to {crash_log_path}",
+            file=sys.stderr,
+        )
+        return 1
     finally:
         logger_service.close()
     return 0

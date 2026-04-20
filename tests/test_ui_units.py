@@ -709,6 +709,30 @@ def test_settings_screen_dismisses_saved_payload():
     }
 
 
+def test_settings_screen_support_actions_dismiss_expected_payloads():
+    settings = SettingsScreen(
+        provider="mock",
+        model_path="",
+        theme="dark_dungeon",
+        dark=True,
+        typewriter=True,
+        typewriter_speed="normal",
+        diagnostics_enabled=False,
+        available_themes=["dark_dungeon"],
+    )
+    settings.dismiss = MagicMock()
+
+    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-test-backend")))
+    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-reveal-saves")))
+    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-reset")))
+
+    assert settings.dismiss.call_args_list == [
+        call({"action": "test_backend"}),
+        call({"action": "reveal_saves"}),
+        call({"action": "reset_settings"}),
+    ]
+
+
 def test_cyoa_app_first_run_selection_updates_runtime_and_config(monkeypatch: pytest.MonkeyPatch):
     app = CYOAApp(model_path="")
     saved: dict[str, object] = {}
@@ -826,6 +850,68 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
             os.environ.pop("CYOA_ENABLE_RAG", None)
         else:
             os.environ["CYOA_ENABLE_RAG"] = previous_env
+
+
+def test_cyoa_app_handle_settings_action_routes_requests() -> None:
+    app = CYOAApp(model_path="")
+    app.run_worker = MagicMock(side_effect=lambda coro, **_kwargs: coro.close())
+    app._reveal_save_folder = MagicMock()
+    app.push_screen = MagicMock()
+
+    app._handle_settings_action("test_backend")
+    app._handle_settings_action("reveal_saves")
+    app._handle_settings_action("reset_settings")
+
+    app.run_worker.assert_called_once()
+    app._reveal_save_folder.assert_called_once_with()
+    app.push_screen.assert_called_once()
+
+
+def test_cyoa_app_reset_settings_restores_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = CYOAApp(model_path="/tmp/current.gguf")
+    app.notify = MagicMock()
+    app._user_config = SimpleNamespace(dark=False, typewriter=False, typewriter_speed="fast")
+    monkeypatch.setenv("CYOA_ENABLE_RAG", "1")
+    monkeypatch.setenv("LLM_MODEL_PATH", "/tmp/current.gguf")
+    monkeypatch.setattr(
+        "cyoa.ui.app.reset_user_config",
+        lambda preserve_setup=True: SimpleNamespace(
+            dark=True,
+            typewriter=True,
+            typewriter_speed="normal",
+        ),
+    )
+
+    app._reset_settings_to_safe_defaults()
+
+    assert app.dark is True
+    assert app.typewriter_enabled is True
+    assert app.typewriter_speed == "normal"
+    assert "CYOA_ENABLE_RAG" not in os.environ
+    assert "LLM_MODEL_PATH" not in os.environ
+    app.notify.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cyoa_app_backend_test_reports_missing_model_path() -> None:
+    app = CYOAApp(model_path="")
+    app.notify = MagicMock()
+    app._user_config = SimpleNamespace(provider="llama_cpp", model_path=None)
+
+    await app._run_backend_connection_test()
+
+    assert "no GGUF path is saved" in app.notify.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_cyoa_app_backend_test_reports_success_for_mock() -> None:
+    app = CYOAApp(model_path="")
+    app.notify = MagicMock()
+    app._user_config = SimpleNamespace(provider="mock", model_path=None)
+
+    await app._run_backend_connection_test()
+
+    assert app.notify.call_args.args[0] == "Quick Demo backend is ready."
 
 
 class ModelDownloadHarness(App[None]):

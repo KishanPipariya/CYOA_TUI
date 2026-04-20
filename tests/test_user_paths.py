@@ -21,6 +21,7 @@ def test_linux_user_paths_follow_xdg(monkeypatch) -> None:
         assert Path(constants_module.CONFIG_FILE) == Path("/tmp/test-config/cyoa-tui/config.json")
         assert Path(constants_module.SAVES_DIR) == Path("/tmp/test-data/cyoa-tui/saves")
         assert Path(constants_module.STORY_LOG_FILE) == Path("/tmp/test-state/cyoa-tui/story.md")
+        assert Path(constants_module.CRASH_LOG_FILE) == Path("/tmp/test-state/cyoa-tui/last_crash.log")
 
     importlib.reload(constants_module)
 
