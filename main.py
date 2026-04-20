@@ -129,7 +129,7 @@ def _select_safe_default_provider(model: str | None) -> str:
     return "mock"
 
 
-def validate_startup_config(args: argparse.Namespace) -> StartupConfig:
+def validate_startup_config(args: argparse.Namespace) -> StartupConfig:  # noqa: C901
     from cyoa.core.user_config import load_user_config
     from cyoa.llm.broker import PRESETS
 

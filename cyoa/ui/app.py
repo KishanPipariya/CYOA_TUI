@@ -6,7 +6,7 @@ import socket
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, cast
 from urllib.parse import urlparse
 
 from textual import work
@@ -30,8 +30,8 @@ from cyoa.core.engine import StoryEngine
 from cyoa.core.events import Events, bus
 from cyoa.core.models import StoryNode
 from cyoa.core.user_config import UserConfig, load_user_config, update_user_config
-from cyoa.db.rag_memory import is_rag_diagnostics_enabled
 from cyoa.db.graph_db import CYOAGraphDB
+from cyoa.db.rag_memory import is_rag_diagnostics_enabled
 from cyoa.llm.broker import ModelBroker
 from cyoa.ui.components import (
     FirstRunSetupScreen,
@@ -199,6 +199,10 @@ class CYOAApp(
         self._subscribe_engine_events()
         self._typewriter_worker()
         if self._first_run_setup_pending:
+            if self.is_headless:
+                self._apply_first_run_selection("mock")
+                self._resume_startup_flow()
+                return
             self._present_first_run_setup()
             return
         self._resume_startup_flow()
@@ -506,8 +510,8 @@ class CYOAApp(
 
     def _present_first_run_setup(self) -> None:
         def on_selected(selection: str | None) -> None:
-            if selection in {"mock", "ollama"}:
-                self._apply_first_run_selection(selection)
+            if selection == "mock" or selection == "ollama":
+                self._apply_first_run_selection(cast(Literal["mock", "ollama"], selection))
                 self._resume_startup_flow()
 
         self.push_screen(FirstRunSetupScreen(ollama_available=self._ollama_available), on_selected)

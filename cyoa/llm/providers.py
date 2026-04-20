@@ -10,12 +10,16 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 import httpx
-try:
-    from llama_cpp import Llama
-except ImportError:  # pragma: no cover - covered via constructor behavior
-    Llama = None
 
 from cyoa.core.observability import LLMObservedSession
+
+llama_cpp: Any | None
+try:
+    import llama_cpp
+except ImportError:  # pragma: no cover - covered via constructor behavior
+    llama_cpp = None
+
+Llama: Any | None = getattr(llama_cpp, "Llama", None) if llama_cpp is not None else None
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +142,7 @@ class LlamaCppProvider(LLMProvider):
             )
         cpu_threads = max(1, (os.cpu_count() or 8) // 2)
         self.model_path = model_path
-        self.llm = Llama(
+        self.llm = cast(Any, Llama)(
             model_path=model_path,
             n_ctx=n_ctx,
             n_threads=cpu_threads,

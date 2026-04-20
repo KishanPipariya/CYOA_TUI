@@ -22,6 +22,7 @@ from cyoa.ui.mixins.contracts import (
 
 logger = logging.getLogger(__name__)
 
+
 class PersistenceMixin:
     """Mixin for save/load game persistence."""
 
@@ -402,9 +403,12 @@ class PersistenceMixin:
     @staticmethod
     def _write_json_payload(path: str, payload: dict[str, object]) -> None:
         """Persist a JSON payload to disk."""
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, ensure_ascii=False)
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+        except OSError as exc:
+            logger.warning("Unable to write persistence payload to %s: %s", path, exc)
 
     def _sync_prompt_status(self, host: object, app: object) -> None:
         """Keep the status bar aligned with current prompt directives."""
@@ -431,7 +435,6 @@ class PersistenceMixin:
             return
 
         mixin_host.action_skip_typewriter()
-        os.makedirs(constants.SAVES_DIR, exist_ok=True)
         payload = self._build_save_payload(host, app)
         payload["autosave"] = True
         self._write_json_payload(self._autosave_file_path(), payload)
@@ -445,7 +448,10 @@ class PersistenceMixin:
         """Delete the current autosave file when the user rejects recovery."""
         path = self._autosave_file_path()
         if os.path.exists(path):
-            os.remove(path)
+            try:
+                os.remove(path)
+            except OSError as exc:
+                logger.warning("Unable to remove autosave %s: %s", path, exc)
 
     def _prompt_autosave_recovery(self, autosave_path: str) -> None:
         """Offer startup choices when an autosave is available."""

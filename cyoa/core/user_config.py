@@ -1,9 +1,12 @@
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from cyoa.core.constants import CONFIG_FILE
+
+logger = logging.getLogger(__name__)
 
 
 USER_CONFIG_VERSION = 1
@@ -113,14 +116,18 @@ def load_user_config() -> UserConfig:
     try:
         with open(CONFIG_FILE, encoding="utf-8") as f:
             return UserConfig.from_dict(json.load(f))
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+        logger.debug("Falling back to default user config from %s: %s", CONFIG_FILE, exc)
         return UserConfig()
 
 
 def save_user_config(config: UserConfig) -> None:
-    Path(CONFIG_FILE).parent.mkdir(parents=True, exist_ok=True)
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(config.to_dict(), f, indent=2, ensure_ascii=False)
+    try:
+        Path(CONFIG_FILE).parent.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config.to_dict(), f, indent=2, ensure_ascii=False)
+    except OSError as exc:
+        logger.warning("Unable to persist user config to %s: %s", CONFIG_FILE, exc)
 
 
 def update_user_config(**changes: Any) -> UserConfig:

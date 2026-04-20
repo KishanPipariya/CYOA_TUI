@@ -6,7 +6,6 @@ import os
 import sys
 from pathlib import Path
 
-
 APP_NAME = "cyoa-tui"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -18,6 +17,11 @@ def _platform_home() -> Path:
     return Path.home()
 
 
+def _current_platform() -> str:
+    """Return the active platform name without letting type checkers constant-fold it."""
+    return os.environ.get("CYOA_PLATFORM", sys.platform)
+
+
 def get_user_config_dir() -> Path:
     """Return the platform-appropriate directory for durable user config."""
     override = os.environ.get("CYOA_CONFIG_DIR")
@@ -25,9 +29,10 @@ def get_user_config_dir() -> Path:
         return Path(override).expanduser()
 
     home = _platform_home()
-    if sys.platform == "darwin":
+    platform_name = _current_platform()
+    if platform_name == "darwin":
         return home / "Library" / "Application Support" / APP_NAME
-    if sys.platform == "win32":
+    if platform_name == "win32":
         appdata = os.environ.get("APPDATA")
         if appdata:
             return Path(appdata) / APP_NAME
@@ -46,9 +51,10 @@ def get_user_data_dir() -> Path:
         return Path(override).expanduser()
 
     home = _platform_home()
-    if sys.platform == "darwin":
+    platform_name = _current_platform()
+    if platform_name == "darwin":
         return home / "Library" / "Application Support" / APP_NAME
-    if sys.platform == "win32":
+    if platform_name == "win32":
         local_appdata = os.environ.get("LOCALAPPDATA")
         if local_appdata:
             return Path(local_appdata) / APP_NAME
@@ -67,9 +73,10 @@ def get_user_state_dir() -> Path:
         return Path(override).expanduser()
 
     home = _platform_home()
-    if sys.platform == "darwin":
+    platform_name = _current_platform()
+    if platform_name == "darwin":
         return home / "Library" / "Logs" / APP_NAME
-    if sys.platform == "win32":
+    if platform_name == "win32":
         local_appdata = os.environ.get("LOCALAPPDATA")
         if local_appdata:
             return Path(local_appdata) / APP_NAME / "Logs"

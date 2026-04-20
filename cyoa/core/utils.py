@@ -1,11 +1,11 @@
-from typing import Any, cast
+from typing import Any
 
 from cyoa.core.user_config import load_user_config, save_user_config
 
 
 def load_config() -> dict[str, Any]:
     """Load UI preferences from the durable user config."""
-    return cast(dict[str, Any], load_user_config().to_ui_preferences())
+    return load_user_config().to_ui_preferences()
 
 
 def save_config(data: dict[str, Any]) -> None:
