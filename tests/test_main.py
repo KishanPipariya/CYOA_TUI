@@ -40,15 +40,13 @@ def test_validate_startup_config_requires_existing_model_file(
         main.validate_startup_config(_args(model="missing.gguf"))
 
 
-def test_validate_startup_config_allows_ollama_without_model(
+def test_validate_startup_config_rejects_ollama_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
 
-    config = main.validate_startup_config(_args())
-
-    assert config.provider == "ollama"
-    assert config.model is None
+    with pytest.raises(main.StartupConfigError, match="Unsupported LLM_PROVIDER"):
+        main.validate_startup_config(_args())
 
 
 def test_validate_startup_config_rejects_invalid_numeric_env(
@@ -116,24 +114,10 @@ def test_validate_startup_config_defaults_to_mock_when_no_provider_is_available(
 ) -> None:
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.delenv("LLM_MODEL_PATH", raising=False)
-    monkeypatch.setattr(main, "_is_ollama_detected", lambda: False)
     with patch("cyoa.core.user_config.load_user_config", return_value=UserConfig()):
         config = main.validate_startup_config(_args())
 
     assert config.provider == "mock"
-    assert config.model is None
-
-
-def test_validate_startup_config_defaults_to_ollama_when_detected(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("LLM_PROVIDER", raising=False)
-    monkeypatch.delenv("LLM_MODEL_PATH", raising=False)
-    monkeypatch.setattr(main, "_is_ollama_detected", lambda: True)
-    with patch("cyoa.core.user_config.load_user_config", return_value=UserConfig()):
-        config = main.validate_startup_config(_args())
-
-    assert config.provider == "ollama"
     assert config.model is None
 
 
@@ -143,7 +127,6 @@ def test_validate_startup_config_falls_back_from_saved_llama_cpp_to_mock(
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.delenv("LLM_PRESET", raising=False)
     monkeypatch.delenv("LLM_MODEL_PATH", raising=False)
-    monkeypatch.setattr(main, "_is_ollama_detected", lambda: False)
 
     with patch(
         "cyoa.core.user_config.load_user_config",
@@ -163,11 +146,11 @@ def test_validate_startup_config_uses_saved_user_config_defaults(
     monkeypatch.delenv("LLM_MODEL_PATH", raising=False)
     with patch(
         "cyoa.core.user_config.load_user_config",
-        return_value=UserConfig(provider="ollama", theme="space_explorer", preset="balanced"),
+        return_value=UserConfig(provider="mock", theme="space_explorer", preset="balanced"),
     ):
         config = main.validate_startup_config(_args(theme=None, preset=None, runtime_preset=None))
 
-    assert config.provider == "ollama"
+    assert config.provider == "mock"
     assert config.theme == "space_explorer"
     assert config.preset == "balanced"
 

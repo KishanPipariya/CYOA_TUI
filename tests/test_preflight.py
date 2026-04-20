@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from cyoa.core.preflight import (
     DISK_HEADROOM_GB,
     check_local_model_preflight,
-    check_ollama_preflight,
     check_terminal_conditions,
 )
 
@@ -21,18 +20,6 @@ def test_terminal_preflight_blocks_dumb_term() -> None:
 
     assert report.has_blocking_issues is True
     assert "modern terminal emulator" in (report.blocking_reason or "")
-
-
-def test_ollama_preflight_blocks_when_unavailable() -> None:
-    report = check_ollama_preflight(
-        ollama_available=False,
-        width=120,
-        height=40,
-        term="xterm-256color",
-    )
-
-    assert report.has_blocking_issues is True
-    assert "Ollama was not detected" in (report.blocking_reason or "")
 
 
 def test_local_model_preflight_blocks_for_low_disk(monkeypatch) -> None:

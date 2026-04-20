@@ -274,15 +274,11 @@ class FirstRunScreenHarness(App[None]):
     def __init__(
         self,
         *,
-        ollama_available: bool,
         general_notes: tuple[str, ...] = (),
-        ollama_note_override: str | None = None,
     ) -> None:
         super().__init__()
         self.screen_ref = FirstRunSetupScreen(
-            ollama_available=ollama_available,
             general_notes=general_notes,
-            ollama_note_override=ollama_note_override,
         )
 
     def compose(self) -> ComposeResult:
@@ -514,30 +510,25 @@ async def test_load_game_screen_mount_formats_save_names_and_selection_dismisses
 
 
 @pytest.mark.asyncio
-async def test_first_run_screen_disables_ollama_when_not_available() -> None:
-    app = FirstRunScreenHarness(ollama_available=False)
+async def test_first_run_screen_exposes_mock_and_download_actions() -> None:
+    app = FirstRunScreenHarness()
 
     async with app.run_test() as pilot:
         await pilot.pause(0.1)
-        ollama_button = app.screen.query_one("#btn-first-run-ollama", Button)
+        mock_button = app.screen.query_one("#btn-first-run-mock", Button)
         download_button = app.screen.query_one("#btn-first-run-download", Button)
-        assert ollama_button.disabled is True
+        assert mock_button.disabled is False
         assert download_button.disabled is False
 
 
 @pytest.mark.asyncio
-async def test_first_run_screen_renders_general_and_ollama_preflight_notes() -> None:
-    app = FirstRunScreenHarness(
-        ollama_available=False,
-        general_notes=("Resize the terminal if panels feel cramped.",),
-        ollama_note_override="Ollama was not detected on this machine.",
-    )
+async def test_first_run_screen_renders_general_notes() -> None:
+    app = FirstRunScreenHarness(general_notes=("Resize the terminal if panels feel cramped.",))
 
     async with app.run_test() as pilot:
         await pilot.pause(0.1)
         labels = [label.render().plain for label in app.screen.query(Label)]
         assert any("Resize the terminal" in text for text in labels)
-        assert any("Ollama was not detected" in text for text in labels)
 
 
 @pytest.mark.asyncio
@@ -647,21 +638,17 @@ def test_startup_choice_screen_dismisses_expected_values():
 
 
 def test_first_run_setup_screen_dismisses_expected_values():
-    first_run = FirstRunSetupScreen(ollama_available=True)
+    first_run = FirstRunSetupScreen()
     first_run.dismiss = MagicMock()
     first_run.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-first-run-mock")))
-    first_run.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-first-run-ollama")))
     first_run.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-first-run-download")))
     first_run.action_quick_demo()
-    first_run.action_use_ollama()
     first_run.action_download_model()
 
     assert first_run.dismiss.call_args_list == [
         call("mock"),
-        call("ollama"),
         call("download"),
         call("mock"),
-        call("ollama"),
         call("download"),
     ]
 
@@ -798,20 +785,6 @@ async def test_model_download_screen_blocks_start_when_preflight_fails() -> None
 def test_cyoa_app_requires_first_run_until_setup_completed() -> None:
     assert CYOAApp._requires_first_run_setup(SimpleNamespace(setup_completed=False)) is True
     assert CYOAApp._requires_first_run_setup(SimpleNamespace(setup_completed=True)) is False
-
-
-def test_cyoa_app_refuses_ollama_selection_when_preflight_blocks(monkeypatch: pytest.MonkeyPatch):
-    app = CYOAApp(model_path="")
-    app.notify = MagicMock()
-    monkeypatch.setattr("cyoa.ui.app.check_ollama_preflight", lambda **_kwargs: SimpleNamespace(
-        has_blocking_issues=True,
-        blocking_reason="Ollama was not detected on this machine.",
-    ))
-
-    applied = app._apply_first_run_selection("ollama")
-
-    assert applied is False
-    app.notify.assert_called_once()
 
 
 def test_theme_watch_mood_updates_container_spinner_and_theme(monkeypatch: pytest.MonkeyPatch):

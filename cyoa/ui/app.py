@@ -1,14 +1,11 @@
 import asyncio
 import logging
 import os
-import shutil
-import socket
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal, cast
-from urllib.parse import urlparse
+from typing import Any, ClassVar, Literal
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -41,7 +38,6 @@ from cyoa.core.model_download import (
 from cyoa.core.models import StoryNode
 from cyoa.core.preflight import (
     check_local_model_preflight,
-    check_ollama_preflight,
     check_terminal_conditions,
 )
 from cyoa.core.user_config import UserConfig, load_user_config, update_user_config
@@ -150,7 +146,6 @@ class CYOAApp(
         self._runtime_diagnostics = runtime_diagnostics or {}
         self._allow_headless_startup_recovery = allow_headless_startup_recovery
         self._user_config = load_user_config()
-        self._ollama_available = self._detect_ollama_available()
         self._first_run_setup_pending = self._requires_first_run_setup(self._user_config)
 
         self.generator: ModelBroker | None = None
@@ -510,25 +505,10 @@ class CYOAApp(
     def _requires_first_run_setup(config: UserConfig) -> bool:
         return not config.setup_completed
 
-    @staticmethod
-    def _detect_ollama_available() -> bool:
-        if shutil.which("ollama") is not None:
-            return True
-
-        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        parsed = urlparse(base_url)
-        hostname = parsed.hostname or "localhost"
-        port = parsed.port or 11434
-        try:
-            with socket.create_connection((hostname, port), timeout=0.2):
-                return True
-        except OSError:
-            return False
-
     def _present_first_run_setup(self) -> None:
         def on_selected(selection: str | None) -> None:
-            if selection == "mock" or selection == "ollama":
-                applied = self._apply_first_run_selection(cast(Literal["mock", "ollama"], selection))
+            if selection == "mock":
+                applied = self._apply_first_run_selection("mock")
                 if applied:
                     self._resume_startup_flow()
             elif selection == "download":
@@ -540,18 +520,9 @@ class CYOAApp(
             term=os.getenv("TERM"),
             is_headless=self.is_headless,
         )
-        ollama_report = check_ollama_preflight(
-            ollama_available=self._ollama_available,
-            width=self.size.width,
-            height=self.size.height,
-            term=os.getenv("TERM"),
-            is_headless=self.is_headless,
-        )
         self.push_screen(
             FirstRunSetupScreen(
-                ollama_available=self._ollama_available,
                 general_notes=tuple(terminal_report.render_lines()),
-                ollama_note_override=ollama_report.blocking_reason,
             ),
             on_selected,
         )
@@ -583,32 +554,13 @@ class CYOAApp(
             return
         self._startup_timer = self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
 
-    def _apply_first_run_selection(self, selection: Literal["mock", "ollama"]) -> bool:
-        if selection == "ollama":
-            report = check_ollama_preflight(
-                ollama_available=self._ollama_available,
-                width=self.size.width,
-                height=self.size.height,
-                term=os.getenv("TERM"),
-                is_headless=self.is_headless,
-            )
-            if report.has_blocking_issues:
-                self.notify(report.blocking_reason or "Ollama is not ready.", severity="warning", timeout=5)
-                return False
+    def _apply_first_run_selection(self, selection: Literal["mock"]) -> bool:
+        runtime_preset = "mock-smoke"
+        preset = "precise"
+        startup_note = "Quick Demo mode selected during first-run setup."
 
-        runtime_preset = "mock-smoke" if selection == "mock" else "ollama-dev"
-        preset = "precise" if selection == "mock" else "balanced"
-        startup_note = (
-            "Quick Demo mode selected during first-run setup."
-            if selection == "mock"
-            else "Using Ollama based on your first-run setup choice."
-        )
-
-        if selection == "mock":
-            self.model_path = ""
-            os.environ.pop("LLM_MODEL_PATH", None)
-        else:
-            os.environ.pop("LLM_MODEL_PATH", None)
+        self.model_path = ""
+        os.environ.pop("LLM_MODEL_PATH", None)
 
         os.environ["LLM_PROVIDER"] = selection
         os.environ["LLM_PRESET"] = preset
@@ -616,7 +568,7 @@ class CYOAApp(
             {
                 "runtime_preset": runtime_preset,
                 "provider": selection,
-                "model": "mock" if selection == "mock" else "ollama default",
+                "model": "mock",
                 "startup_note": startup_note,
             }
         )

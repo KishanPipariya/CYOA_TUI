@@ -10,7 +10,6 @@ This document describes the repository as it exists on April 18, 2026. It is int
 - Core package: [`cyoa/`](/Users/kishan/CYOA_TUI/cyoa)
 - LLM backends:
   - `llama_cpp` for local GGUF models
-  - `ollama` for daemon-backed models
   - `mock` for tests and demo-friendly local runs
 - Optional integrations:
   - Neo4j graph persistence in [`cyoa/db/graph_db.py`](/Users/kishan/CYOA_TUI/cyoa/db/graph_db.py)
@@ -57,7 +56,7 @@ The current runtime supports:
 ### LLM layer
 
 - [`cyoa/llm/broker.py`](/Users/kishan/CYOA_TUI/cyoa/llm/broker.py): `StoryContext`, speculation cache, provider-agnostic generation broker
-- [`cyoa/llm/providers.py`](/Users/kishan/CYOA_TUI/cyoa/llm/providers.py): concrete providers for `llama_cpp`, `ollama`, and `mock`
+- [`cyoa/llm/providers.py`](/Users/kishan/CYOA_TUI/cyoa/llm/providers.py): concrete providers for `llama_cpp` and `mock`
 - [`cyoa/llm/pipeline.py`](/Users/kishan/CYOA_TUI/cyoa/llm/pipeline.py): prompt assembly pipeline
 - [`cyoa/llm/templates/system_prompt.j2`](/Users/kishan/CYOA_TUI/cyoa/llm/templates/system_prompt.j2): base prompt template
 
@@ -105,7 +104,7 @@ flowchart TD
 
 Current startup behavior:
 
-- valid providers are `llama_cpp`, `ollama`, and `mock`
+- valid providers are `llama_cpp` and `mock`
 - `llama_cpp` requires an existing local model path
 - `LLM_N_CTX`, `LLM_MAX_TOKENS`, and `LLM_TOKEN_BUDGET` must be positive integers
 - `LLM_TEMPERATURE` must be a non-negative float
@@ -117,7 +116,6 @@ Runtime presets currently defined in [`main.py`](/Users/kishan/CYOA_TUI/main.py)
 
 - `local-quality`
 - `local-fast`
-- `ollama-dev`
 - `mock-smoke`
 
 ## 6. Engine Behavior
@@ -255,7 +253,6 @@ Common payloads used by subscribers:
 - `LLM_PROVIDER`
 - `LLM_MODEL_PATH`
 - `LLM_MODEL`
-- `OLLAMA_BASE_URL`
 
 ### Generation and context
 

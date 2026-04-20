@@ -558,33 +558,19 @@ class FirstRunSetupScreen(ModalScreen[str]):
 
     BINDINGS = [
         ("q", "quick_demo", "Quick Demo"),
-        ("o", "use_ollama", "Use Ollama"),
         ("d", "download_model", "Download Local Model"),
     ]
 
     def __init__(
         self,
         *,
-        ollama_available: bool,
         general_notes: tuple[str, ...] = (),
-        ollama_note_override: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self._ollama_available = ollama_available
         self._general_notes = general_notes
-        self._ollama_note_override = ollama_note_override
 
     def compose(self) -> ComposeResult:
-        ollama_button_label = "[b]O[/b]llama Ready" if self._ollama_available else "Ollama Not Detected"
-        ollama_note = (
-            "Use your local Ollama service and keep the full runtime on your machine."
-            if self._ollama_available
-            else "Install or start Ollama first. This option unlocks automatically once it is detected."
-        )
-        if self._ollama_note_override:
-            ollama_note = self._ollama_note_override
-
         with DialogFrame(id="first-run-dialog", classes="dialog-frame dialog-frame-accent dialog-frame-scroll"):
             yield Static("FIRST RUN SETUP", id="first-run-kicker")
             yield Label("[b]Choose How To Start[/b]", id="first-run-title", classes="dialog-title")
@@ -606,14 +592,6 @@ class FirstRunSetupScreen(ModalScreen[str]):
                 classes="first-run-note",
             )
             yield Button(
-                ollama_button_label,
-                id="btn-first-run-ollama",
-                variant="success" if self._ollama_available else "default",
-                disabled=not self._ollama_available,
-                classes="first-run-option",
-            )
-            yield Label(ollama_note, classes="first-run-note")
-            yield Button(
                 "[b]D[/b]ownload Local Model",
                 id="btn-first-run-download",
                 variant="default",
@@ -627,17 +605,11 @@ class FirstRunSetupScreen(ModalScreen[str]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-first-run-mock":
             self.dismiss("mock")
-        elif event.button.id == "btn-first-run-ollama" and self._ollama_available:
-            self.dismiss("ollama")
         elif event.button.id == "btn-first-run-download":
             self.dismiss("download")
 
     def action_quick_demo(self) -> None:
         self.dismiss("mock")
-
-    def action_use_ollama(self) -> None:
-        if self._ollama_available:
-            self.dismiss("ollama")
 
     def action_download_model(self) -> None:
         self.dismiss("download")

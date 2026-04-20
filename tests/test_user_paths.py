@@ -41,16 +41,16 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
 
     save_user_config(
         UserConfig(
-            provider="ollama",
+            provider="llama_cpp",
             model_path="/models/demo.gguf",
             theme="space_explorer",
             dark=False,
             typewriter=False,
             typewriter_speed="fast",
             preset="balanced",
-            runtime_preset="ollama-dev",
+            runtime_preset="local-fast",
             setup_completed=True,
-            setup_choice="ollama",
+            setup_choice="download",
             extras={"custom_flag": "enabled"},
         )
     )
@@ -59,14 +59,14 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
     restored = load_user_config()
 
     assert payload["version"] == 1
-    assert restored.provider == "ollama"
+    assert restored.provider == "llama_cpp"
     assert restored.model_path == "/models/demo.gguf"
     assert restored.theme == "space_explorer"
     assert restored.dark is False
     assert restored.typewriter is False
     assert restored.typewriter_speed == "fast"
     assert restored.preset == "balanced"
-    assert restored.runtime_preset == "ollama-dev"
+    assert restored.runtime_preset == "local-fast"
     assert restored.setup_completed is True
-    assert restored.setup_choice == "ollama"
+    assert restored.setup_choice == "download"
     assert restored.extras == {"custom_flag": "enabled"}

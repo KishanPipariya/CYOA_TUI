@@ -9,8 +9,6 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, cast
 
-import httpx
-
 from cyoa.core.observability import LLMObservedSession
 
 llama_cpp: Any | None
@@ -138,7 +136,7 @@ class LlamaCppProvider(LLMProvider):
     def __init__(self, model_path: str, n_ctx: int = 4096):
         if Llama is None:
             raise RuntimeError(
-                "llama_cpp is not installed. Choose mock or ollama, or install local LLM support."
+                "llama_cpp is not installed. Choose mock or install local LLM support."
             )
         cpu_threads = max(1, (os.cpu_count() or 8) // 2)
         self.model_path = model_path
@@ -457,178 +455,6 @@ class LlamaCppProvider(LLMProvider):
         finally:
             if acquired:
                 self._lock.release()
-
-
-class OllamaProvider(LLMProvider):
-    def __init__(self, model: str, base_url: str = "http://localhost:11434"):
-        self.tokenizer: Any | None = None
-        self.model = model
-        self.base_url = f"{base_url.rstrip('/')}/api/chat"
-        # Tiktoken fallback for high-precision estimation without model weights
-        try:
-            import tiktoken
-
-            self.tokenizer = tiktoken.get_encoding("cl100k_base")
-        except ImportError:
-            self.tokenizer = None
-
-    def count_tokens(self, text: str) -> int:
-        if not text:
-            return 0
-        if self.tokenizer:
-            return len(self.tokenizer.encode(text))
-        # Fallback to rough estimate if tiktoken is missing
-        return _fallback_token_estimate(text)
-
-    def capabilities(self) -> ProviderCapabilities:
-        return ProviderCapabilities(streaming_json=True, structured_json=True, state_transfer=False)
-
-    def _build_payload(
-        self,
-        messages: list[dict[str, str]],
-        *,
-        stream: bool,
-        schema: dict[str, Any] | None,
-        max_tokens: int,
-        temperature: float,
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "stream": stream,
-            "options": {
-                "num_predict": max_tokens,
-                "temperature": temperature,
-            },
-        }
-        if schema is not None:
-            payload["format"] = schema
-        return payload
-
-    def _extract_ollama_content(self, data: dict[str, Any]) -> str:
-        try:
-            content = data["message"]["content"]
-        except KeyError as exc:
-            raise ProviderResponseError("Ollama response missing message content") from exc
-        if not isinstance(content, str):
-            raise ProviderResponseError("Ollama response content must be a string")
-        return content
-
-    async def _post_json(
-        self,
-        payload: dict[str, Any],
-    ) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(self.base_url, json=payload)
-            response.raise_for_status()
-            data = response.json()
-        if not isinstance(data, dict):
-            raise ProviderResponseError("Ollama response body must be a JSON object")
-        return data
-
-    async def _generate_non_streaming(
-        self,
-        task: str,
-        messages: list[dict[str, str]],
-        schema: dict[str, Any] | None,
-        max_tokens: int,
-        temperature: float,
-    ) -> str:
-        session = LLMObservedSession(model_name=self.model, task=task).start()
-        try:
-            payload = self._build_payload(
-                messages,
-                stream=False,
-                schema=schema,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
-            data = await self._post_json(payload)
-            content = self._extract_ollama_content(data)
-        except (httpx.HTTPError, ValueError, ProviderResponseError):
-            session.end(success=False)
-            raise
-
-        session.report_first_token()
-        session.report_token(self.count_tokens(content))
-        session.end(success=True)
-        return content
-
-    def _parse_stream_line(self, line: str) -> dict[str, Any] | None:
-        try:
-            chunk = json.loads(line)
-        except json.JSONDecodeError:
-            logger.warning("Failed to decode Ollama stream chunk: %s", line)
-            return None
-        if not isinstance(chunk, dict):
-            raise ProviderResponseError("Ollama stream chunk must decode to a JSON object")
-        return chunk
-
-    async def generate_text(
-        self,
-        messages: list[dict[str, str]],
-        max_tokens: int = 512,
-        temperature: float = 0.7,
-    ) -> str:
-        return await self._generate_non_streaming(
-            "generate_text",
-            messages,
-            None,
-            max_tokens,
-            temperature,
-        )
-
-    async def generate_json(
-        self,
-        messages: list[dict[str, str]],
-        schema: dict[str, Any],
-        max_tokens: int = 512,
-        temperature: float = 0.7,
-    ) -> str:
-        return await self._generate_non_streaming(
-            "generate_json",
-            messages,
-            schema,
-            max_tokens,
-            temperature,
-        )
-
-    async def stream_json(
-        self,
-        messages: list[dict[str, str]],
-        schema: dict[str, Any],
-        max_tokens: int = 512,
-        temperature: float = 0.7,
-    ) -> AsyncIterator[str]:
-        session = LLMObservedSession(model_name=self.model, task="stream_json").start()
-        try:
-            payload = self._build_payload(
-                messages,
-                stream=True,
-                schema=schema,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                async with client.stream("POST", self.base_url, json=payload) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if not line:
-                            continue
-                        chunk = self._parse_stream_line(line)
-                        if chunk is None:
-                            continue
-                        if chunk.get("done", False):
-                            break
-                        content = self._extract_ollama_content(chunk)
-                        session.report_first_token()
-                        session.report_token(self.count_tokens(content))
-                        yield content
-            session.end(success=True)
-        except (httpx.HTTPError, ValueError, ProviderResponseError):
-            session.end(success=False)
-            raise
-
 
 class MockProvider(LLMProvider):
     """A lightweight mock provider that returns canned responses.

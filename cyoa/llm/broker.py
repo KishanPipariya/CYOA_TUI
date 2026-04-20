@@ -40,7 +40,6 @@ from cyoa.llm.providers import (
     LlamaCppProvider,
     LLMProvider,
     MockProvider,
-    OllamaProvider,
     ProviderCapabilities,
     count_messages_tokens,
 )
@@ -426,25 +425,21 @@ class ModelBroker:
         self, model_path: str | None = None, n_ctx: int | None = None
     ) -> LLMProvider:
         provider_type = os.getenv("LLM_PROVIDER", "llama_cpp").lower()
-        if provider_type == "ollama":
-            model = os.getenv("LLM_MODEL", model_path or "llama3")
-            base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-            return OllamaProvider(model=model, base_url=base_url)
         if provider_type == "mock":
             mock_model = model_path or os.getenv("LLM_MODEL") or "mock"
             return MockProvider(model_name=mock_model)
-        else:
-            m_path = model_path or os.getenv("LLM_MODEL_PATH")
-            if not m_path:
-                m_path = "models/mistral-7b-instruct-v0.2.Q4_K_M.gguf"
-                logger.warning("No model path provided, using default: %s", m_path)
 
-            n_ctx_val = n_ctx or int(os.getenv("LLM_N_CTX", str(DEFAULT_LLM_N_CTX)))
-            if not os.path.exists(m_path):
-                raise FileNotFoundError(
-                    f"Configured llama_cpp model file does not exist: {m_path!r}."
-                )
-            return LlamaCppProvider(model_path=m_path, n_ctx=n_ctx_val)
+        m_path = model_path or os.getenv("LLM_MODEL_PATH")
+        if not m_path:
+            m_path = "models/mistral-7b-instruct-v0.2.Q4_K_M.gguf"
+            logger.warning("No model path provided, using default: %s", m_path)
+
+        n_ctx_val = n_ctx or int(os.getenv("LLM_N_CTX", str(DEFAULT_LLM_N_CTX)))
+        if not os.path.exists(m_path):
+            raise FileNotFoundError(
+                f"Configured llama_cpp model file does not exist: {m_path!r}."
+            )
+        return LlamaCppProvider(model_path=m_path, n_ctx=n_ctx_val)
 
     async def generate_summary_async(self, turns_to_compress: list[dict[str, str]]) -> str:
         """Deprecated legacy wrapper. Use update_story_summaries_async(context) instead."""

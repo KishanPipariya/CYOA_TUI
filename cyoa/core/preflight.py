@@ -94,29 +94,6 @@ def check_terminal_conditions(
     return PreflightReport(tuple(issues))
 
 
-def check_ollama_preflight(
-    *,
-    ollama_available: bool,
-    width: int,
-    height: int,
-    term: str | None = None,
-    is_headless: bool = False,
-) -> PreflightReport:
-    issues = list(
-        check_terminal_conditions(width=width, height=height, term=term, is_headless=is_headless).issues
-    )
-    if not ollama_available:
-        issues.append(
-            PreflightIssue(
-                severity="error",
-                summary="Ollama was not detected on this machine.",
-                guidance="Install it or start the local Ollama service, then reopen setup.",
-                blocks_action=True,
-            )
-        )
-    return PreflightReport(tuple(issues))
-
-
 def check_local_model_preflight(
     recommendation: ModelRecommendation,
     *,
@@ -140,7 +117,7 @@ def check_local_model_preflight(
                     f"This machine reports about {recommendation.ram_gb:.1f} GB RAM, "
                     f"below the recommended {recommendation.minimum_ram_gb:.1f} GB for {recommendation.label}."
                 ),
-                guidance="Choose Quick Demo or Ollama, or use a smaller local model on a machine with more memory.",
+                guidance="Choose Quick Demo, or use a smaller local model on a machine with more memory.",
                 blocks_action=True,
             )
         )

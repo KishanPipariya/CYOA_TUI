@@ -5,9 +5,8 @@ import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-import httpx
 import pytest
 
 from cyoa.llm.broker import MemoryEntry
@@ -26,8 +25,6 @@ from cyoa.llm.pipeline import (
 )
 from cyoa.llm.providers import (
     LlamaCppProvider,
-    OllamaProvider,
-    ProviderResponseError,
     count_messages_tokens,
 )
 
@@ -119,11 +116,10 @@ def test_provider_capabilities_are_normalized(mock_llama) -> None:
     from cyoa.llm.providers import MockProvider
 
     llama = LlamaCppProvider(model_path="dummy.gguf")
-    ollama = OllamaProvider(model="llama3")
     mock = MockProvider()
 
     assert llama.capabilities().state_transfer is True
-    assert ollama.capabilities().streaming_json is True
+    assert llama.capabilities().streaming_json is True
     assert mock.capabilities().structured_json is True
 
 @pytest.mark.asyncio
@@ -275,227 +271,6 @@ async def test_llama_cpp_close_waits_for_cancelled_stream_cleanup(mock_llama) ->
 
     assert not hasattr(provider, "llm")
 
-# ── OllamaProvider Tests ─────────────────────────────────────────────────────
-
-
-def test_ollama_count_tokens_handles_empty_and_fallback_estimate() -> None:
-    provider = OllamaProvider(model="llama3")
-    provider.tokenizer = None
-
-    assert provider.count_tokens("") == 0
-    assert provider.count_tokens("abcdefgh") == 2
-
-
-def test_ollama_extract_content_rejects_non_string() -> None:
-    provider = OllamaProvider(model="llama3")
-    with pytest.raises(ProviderResponseError, match="must be a string"):
-        provider._extract_ollama_content({"message": {"content": 123}})
-
-
-@pytest.mark.asyncio
-async def test_ollama_post_json_rejects_non_object_body() -> None:
-    mock_response = MagicMock()
-    mock_response.json.return_value = ["bad"]
-    mock_response.raise_for_status = MagicMock()
-
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
-        mock_post.return_value = mock_response
-        provider = OllamaProvider(model="llama3")
-
-        with pytest.raises(ProviderResponseError, match="JSON object"):
-            await provider._post_json({"model": "llama3"})
-
-@pytest.mark.asyncio
-async def test_ollama_generate_json():
-    messages = [{"role": "user", "content": "hi"}]
-    schema = {"type": "object"}
-
-    mock_response = MagicMock()
-    mock_response.json.return_value = {"message": {"content": '{"narrative": "Ollama"}'}}
-    mock_response.raise_for_status = MagicMock()
-
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
-        mock_post.return_value = mock_response
-
-        provider = OllamaProvider(model="llama3")
-        result = await provider.generate_json(messages, schema)
-
-        assert result == '{"narrative": "Ollama"}'
-        # Verify payload
-        args, kwargs = mock_post.call_args
-        payload = kwargs["json"]
-        assert payload["model"] == "llama3"
-        assert payload["format"] == schema
-        assert payload["stream"] is False
-
-
-@pytest.mark.asyncio
-async def test_ollama_generate_text_uses_non_streaming_payload() -> None:
-    messages = [{"role": "user", "content": "summarize"}]
-
-    mock_response = MagicMock()
-    mock_response.json.return_value = {"message": {"content": "plain text"}}
-    mock_response.raise_for_status = MagicMock()
-
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
-        mock_post.return_value = mock_response
-
-        provider = OllamaProvider(model="llama3")
-        result = await provider.generate_text(messages, max_tokens=17, temperature=0.1)
-
-        assert result == "plain text"
-        _, kwargs = mock_post.call_args
-        payload = kwargs["json"]
-        assert payload["stream"] is False
-        assert "format" not in payload
-        assert payload["options"] == {"num_predict": 17, "temperature": 0.1}
-
-
-@pytest.mark.asyncio
-async def test_ollama_generate_json_rejects_missing_message_content():
-    messages = [{"role": "user", "content": "hi"}]
-    schema = {"type": "object"}
-
-    mock_response = MagicMock()
-    mock_response.json.return_value = {"message": {}}
-    mock_response.raise_for_status = MagicMock()
-
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
-        mock_post.return_value = mock_response
-
-        provider = OllamaProvider(model="llama3")
-        with pytest.raises(ProviderResponseError, match="missing message content"):
-            await provider.generate_json(messages, schema)
-
-
-@pytest.mark.asyncio
-async def test_ollama_generate_json_propagates_http_errors() -> None:
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
-        mock_post.side_effect = httpx.HTTPError("network")
-        provider = OllamaProvider(model="llama3")
-
-        with pytest.raises(httpx.HTTPError):
-            await provider.generate_json([{"role": "user", "content": "hi"}], {"type": "object"})
-
-@pytest.mark.asyncio
-async def test_ollama_stream_json():
-    # Helper for async iteration
-    async def async_iter(items):
-        for item in items:
-            yield item
-
-    # Use MagicMock for the response object so its methods don't return coroutines by default
-    mock_response = MagicMock()
-    mock_lines = [
-        json.dumps({"message": {"content": '{"narr' }}),
-        json.dumps({"message": {"content": 'ative": "Ollama"}'}}),
-        json.dumps({"done": True})
-    ]
-    # aiter_lines should return an async iterator
-    mock_response.aiter_lines.return_value = async_iter(mock_lines)
-    mock_response.raise_for_status = MagicMock()
-
-    mock_context = MagicMock()
-    # __aenter__ must return the response
-    mock_context.__aenter__ = AsyncMock(return_value=mock_response)
-
-    with patch("httpx.AsyncClient.stream", return_value=mock_context):
-        provider = OllamaProvider(model="llama3")
-        chunks = []
-        async for chunk in provider.stream_json([{"role": "user", "content": "hi"}], {}):
-            chunks.append(chunk)
-
-        assert "".join(chunks) == '{"narrative": "Ollama"}'
-
-
-@pytest.mark.asyncio
-async def test_ollama_stream_json_skips_blank_lines() -> None:
-    async def async_iter(items):
-        for item in items:
-            yield item
-
-    mock_response = MagicMock()
-    mock_response.aiter_lines.return_value = async_iter(
-        [
-            "",
-            json.dumps({"message": {"content": "A"}}),
-            json.dumps({"done": True}),
-        ]
-    )
-    mock_response.raise_for_status = MagicMock()
-
-    mock_context = MagicMock()
-    mock_context.__aenter__ = AsyncMock(return_value=mock_response)
-
-    with patch("httpx.AsyncClient.stream", return_value=mock_context):
-        provider = OllamaProvider(model="llama3")
-        chunks = []
-        async for chunk in provider.stream_json([{"role": "user", "content": "hi"}], {}):
-            chunks.append(chunk)
-
-    assert "".join(chunks) == "A"
-
-
-@pytest.mark.asyncio
-async def test_ollama_stream_json_skips_malformed_lines():
-    async def async_iter(items):
-        for item in items:
-            yield item
-
-    mock_response = MagicMock()
-    mock_response.aiter_lines.return_value = async_iter(
-        [
-            "{not valid json",
-            json.dumps({"message": {"content": "A"}}),
-            json.dumps({"done": True}),
-        ]
-    )
-    mock_response.raise_for_status = MagicMock()
-
-    mock_context = MagicMock()
-    mock_context.__aenter__ = AsyncMock(return_value=mock_response)
-
-    with patch("httpx.AsyncClient.stream", return_value=mock_context):
-        provider = OllamaProvider(model="llama3")
-        chunks = []
-        async for chunk in provider.stream_json([{"role": "user", "content": "hi"}], {}):
-            chunks.append(chunk)
-
-    assert "".join(chunks) == "A"
-
-
-@pytest.mark.asyncio
-async def test_ollama_stream_json_rejects_non_object_chunks():
-    async def async_iter(items):
-        for item in items:
-            yield item
-
-    mock_response = MagicMock()
-    mock_response.aiter_lines.return_value = async_iter([json.dumps(["bad"])])
-    mock_response.raise_for_status = MagicMock()
-
-    mock_context = MagicMock()
-    mock_context.__aenter__ = AsyncMock(return_value=mock_response)
-
-    with patch("httpx.AsyncClient.stream", return_value=mock_context):
-        provider = OllamaProvider(model="llama3")
-        with pytest.raises(ProviderResponseError, match="JSON object"):
-            async for _ in provider.stream_json([{"role": "user", "content": "hi"}], {}):
-                pass
-
-
-@pytest.mark.asyncio
-async def test_ollama_stream_json_propagates_http_errors() -> None:
-    mock_context = MagicMock()
-    mock_context.__aenter__ = AsyncMock(side_effect=httpx.HTTPError("stream failed"))
-
-    with patch("httpx.AsyncClient.stream", return_value=mock_context):
-        provider = OllamaProvider(model="llama3")
-        with pytest.raises(httpx.HTTPError):
-            async for _ in provider.stream_json([{"role": "user", "content": "hi"}], {}):
-                pass
-
-
 # ── MockProvider Tests ───────────────────────────────────────────────────────
 
 
@@ -578,21 +353,6 @@ def test_model_broker_uses_llama_cpp_provider_when_model_exists(tmp_path: Path, 
         broker = ModelBroker(model_path=str(model_path))
 
     assert isinstance(broker.provider, LlamaCppProvider)
-
-
-def test_model_broker_uses_ollama_provider_when_requested():
-    from cyoa.llm.broker import ModelBroker
-
-    with patch.dict(
-        os.environ,
-        {"LLM_PROVIDER": "ollama", "LLM_MODEL": "llama3.2", "OLLAMA_BASE_URL": "http://ollama:11434"},
-        clear=False,
-    ):
-        broker = ModelBroker()
-
-    assert isinstance(broker.provider, OllamaProvider)
-    assert broker.provider.model == "llama3.2"
-    assert broker.provider.base_url == "http://ollama:11434/api/chat"
 
 
 def test_llama_cpp_token_count_falls_back_when_lock_is_busy(mock_llama):

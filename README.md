@@ -5,21 +5,20 @@ AI-generated choose-your-own-adventure fiction in the terminal, built with `Text
 ![Python](https://img.shields.io/badge/python-3.13%2B-blue)
 ![Textual](https://img.shields.io/badge/UI-Textual-2f6fed)
 ![llama.cpp](https://img.shields.io/badge/Local%20LLM-llama.cpp-6b8e23)
-![Ollama](https://img.shields.io/badge/Backend-Ollama-black)
 ![Coverage](https://raw.githubusercontent.com/KishanPipariya/CYOA_TUI/main/.github/badges/coverage.svg)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-`python` `textual` `llama.cpp` `ollama` `gguf` `terminal-ui` `choose-your-own-adventure` `local-llm`
+`python` `textual` `llama.cpp` `gguf` `terminal-ui` `choose-your-own-adventure` `local-llm`
 
 ## Why This Project
 
 Many terminal LLM demos stop at "generate text and print it." This project aims higher: streaming story turns, structured choices, save/load state, bookmarks, export, optional memory retrieval, optional graph persistence, and observable runtime behavior.
 
-It is also easy to demo. `mock` mode gives you a deterministic local showcase path, while the same app can run against `llama.cpp` or `ollama` when you want real model-backed behavior.
+It is also easy to demo. `mock` mode gives you a deterministic local showcase path, while the same app can run against `llama.cpp` when you want real model-backed behavior.
 
 ## Overview
 
-This project turns your terminal into a story engine. It streams narrative text, presents branching choices, and supports both local GGUF models through `llama.cpp` and remote/local Ollama models.
+This project turns your terminal into a story engine. It streams narrative text, presents branching choices, and supports local GGUF models through `llama.cpp`.
 
 The app can also persist story structure to Neo4j, keep lightweight memory with Chroma, and export observability data through OpenTelemetry. Those integrations are optional at runtime.
 
@@ -28,7 +27,6 @@ The app can also persist story structure to Neo4j, keep lightweight memory with 
 - Terminal-first adventure UI built with `Textual`
 - Streaming story generation with branching choices
 - Local `llama.cpp` support for GGUF models
-- `ollama` support for daemon-backed models
 - `mock` provider for development and smoke testing
 - Theme-based story starts plus direct prompt overrides
 - Save/load support, undo/redo, bookmarks, and story export
@@ -53,7 +51,6 @@ The app can also persist story structure to Neo4j, keep lightweight memory with 
 - `uv`
 - One of:
   - a GGUF model for `llama_cpp`
-  - a running Ollama instance
   - `LLM_PROVIDER=mock` for local development
 
 ### Install
@@ -75,7 +72,6 @@ LLM_MODEL_PATH=/path/to/model.gguf
 Supported providers:
 
 - `llama_cpp`
-- `ollama`
 - `mock`
 
 ### Run
@@ -135,7 +131,7 @@ StoryEngine
   -> uses ModelBroker for provider-agnostic generation
 
 ModelBroker / Providers
-  -> support llama.cpp, ollama, and mock backends
+  -> support llama.cpp and mock backends
 ```
 
 ## Controls

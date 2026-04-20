@@ -1,22 +1,18 @@
 import argparse
 import os
-import shutil
-import socket
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
-from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
 # Load .env before anything that reads os.getenv (graph_db)
 load_dotenv()
 
-VALID_PROVIDERS = {"llama_cpp", "ollama", "mock"}
+VALID_PROVIDERS = {"llama_cpp", "mock"}
 RUNTIME_PRESETS = {
     "local-quality": {"provider": "llama_cpp", "generation_preset": "precise"},
     "local-fast": {"provider": "llama_cpp", "generation_preset": "balanced"},
-    "ollama-dev": {"provider": "ollama", "generation_preset": "balanced"},
     "mock-smoke": {"provider": "mock", "generation_preset": "precise"},
 }
 
@@ -73,7 +69,7 @@ def _build_parser(available_themes: Sequence[str] | None = None) -> argparse.Arg
         "--runtime-preset",
         type=str,
         default=None,
-        help="Runtime profile to apply (local-quality, local-fast, ollama-dev, mock-smoke).",
+        help="Runtime profile to apply (local-quality, local-fast, mock-smoke).",
     )
     return parser
 
@@ -106,26 +102,9 @@ def _parse_non_negative_float(name: str) -> None:
         raise StartupConfigError(f"{name} must be non-negative; got {parsed}.")
 
 
-def _is_ollama_detected() -> bool:
-    if shutil.which("ollama") is not None:
-        return True
-
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    parsed = urlparse(base_url)
-    hostname = parsed.hostname or "localhost"
-    port = parsed.port or 11434
-    try:
-        with socket.create_connection((hostname, port), timeout=0.2):
-            return True
-    except OSError:
-        return False
-
-
 def _select_safe_default_provider(model: str | None) -> str:
     if model and os.path.exists(model):
         return "llama_cpp"
-    if _is_ollama_detected():
-        return "ollama"
     return "mock"
 
 
