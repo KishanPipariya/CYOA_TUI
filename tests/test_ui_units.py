@@ -19,6 +19,7 @@ from cyoa.ui.components import (
     FirstRunSetupScreen,
     LoadGameScreen,
     ModelDownloadScreen,
+    SettingsScreen,
     StartupChoiceScreen,
     StatusDisplay,
     ThemeSpinner,
@@ -279,6 +280,27 @@ class FirstRunScreenHarness(App[None]):
         super().__init__()
         self.screen_ref = FirstRunSetupScreen(
             general_notes=general_notes,
+        )
+
+    def compose(self) -> ComposeResult:
+        yield Container()
+
+    async def on_mount(self) -> None:
+        self.push_screen(self.screen_ref)
+
+
+class SettingsScreenHarness(App[None]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.screen_ref = SettingsScreen(
+            provider="mock",
+            model_path="",
+            theme="dark_dungeon",
+            dark=True,
+            typewriter=True,
+            typewriter_speed="normal",
+            diagnostics_enabled=False,
+            available_themes=["dark_dungeon", "space_explorer"],
         )
 
     def compose(self) -> ComposeResult:
@@ -653,6 +675,40 @@ def test_first_run_setup_screen_dismisses_expected_values():
     ]
 
 
+def test_settings_screen_dismisses_saved_payload():
+    settings = SettingsScreen(
+        provider="mock",
+        model_path="",
+        theme="dark_dungeon",
+        dark=True,
+        typewriter=True,
+        typewriter_speed="normal",
+        diagnostics_enabled=False,
+        available_themes=["dark_dungeon", "space_explorer"],
+    )
+    settings.dismiss = MagicMock()
+    settings._refresh_state = MagicMock()
+    settings.query_one = lambda selector, *_args: SimpleNamespace(value="/tmp/demo.gguf") if selector == "#settings-model-path" else None
+
+    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-provider-llama")))
+    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-theme-next")))
+    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-typewriter-off")))
+    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-speed-fast")))
+    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-diagnostics-on")))
+    settings.action_save()
+
+    saved_payload = settings.dismiss.call_args_list[-1].args[0]
+    assert saved_payload == {
+        "provider": "llama_cpp",
+        "model_path": "/tmp/demo.gguf",
+        "theme": "space_explorer",
+        "dark": True,
+        "typewriter": False,
+        "typewriter_speed": "fast",
+        "diagnostics_enabled": True,
+    }
+
+
 def test_cyoa_app_first_run_selection_updates_runtime_and_config(monkeypatch: pytest.MonkeyPatch):
     app = CYOAApp(model_path="")
     saved: dict[str, object] = {}
@@ -720,6 +776,58 @@ def test_cyoa_app_downloaded_model_selection_updates_runtime_and_config(
             os.environ["LLM_PRESET"] = previous_preset
 
 
+def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.MonkeyPatch):
+    app = CYOAApp(model_path="/tmp/current.gguf")
+    app._user_config = SimpleNamespace(
+        provider="mock",
+        model_path=None,
+        theme="dark_dungeon",
+        dark=True,
+        typewriter=True,
+        typewriter_speed="normal",
+        diagnostics_enabled=False,
+    )
+    app._runtime_diagnostics["provider"] = "mock"
+    app.notify = MagicMock()
+    app.action_skip_typewriter = MagicMock()
+    saved: dict[str, object] = {}
+    previous_env = os.environ.get("CYOA_ENABLE_RAG")
+    monkeypatch.setattr(
+        "cyoa.ui.app.update_user_config",
+        lambda **changes: saved.update(changes) or SimpleNamespace(**changes),
+    )
+
+    try:
+        app._apply_settings(
+            {
+                "provider": "llama_cpp",
+                "model_path": "/tmp/models/demo.gguf",
+                "theme": "space_explorer",
+                "dark": False,
+                "typewriter": False,
+                "typewriter_speed": "fast",
+                "diagnostics_enabled": True,
+            }
+        )
+
+        assert app.dark is False
+        assert app.typewriter_enabled is False
+        assert app.typewriter_speed == "fast"
+        assert os.environ["CYOA_ENABLE_RAG"] == "1"
+        assert saved["provider"] == "llama_cpp"
+        assert saved["model_path"] == "/tmp/models/demo.gguf"
+        assert saved["theme"] == "space_explorer"
+        assert saved["diagnostics_enabled"] is True
+        app.action_skip_typewriter.assert_called_once_with()
+        app.notify.assert_called_once()
+        assert "Restart to apply: theme, provider, model path." in app.notify.call_args.args[0]
+    finally:
+        if previous_env is None:
+            os.environ.pop("CYOA_ENABLE_RAG", None)
+        else:
+            os.environ["CYOA_ENABLE_RAG"] = previous_env
+
+
 class ModelDownloadHarness(App[None]):
     def __init__(self, *, blocked_reason: str | None = None) -> None:
         super().__init__()
@@ -780,6 +888,26 @@ async def test_model_download_screen_blocks_start_when_preflight_fails() -> None
         await pilot.click("#btn-model-download-start")
         await pilot.pause(0.1)
         app.begin_first_run_model_download.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_settings_screen_cycles_and_saves_choices() -> None:
+    app = SettingsScreenHarness()
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.1)
+        app.screen_ref.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-provider-llama")))
+        app.screen_ref.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-theme-next")))
+        app.screen_ref.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-dark-off")))
+        app.screen_ref.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-typewriter-off")))
+        app.screen_ref.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-speed-instant")))
+        app.screen_ref.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-diagnostics-on")))
+        await pilot.pause(0.1)
+
+        provider_label = app.screen.query_one("#settings-provider-value", Label)
+        theme_label = app.screen.query_one("#settings-theme-value", Label)
+        assert "saved GGUF" in provider_label.render().plain
+        assert "space_explorer" in theme_label.render().plain
 
 
 def test_cyoa_app_requires_first_run_until_setup_completed() -> None:

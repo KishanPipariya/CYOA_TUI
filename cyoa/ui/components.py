@@ -45,6 +45,7 @@ __all__ = [
     "FirstRunSetupScreen",
     "JournalPanel",
     "StartupChoiceScreen",
+    "SettingsScreen",
     "StoryMapPanel",
     "StoryPane",
     "StatusBar",
@@ -330,6 +331,7 @@ HELP_TEXT = """\
 | [b][reverse]  L  [/reverse][/b] | Load Game |
 | [b][reverse]  E  [/reverse][/b] | Export story to Markdown/JSON |
 | [b][reverse]  R  [/reverse][/b] | Restart Adventure |
+| [b][reverse]  O  [/reverse][/b] | Open settings |
 | [b][reverse]  T  [/reverse][/b] | Toggle Typewriter |
 | [b][reverse]  G  [/reverse][/b] | Cycle generation preset |
 | [b][reverse]  X  [/reverse][/b] | Edit active directives |
@@ -748,6 +750,235 @@ class ModelDownloadScreen(ModalScreen[None]):
         self.query_one("#model-download-detail", Label).update(f"Saved model to {path}")
         self.query_one("#btn-model-download-cancel", Button).label = "Continue"
         self.query_one("#btn-model-download-cancel", Button).disabled = False
+
+
+class SettingsScreen(ModalScreen[dict[str, Any]]):
+    """Modal settings screen for persisted consumer-facing preferences."""
+
+    DEFAULT_CSS = """
+    SettingsScreen {
+        align: center middle;
+        background: $background 80%;
+    }
+    #settings-dialog {
+        width: 86;
+        height: 90%;
+        max-width: 96%;
+    }
+    .settings-section {
+        margin-top: 1;
+    }
+    .settings-label {
+        margin-top: 1;
+    }
+    .settings-value {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+    .settings-row {
+        width: 100%;
+        height: auto;
+    }
+    .settings-row Button {
+        width: 1fr;
+        min-width: 12;
+    }
+    #settings-model-path {
+        margin: 1 0;
+    }
+    #settings-actions {
+        width: 100%;
+        margin-top: 1;
+    }
+    #settings-actions Button {
+        width: 1fr;
+    }
+    """
+
+    BINDINGS = [("escape", "cancel", "Cancel"), ("enter", "save", "Save")]
+
+    def __init__(
+        self,
+        *,
+        provider: str | None,
+        model_path: str | None,
+        theme: str,
+        dark: bool,
+        typewriter: bool,
+        typewriter_speed: str,
+        diagnostics_enabled: bool,
+        available_themes: list[str],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._provider = provider if provider in {"mock", "llama_cpp"} else "mock"
+        self._model_path = model_path or ""
+        self._theme_names = available_themes or [theme]
+        self._theme_index = self._resolve_theme_index(theme)
+        self._dark = dark
+        self._typewriter = typewriter
+        self._typewriter_speed = (
+            typewriter_speed if typewriter_speed in constants.TYPEWRITER_SPEEDS else "normal"
+        )
+        self._diagnostics_enabled = diagnostics_enabled
+
+    def _resolve_theme_index(self, theme: str) -> int:
+        try:
+            return self._theme_names.index(theme)
+        except ValueError:
+            self._theme_names = [theme, *self._theme_names]
+            return 0
+
+    @property
+    def _current_theme(self) -> str:
+        return self._theme_names[self._theme_index]
+
+    def compose(self) -> ComposeResult:
+        with DialogFrame(id="settings-dialog", classes="dialog-frame dialog-frame-scroll dialog-frame-accent"):
+            yield Static("SETTINGS", id="settings-kicker")
+            yield Label("[b]Adventure Settings[/b]", classes="dialog-title")
+            yield Static(
+                "Dark mode and typewriter updates apply immediately. Runtime provider, model path, theme pack, and diagnostics apply on restart.",
+                classes="dialog-message",
+            )
+
+            yield Label("Runtime Provider", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Quick Demo", id="btn-settings-provider-mock")
+                yield Button("Local Model", id="btn-settings-provider-llama")
+            yield Label("", id="settings-provider-value", classes="settings-value")
+
+            yield Label("Local Model Path", classes="settings-label")
+            yield Input(
+                value=self._model_path,
+                placeholder="/path/to/model.gguf",
+                id="settings-model-path",
+            )
+            yield Label(
+                "Used on next restart when Local Model is selected. Leave blank to keep demo mode safe.",
+                classes="settings-value",
+            )
+
+            yield Label("Theme Pack", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Previous", id="btn-settings-theme-prev")
+                yield Button("Next", id="btn-settings-theme-next")
+            yield Label("", id="settings-theme-value", classes="settings-value")
+
+            yield Label("Appearance", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Dark", id="btn-settings-dark-on")
+                yield Button("Light", id="btn-settings-dark-off")
+
+            yield Label("Typewriter", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("On", id="btn-settings-typewriter-on")
+                yield Button("Off", id="btn-settings-typewriter-off")
+
+            yield Label("Typewriter Speed", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Slow", id="btn-settings-speed-slow")
+                yield Button("Normal", id="btn-settings-speed-normal")
+                yield Button("Fast", id="btn-settings-speed-fast")
+                yield Button("Instant", id="btn-settings-speed-instant")
+
+            yield Label("Diagnostics", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Off", id="btn-settings-diagnostics-off")
+                yield Button("On", id="btn-settings-diagnostics-on")
+            yield Label(
+                "Enables advanced RAG diagnostics for future launches.",
+                id="settings-diagnostics-value",
+                classes="settings-value",
+            )
+
+            with DialogActions(id="settings-actions", classes="dialog-actions"):
+                yield Button("Save", id="btn-settings-save", variant="primary")
+                yield Button("Cancel", id="btn-settings-cancel", variant="error")
+
+    def on_mount(self) -> None:
+        self._refresh_state()
+        self.query_one("#settings-model-path", Input).focus()
+
+    def _set_selected(self, button_id: str, selected: bool) -> None:
+        button = self.query_one(f"#{button_id}", Button)
+        button.variant = "primary" if selected else "default"
+
+    def _refresh_state(self) -> None:
+        self._set_selected("btn-settings-provider-mock", self._provider == "mock")
+        self._set_selected("btn-settings-provider-llama", self._provider == "llama_cpp")
+        self.query_one("#settings-provider-value", Label).update(
+            "Quick Demo keeps startup safe." if self._provider == "mock" else "Use a saved GGUF on restart."
+        )
+
+        self._set_selected("btn-settings-dark-on", self._dark)
+        self._set_selected("btn-settings-dark-off", not self._dark)
+        self._set_selected("btn-settings-typewriter-on", self._typewriter)
+        self._set_selected("btn-settings-typewriter-off", not self._typewriter)
+
+        for speed in constants.TYPEWRITER_SPEEDS:
+            self._set_selected(
+                f"btn-settings-speed-{speed}",
+                self._typewriter_speed == speed,
+            )
+
+        self._set_selected("btn-settings-diagnostics-on", self._diagnostics_enabled)
+        self._set_selected("btn-settings-diagnostics-off", not self._diagnostics_enabled)
+        self.query_one("#settings-theme-value", Label).update(
+            f"{self._current_theme} ({self._theme_index + 1}/{len(self._theme_names)})"
+        )
+
+    def _dismiss_with_value(self) -> None:
+        model_path = self.query_one("#settings-model-path", Input).value.strip() or None
+        self.dismiss(
+            {
+                "provider": self._provider,
+                "model_path": model_path,
+                "theme": self._current_theme,
+                "dark": self._dark,
+                "typewriter": self._typewriter,
+                "typewriter_speed": self._typewriter_speed,
+                "diagnostics_enabled": self._diagnostics_enabled,
+            }
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id
+        if button_id == "btn-settings-save":
+            self._dismiss_with_value()
+            return
+        if button_id == "btn-settings-cancel":
+            self.dismiss(None)
+            return
+        if button_id == "btn-settings-provider-mock":
+            self._provider = "mock"
+        elif button_id == "btn-settings-provider-llama":
+            self._provider = "llama_cpp"
+        elif button_id == "btn-settings-theme-prev":
+            self._theme_index = (self._theme_index - 1) % len(self._theme_names)
+        elif button_id == "btn-settings-theme-next":
+            self._theme_index = (self._theme_index + 1) % len(self._theme_names)
+        elif button_id == "btn-settings-dark-on":
+            self._dark = True
+        elif button_id == "btn-settings-dark-off":
+            self._dark = False
+        elif button_id == "btn-settings-typewriter-on":
+            self._typewriter = True
+        elif button_id == "btn-settings-typewriter-off":
+            self._typewriter = False
+        elif button_id == "btn-settings-diagnostics-on":
+            self._diagnostics_enabled = True
+        elif button_id == "btn-settings-diagnostics-off":
+            self._diagnostics_enabled = False
+        elif button_id and button_id.startswith("btn-settings-speed-"):
+            self._typewriter_speed = button_id.rsplit("-", 1)[-1]
+        self._refresh_state()
+
+    def action_save(self) -> None:
+        self._dismiss_with_value()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class TextPromptScreen(ModalScreen[str]):

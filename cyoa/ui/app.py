@@ -40,6 +40,7 @@ from cyoa.core.preflight import (
     check_local_model_preflight,
     check_terminal_conditions,
 )
+from cyoa.core.theme_loader import list_themes
 from cyoa.core.user_config import UserConfig, load_user_config, update_user_config
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import is_rag_diagnostics_enabled
@@ -49,6 +50,7 @@ from cyoa.ui.components import (
     GameWorkspace,
     JournalListItem,
     ModelDownloadScreen,
+    SettingsScreen,
     StatusDisplay,
     ThemeSpinner,
 )
@@ -97,6 +99,7 @@ class CYOAApp(
         Binding("j", "toggle_journal", "Journal", show=True),
         Binding("m", "toggle_story_map", "Map", show=True),
         Binding("h", "show_help", "Help", show=True),
+        Binding("o", "show_settings", "Settings", show=True),
         Binding("u", "undo", "Undo", show=True),
         Binding("y", "redo", "Redo", show=True),
         Binding("k", "create_bookmark", "Bookmark", show=True),
@@ -808,6 +811,82 @@ class CYOAApp(
             severity="information",
             timeout=3,
         )
+
+    def action_show_settings(self) -> None:
+        """Open the persisted settings modal."""
+        config = self._user_config
+
+        def on_saved(payload: dict[str, Any] | None) -> None:
+            if not payload:
+                return
+            self._apply_settings(payload)
+
+        self.push_screen(
+            SettingsScreen(
+                provider=config.provider,
+                model_path=config.model_path,
+                theme=config.theme,
+                dark=config.dark,
+                typewriter=config.typewriter,
+                typewriter_speed=config.typewriter_speed,
+                diagnostics_enabled=config.diagnostics_enabled,
+                available_themes=list_themes(),
+            ),
+            on_saved,
+        )
+
+    def _apply_settings(self, payload: dict[str, Any]) -> None:
+        """Persist settings and apply the runtime-safe subset immediately."""
+        previous_config = self._user_config
+        provider = str(payload.get("provider") or "mock").strip().lower()
+        if provider not in {"mock", "llama_cpp"}:
+            provider = "mock"
+
+        raw_model_path = payload.get("model_path")
+        model_path = raw_model_path.strip() if isinstance(raw_model_path, str) and raw_model_path.strip() else None
+        theme_name = str(payload.get("theme") or self._user_config.theme).strip() or self._user_config.theme
+        dark = bool(payload.get("dark", self._user_config.dark))
+        typewriter = bool(payload.get("typewriter", self._user_config.typewriter))
+        typewriter_speed = str(payload.get("typewriter_speed") or self._user_config.typewriter_speed).strip()
+        if typewriter_speed not in constants.TYPEWRITER_SPEEDS:
+            typewriter_speed = self._user_config.typewriter_speed
+        diagnostics_enabled = bool(
+            payload.get("diagnostics_enabled", self._user_config.diagnostics_enabled)
+        )
+
+        if diagnostics_enabled:
+            os.environ["CYOA_ENABLE_RAG"] = "1"
+        else:
+            os.environ.pop("CYOA_ENABLE_RAG", None)
+
+        self.dark = dark
+        self.typewriter_enabled = typewriter
+        self.typewriter_speed = typewriter_speed
+        if not self.typewriter_enabled:
+            self.action_skip_typewriter()
+
+        self._user_config = update_user_config(
+            provider=provider,
+            model_path=model_path,
+            theme=theme_name,
+            dark=dark,
+            typewriter=typewriter,
+            typewriter_speed=typewriter_speed,
+            diagnostics_enabled=diagnostics_enabled,
+        )
+
+        pending_changes: list[str] = []
+        if theme_name != previous_config.theme:
+            pending_changes.append("theme")
+        if provider != self._runtime_diagnostics.get("provider"):
+            pending_changes.append("provider")
+        if provider == "llama_cpp" and model_path != previous_config.model_path:
+            pending_changes.append("model path")
+
+        message = "Settings saved."
+        if pending_changes:
+            message = f"Settings saved. Restart to apply: {', '.join(pending_changes)}."
+        self.notify(message, severity="information", timeout=4)
 
     def action_edit_directives(self) -> None:
         """Edit comma-separated player directives for the active run."""

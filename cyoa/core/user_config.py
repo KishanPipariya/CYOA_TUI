@@ -20,6 +20,7 @@ class UserConfig:
     dark: bool = True
     typewriter: bool = True
     typewriter_speed: str = "normal"
+    diagnostics_enabled: bool = False
     preset: str | None = None
     runtime_preset: str | None = None
     setup_completed: bool = False
@@ -38,6 +39,7 @@ class UserConfig:
             "dark",
             "typewriter",
             "typewriter_speed",
+            "diagnostics_enabled",
             "preset",
             "runtime_preset",
             "setup_completed",
@@ -54,6 +56,7 @@ class UserConfig:
         dark = payload.get("dark")
         typewriter = payload.get("typewriter")
         typewriter_speed = payload.get("typewriter_speed")
+        diagnostics_enabled = payload.get("diagnostics_enabled")
         preset = payload.get("preset")
         runtime_preset = payload.get("runtime_preset")
         setup_completed = payload.get("setup_completed")
@@ -69,6 +72,9 @@ class UserConfig:
                 typewriter_speed.strip()
                 if isinstance(typewriter_speed, str) and typewriter_speed.strip()
                 else "normal"
+            ),
+            diagnostics_enabled=(
+                diagnostics_enabled if isinstance(diagnostics_enabled, bool) else False
             ),
             preset=preset.strip() if isinstance(preset, str) and preset.strip() else None,
             runtime_preset=(
@@ -96,6 +102,7 @@ class UserConfig:
                 "dark": self.dark,
                 "typewriter": self.typewriter,
                 "typewriter_speed": self.typewriter_speed,
+                "diagnostics_enabled": self.diagnostics_enabled,
                 "preset": self.preset,
                 "runtime_preset": self.runtime_preset,
                 "setup_completed": self.setup_completed,
