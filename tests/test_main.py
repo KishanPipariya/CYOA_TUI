@@ -5,6 +5,7 @@ import pytest
 
 import main
 from cyoa.core.theme_loader import ThemeValidationError
+from cyoa.core.user_config import UserConfig
 
 
 def _args(**overrides: str | None) -> argparse.Namespace:
@@ -107,6 +108,37 @@ def test_validate_startup_config_applies_runtime_preset_defaults(
     assert config.preset == "precise"
 
 
+def test_validate_startup_config_uses_saved_user_config_defaults() -> None:
+    with patch(
+        "cyoa.core.user_config.load_user_config",
+        return_value=UserConfig(provider="ollama", theme="space_explorer", preset="balanced"),
+    ):
+        config = main.validate_startup_config(_args(theme=None, preset=None, runtime_preset=None))
+
+    assert config.provider == "ollama"
+    assert config.theme == "space_explorer"
+    assert config.preset == "balanced"
+
+
+def test_validate_startup_config_prefers_cli_args_over_saved_config() -> None:
+    with patch(
+        "cyoa.core.user_config.load_user_config",
+        return_value=UserConfig(
+            provider="mock",
+            model_path="/models/saved.gguf",
+            theme="space_explorer",
+            preset="balanced",
+        ),
+    ):
+        config = main.validate_startup_config(
+            _args(model="/models/cli.gguf", theme="dark_dungeon", preset="precise")
+        )
+
+    assert config.model == "/models/cli.gguf"
+    assert config.theme == "dark_dungeon"
+    assert config.preset == "precise"
+
+
 @pytest.mark.smoke
 def test_main_closes_logger_on_keyboard_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "mock")
@@ -116,6 +148,7 @@ def test_main_closes_logger_on_keyboard_interrupt(monkeypatch: pytest.MonkeyPatc
 
     with (
         patch("main.os._exit", side_effect=AssertionError("os._exit should not be used")),
+        patch("cyoa.core.constants.ensure_user_directories"),
         patch("cyoa.core.observability.setup_observability"),
         patch("cyoa.core.theme_loader.list_themes", return_value=["dark_dungeon"]),
         patch(
@@ -136,6 +169,7 @@ def test_main_returns_error_for_invalid_startup_config(monkeypatch: pytest.Monke
     monkeypatch.setenv("LLM_PROVIDER", "invalid")
 
     with (
+        patch("cyoa.core.constants.ensure_user_directories"),
         patch("cyoa.core.observability.setup_observability"),
         patch("cyoa.core.theme_loader.list_themes", return_value=["dark_dungeon"]),
         patch("cyoa.db.story_logger.StoryLogger") as logger_cls,
@@ -152,6 +186,7 @@ def test_main_returns_error_for_invalid_theme_payload(monkeypatch: pytest.Monkey
     monkeypatch.setenv("LLM_PROVIDER", "mock")
 
     with (
+        patch("cyoa.core.constants.ensure_user_directories"),
         patch("cyoa.core.observability.setup_observability"),
         patch("cyoa.core.theme_loader.list_themes", return_value=["dark_dungeon"]),
         patch(
@@ -166,3 +201,46 @@ def test_main_returns_error_for_invalid_theme_payload(monkeypatch: pytest.Monkey
     assert exit_code == 2
     logger_cls.assert_not_called()
     app_cls.assert_not_called()
+
+
+def test_main_bootstraps_user_directories(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+
+    with (
+        patch("cyoa.core.constants.ensure_user_directories") as ensure_dirs,
+        patch("cyoa.core.observability.setup_observability"),
+        patch("cyoa.core.theme_loader.list_themes", return_value=["dark_dungeon"]),
+        patch(
+            "cyoa.core.theme_loader.load_theme",
+            return_value={"prompt": "Start", "spinner_frames": ["-"], "accent_color": None},
+        ),
+        patch("cyoa.db.story_logger.StoryLogger"),
+        patch("cyoa.ui.app.CYOAApp") as app_cls,
+    ):
+        app_cls.return_value.run.return_value = None
+        exit_code = main.main([])
+
+    assert exit_code == 0
+    ensure_dirs.assert_called_once_with()
+
+
+def test_main_persists_resolved_user_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+
+    with (
+        patch("cyoa.core.constants.ensure_user_directories"),
+        patch("cyoa.core.observability.setup_observability"),
+        patch("cyoa.core.theme_loader.list_themes", return_value=["dark_dungeon"]),
+        patch(
+            "cyoa.core.theme_loader.load_theme",
+            return_value={"prompt": "Start", "spinner_frames": ["-"], "accent_color": None},
+        ),
+        patch("cyoa.core.user_config.update_user_config") as update_config,
+        patch("cyoa.db.story_logger.StoryLogger"),
+        patch("cyoa.ui.app.CYOAApp") as app_cls,
+    ):
+        app_cls.return_value.run.return_value = None
+        exit_code = main.main([])
+
+    assert exit_code == 0
+    update_config.assert_called_once()

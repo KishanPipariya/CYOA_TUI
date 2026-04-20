@@ -1,19 +1,23 @@
-import json
 from typing import Any, cast
 
-from cyoa.core.constants import CONFIG_FILE
+from cyoa.core.user_config import load_user_config, save_user_config
 
 
 def load_config() -> dict[str, Any]:
-    """Load UI preferences from the local config file."""
-    try:
-        with open(CONFIG_FILE) as f:
-            return cast(dict[str, Any], json.load(f))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    """Load UI preferences from the durable user config."""
+    return cast(dict[str, Any], load_user_config().to_ui_preferences())
 
 
 def save_config(data: dict[str, Any]) -> None:
-    """Save UI preferences to the local config file."""
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(data, f)
+    """Persist UI preferences while preserving non-UI user settings."""
+    config = load_user_config()
+    dark = data.get("dark")
+    if isinstance(dark, bool):
+        config.dark = dark
+    typewriter = data.get("typewriter")
+    if isinstance(typewriter, bool):
+        config.typewriter = typewriter
+    typewriter_speed = data.get("typewriter_speed")
+    if isinstance(typewriter_speed, str) and typewriter_speed:
+        config.typewriter_speed = typewriter_speed
+    save_user_config(config)

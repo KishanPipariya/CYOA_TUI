@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from cyoa.core.events import Events, bus
@@ -31,6 +32,7 @@ class StoryLogger:
         if self._file_handle:
             self._file_handle.close()
 
+        Path(self.filepath).parent.mkdir(parents=True, exist_ok=True)
         with open(self.filepath, "w", encoding="utf-8") as f:
             f.write(f"# {title}\n\n")
 

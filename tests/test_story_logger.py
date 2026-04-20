@@ -6,7 +6,7 @@ from cyoa.db.story_logger import StoryLogger
 
 
 def test_story_logger_records_live_story_transcript(tmp_path: Path) -> None:
-    log_path = tmp_path / "story.md"
+    log_path = tmp_path / "logs" / "story.md"
     logger = StoryLogger(filepath=str(log_path))
 
     try:

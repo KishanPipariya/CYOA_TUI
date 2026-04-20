@@ -2,6 +2,91 @@
 Centralised constants and configuration for the CYOA TUI project.
 """
 
+import os
+import sys
+from pathlib import Path
+
+
+APP_NAME = "cyoa-tui"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _platform_home() -> Path:
+    home = os.environ.get("HOME")
+    if home:
+        return Path(home).expanduser()
+    return Path.home()
+
+
+def get_user_config_dir() -> Path:
+    """Return the platform-appropriate directory for durable user config."""
+    override = os.environ.get("CYOA_CONFIG_DIR")
+    if override:
+        return Path(override).expanduser()
+
+    home = _platform_home()
+    if sys.platform == "darwin":
+        return home / "Library" / "Application Support" / APP_NAME
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / APP_NAME
+        return home / "AppData" / "Roaming" / APP_NAME
+
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config_home:
+        return Path(xdg_config_home).expanduser() / APP_NAME
+    return home / ".config" / APP_NAME
+
+
+def get_user_data_dir() -> Path:
+    """Return the platform-appropriate directory for saves and exports."""
+    override = os.environ.get("CYOA_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
+
+    home = _platform_home()
+    if sys.platform == "darwin":
+        return home / "Library" / "Application Support" / APP_NAME
+    if sys.platform == "win32":
+        local_appdata = os.environ.get("LOCALAPPDATA")
+        if local_appdata:
+            return Path(local_appdata) / APP_NAME
+        return home / "AppData" / "Local" / APP_NAME
+
+    xdg_data_home = os.environ.get("XDG_DATA_HOME")
+    if xdg_data_home:
+        return Path(xdg_data_home).expanduser() / APP_NAME
+    return home / ".local" / "share" / APP_NAME
+
+
+def get_user_state_dir() -> Path:
+    """Return the platform-appropriate directory for logs and transient state."""
+    override = os.environ.get("CYOA_STATE_DIR")
+    if override:
+        return Path(override).expanduser()
+
+    home = _platform_home()
+    if sys.platform == "darwin":
+        return home / "Library" / "Logs" / APP_NAME
+    if sys.platform == "win32":
+        local_appdata = os.environ.get("LOCALAPPDATA")
+        if local_appdata:
+            return Path(local_appdata) / APP_NAME / "Logs"
+        return home / "AppData" / "Local" / APP_NAME / "Logs"
+
+    xdg_state_home = os.environ.get("XDG_STATE_HOME")
+    if xdg_state_home:
+        return Path(xdg_state_home).expanduser() / APP_NAME
+    return home / ".local" / "state" / APP_NAME
+
+
+def ensure_user_directories() -> None:
+    """Create the app's user-facing storage directories if they do not yet exist."""
+    get_user_config_dir().mkdir(parents=True, exist_ok=True)
+    get_user_data_dir().mkdir(parents=True, exist_ok=True)
+    get_user_state_dir().mkdir(parents=True, exist_ok=True)
+
 # --- Narrative & Gameplay ---
 
 DEFAULT_STARTING_PROMPT = """You are a dark fantasy interactive fiction engine.
@@ -28,7 +113,7 @@ SCENE_KEYWORDS: dict[str, list[str]] = {
 
 # Load the ASCII art for the initial screen
 try:
-    with open("loading_art.md", encoding="utf-8") as f:
+    with (_REPO_ROOT / "loading_art.md").open(encoding="utf-8") as f:
         LOADING_ART = f.read()
 except FileNotFoundError:
     LOADING_ART = "# Welcome to the Adventure\n\n*Loading the AI model... Please wait.*"
@@ -48,9 +133,9 @@ TYPEWRITER_CHAR_DELAY = 0.02  # seconds per character (legacy, kept for compat)
 TYPEWRITER_CATCHUP_THRESHOLD = 50  # if queue > 50, speed up reveal
 TYPEWRITER_MAX_BATCH = 5  # max characters to reveal per tick during catchup
 
-CONFIG_FILE = ".config.json"
-SAVES_DIR = "saves"
-STORY_LOG_FILE = "story.md"
+CONFIG_FILE = str(get_user_config_dir() / "config.json")
+SAVES_DIR = str(get_user_data_dir() / "saves")
+STORY_LOG_FILE = str(get_user_state_dir() / "story.md")
 
 # Error marker used to detect fallback nodes from LLM failures
 ERROR_NARRATIVE_PREFIX = "The universe encounters an anomaly"
