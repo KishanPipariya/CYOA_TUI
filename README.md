@@ -102,6 +102,8 @@ Use a built-in theme:
 uv run python main.py --theme space_explorer
 ```
 
+Other built-in themes include `dark_dungeon`, `haunted_observatory`, `neon_heist`, and `sunken_realm`.
+
 Override the opening prompt directly:
 
 ```bash

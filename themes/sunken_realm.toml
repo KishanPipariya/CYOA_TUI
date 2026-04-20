@@ -1,0 +1,34 @@
+name = "Sunken Realm"
+description = "An underwater fantasy expedition through drowned temples, living tides, and ancient bargains."
+accent_color = "green"
+spinner_frames = ["[≈]", "[≋]", "[◌]", "[◍]"]
+goals = ["Reach the drowned temple heart", "Decide whether to break or renew the ancient pact"]
+directives = ["Let depth, pressure, and fragile alliances constrain choices.", "Reward curiosity with lore, but make every detour cost something."]
+opening_inventory = ["Pearl Lantern", "Salt-Sealed Diving Knife"]
+story_flags = ["reef_descent"]
+content_tags = ["underwater", "fantasy", "expedition"]
+persona = "You are an underwater fantasy narrator. Choices should feel wondrous, dangerous, and shaped by tides, relics, and old oaths."
+
+prompt = """You are an underwater fantasy interactive fiction engine.
+Describe the starting scenario where the player descends into a recently revealed ruin beneath a storm-torn reef to investigate why the sea itself has become restless.
+Provide 2-3 choices for what they can do next.
+You MUST provide a creative 'title' for this new adventure in the JSON response.
+When the story reaches a definitive conclusion (the pact restored, the depths unleashed, death, etc), set 'is_ending' to true and provide an empty choices list.
+Ensure your output is strictly valid JSON matching the requested schema.
+"""
+
+[opening_stats]
+health = 100
+gold = 40
+reputation = 0
+
+[[opening_objectives]]
+id = "survey_outer_ruin"
+text = "Survey the outer ruin and find a safe path deeper."
+status = "active"
+
+[faction_reputation]
+"Tidebinders" = 1
+
+[npc_affinity]
+"Reef Guide Nara" = 2

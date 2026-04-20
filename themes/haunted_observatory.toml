@@ -1,0 +1,34 @@
+name = "Haunted Observatory"
+description = "A gothic mystery inside a storm-lashed observatory where the stars seem to watch back."
+accent_color = "magenta"
+spinner_frames = ["[☾]", "[☁]", "[⚡]", "[✶]"]
+goals = ["Uncover why the observatory was abandoned", "Survive the night without losing your mind"]
+directives = ["Keep the supernatural ambiguous at first, then escalate with concrete consequences.", "Let clues, locked spaces, and prior discoveries shape future choices."]
+opening_inventory = ["Brass Skeleton Key", "Half-Burned Star Chart"]
+story_flags = ["observatory_arrival"]
+content_tags = ["gothic", "mystery", "supernatural"]
+persona = "You are a gothic mystery narrator. Choices should feel tense, eerie, and rooted in physical clues as much as fear."
+
+prompt = """You are a gothic mystery interactive fiction engine.
+Describe the starting scenario where the player arrives at an isolated observatory during a violent storm after receiving a letter from a missing astronomer.
+Provide 2-3 choices for what they can do next.
+You MUST provide a creative 'title' for this new adventure in the JSON response.
+When the story reaches a definitive conclusion (truth revealed, escape, death, possession, etc), set 'is_ending' to true and provide an empty choices list.
+Ensure your output is strictly valid JSON matching the requested schema.
+"""
+
+[opening_stats]
+health = 100
+gold = 12
+reputation = 0
+
+[[opening_objectives]]
+id = "enter_observatory"
+text = "Find a way into the sealed observatory before the storm worsens."
+status = "active"
+
+[faction_reputation]
+"Village Locals" = -1
+
+[npc_affinity]
+"Missing Astronomer" = 1
