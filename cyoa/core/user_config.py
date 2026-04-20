@@ -19,6 +19,8 @@ class UserConfig:
     typewriter_speed: str = "normal"
     preset: str | None = None
     runtime_preset: str | None = None
+    setup_completed: bool = False
+    setup_choice: str | None = None
     extras: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -35,6 +37,8 @@ class UserConfig:
             "typewriter_speed",
             "preset",
             "runtime_preset",
+            "setup_completed",
+            "setup_choice",
             "version",
         }
         extras = {
@@ -49,6 +53,8 @@ class UserConfig:
         typewriter_speed = payload.get("typewriter_speed")
         preset = payload.get("preset")
         runtime_preset = payload.get("runtime_preset")
+        setup_completed = payload.get("setup_completed")
+        setup_choice = payload.get("setup_choice")
 
         return cls(
             provider=provider.strip() if isinstance(provider, str) and provider.strip() else None,
@@ -67,6 +73,12 @@ class UserConfig:
                 if isinstance(runtime_preset, str) and runtime_preset.strip()
                 else None
             ),
+            setup_completed=setup_completed if isinstance(setup_completed, bool) else False,
+            setup_choice=(
+                setup_choice.strip()
+                if isinstance(setup_choice, str) and setup_choice.strip()
+                else None
+            ),
             extras=extras,
         )
 
@@ -83,6 +95,8 @@ class UserConfig:
                 "typewriter_speed": self.typewriter_speed,
                 "preset": self.preset,
                 "runtime_preset": self.runtime_preset,
+                "setup_completed": self.setup_completed,
+                "setup_choice": self.setup_choice,
             }
         )
         return payload

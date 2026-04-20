@@ -49,6 +49,8 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
             typewriter_speed="fast",
             preset="balanced",
             runtime_preset="ollama-dev",
+            setup_completed=True,
+            setup_choice="ollama",
             extras={"custom_flag": "enabled"},
         )
     )
@@ -65,4 +67,6 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
     assert restored.typewriter_speed == "fast"
     assert restored.preset == "balanced"
     assert restored.runtime_preset == "ollama-dev"
+    assert restored.setup_completed is True
+    assert restored.setup_choice == "ollama"
     assert restored.extras == {"custom_flag": "enabled"}

@@ -1,4 +1,5 @@
 import asyncio
+import os
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock, call
@@ -7,7 +8,7 @@ import pytest
 from textual.app import App, ComposeResult
 from textual.containers import Container
 from textual.theme import Theme
-from textual.widgets import Label, ListView, ProgressBar
+from textual.widgets import Button, Label, ListView, ProgressBar
 
 from cyoa.core import constants
 from cyoa.core.models import Choice, ChoiceRequirement, StoryNode
@@ -15,6 +16,7 @@ from cyoa.core.runtime import EnginePhase, EngineTransition
 from cyoa.ui.app import BufferedNotification, CYOAApp
 from cyoa.ui.components import (
     BranchScreen,
+    FirstRunSetupScreen,
     LoadGameScreen,
     StartupChoiceScreen,
     StatusDisplay,
@@ -267,6 +269,18 @@ class LoadScreenHarness(App[None]):
         self.push_screen(self.screen_ref)
 
 
+class FirstRunScreenHarness(App[None]):
+    def __init__(self, *, ollama_available: bool) -> None:
+        super().__init__()
+        self.screen_ref = FirstRunSetupScreen(ollama_available=ollama_available)
+
+    def compose(self) -> ComposeResult:
+        yield Container()
+
+    async def on_mount(self) -> None:
+        self.push_screen(self.screen_ref)
+
+
 def test_typewriter_batch_catchup_consumes_active_chunk_and_queue():
     host = DummyTypewriterHost()
     host._typewriter_active_chunk = list("abc")
@@ -489,6 +503,18 @@ async def test_load_game_screen_mount_formats_save_names_and_selection_dismisses
 
 
 @pytest.mark.asyncio
+async def test_first_run_screen_disables_ollama_when_not_available() -> None:
+    app = FirstRunScreenHarness(ollama_available=False)
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.1)
+        ollama_button = app.screen.query_one("#btn-first-run-ollama", Button)
+        download_button = app.screen.query_one("#btn-first-run-download", Button)
+        assert ollama_button.disabled is True
+        assert download_button.disabled is True
+
+
+@pytest.mark.asyncio
 async def test_status_display_watchers_and_spinner_tick() -> None:
     app = StatusDisplayHarness()
     async with app.run_test() as pilot:
@@ -592,6 +618,53 @@ def test_startup_choice_screen_dismisses_expected_values():
     help_screen.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-help-close")))
     help_screen.action_close()
     assert help_screen.dismiss.call_args_list == [call(None), call(None)]
+
+
+def test_first_run_setup_screen_dismisses_expected_values():
+    first_run = FirstRunSetupScreen(ollama_available=True)
+    first_run.dismiss = MagicMock()
+    first_run.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-first-run-mock")))
+    first_run.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-first-run-ollama")))
+    first_run.action_quick_demo()
+    first_run.action_use_ollama()
+
+    assert first_run.dismiss.call_args_list == [
+        call("mock"),
+        call("ollama"),
+        call("mock"),
+        call("ollama"),
+    ]
+
+
+def test_cyoa_app_first_run_selection_updates_runtime_and_config(monkeypatch: pytest.MonkeyPatch):
+    app = CYOAApp(model_path="")
+    saved: dict[str, object] = {}
+    app._sync_runtime_status = MagicMock()
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_PRESET", raising=False)
+    monkeypatch.delenv("LLM_MODEL_PATH", raising=False)
+
+    monkeypatch.setattr(
+        "cyoa.ui.app.update_user_config",
+        lambda **changes: saved.update(changes) or SimpleNamespace(**changes),
+    )
+
+    app._apply_first_run_selection("mock")
+
+    assert os.environ["LLM_PROVIDER"] == "mock"
+    assert os.environ["LLM_PRESET"] == "precise"
+    assert app._runtime_diagnostics["runtime_preset"] == "mock-smoke"
+    assert app._runtime_diagnostics["provider"] == "mock"
+    assert app._runtime_diagnostics["model"] == "mock"
+    assert saved["setup_completed"] is True
+    assert saved["setup_choice"] == "mock"
+    assert saved["runtime_preset"] == "mock-smoke"
+    app._sync_runtime_status.assert_called_once_with()
+
+
+def test_cyoa_app_requires_first_run_until_setup_completed() -> None:
+    assert CYOAApp._requires_first_run_setup(SimpleNamespace(setup_completed=False)) is True
+    assert CYOAApp._requires_first_run_setup(SimpleNamespace(setup_completed=True)) is False
 
 
 def test_theme_watch_mood_updates_container_spinner_and_theme(monkeypatch: pytest.MonkeyPatch):

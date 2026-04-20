@@ -140,6 +140,9 @@ def test_validate_startup_config_defaults_to_ollama_when_detected(
 def test_validate_startup_config_falls_back_from_saved_llama_cpp_to_mock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_PRESET", raising=False)
+    monkeypatch.delenv("LLM_MODEL_PATH", raising=False)
     monkeypatch.setattr(main, "_is_ollama_detected", lambda: False)
 
     with patch(
@@ -152,7 +155,12 @@ def test_validate_startup_config_falls_back_from_saved_llama_cpp_to_mock(
     assert config.startup_note == "Configured local model was unavailable. Starting in mock mode instead."
 
 
-def test_validate_startup_config_uses_saved_user_config_defaults() -> None:
+def test_validate_startup_config_uses_saved_user_config_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_PRESET", raising=False)
+    monkeypatch.delenv("LLM_MODEL_PATH", raising=False)
     with patch(
         "cyoa.core.user_config.load_user_config",
         return_value=UserConfig(provider="ollama", theme="space_explorer", preset="balanced"),

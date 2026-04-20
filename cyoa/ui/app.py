@@ -1,9 +1,13 @@
 import asyncio
 import logging
+import os
+import shutil
+import socket
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal
+from urllib.parse import urlparse
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -25,10 +29,17 @@ from cyoa.core import constants, utils
 from cyoa.core.engine import StoryEngine
 from cyoa.core.events import Events, bus
 from cyoa.core.models import StoryNode
+from cyoa.core.user_config import UserConfig, load_user_config, update_user_config
 from cyoa.db.rag_memory import is_rag_diagnostics_enabled
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.llm.broker import ModelBroker
-from cyoa.ui.components import GameWorkspace, JournalListItem, StatusDisplay, ThemeSpinner
+from cyoa.ui.components import (
+    FirstRunSetupScreen,
+    GameWorkspace,
+    JournalListItem,
+    StatusDisplay,
+    ThemeSpinner,
+)
 from cyoa.ui.mixins import (
     EventsMixin,
     NavigationMixin,
@@ -122,6 +133,9 @@ class CYOAApp(
         self._initial_prompt_config = initial_prompt_config or {}
         self._runtime_diagnostics = runtime_diagnostics or {}
         self._allow_headless_startup_recovery = allow_headless_startup_recovery
+        self._user_config = load_user_config()
+        self._ollama_available = self._detect_ollama_available()
+        self._first_run_setup_pending = self._requires_first_run_setup(self._user_config)
 
         self.generator: ModelBroker | None = None
         self.engine: StoryEngine | None = None
@@ -183,14 +197,11 @@ class CYOAApp(
         self._sync_runtime_status()
 
         self._subscribe_engine_events()
-
-        self.show_loading()
         self._typewriter_worker()
-        autosave_path = self._autosave_path()
-        if autosave_path is not None and (not self.is_headless or self._allow_headless_startup_recovery):
-            self._prompt_autosave_recovery(autosave_path)
-        else:
-            self._startup_timer = self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
+        if self._first_run_setup_pending:
+            self._present_first_run_setup()
+            return
+        self._resume_startup_flow()
 
     def on_resize(self, event: Resize) -> None:
         self._set_compact_layout(event.size.width)
@@ -473,6 +484,80 @@ class CYOAApp(
             return max(0, story_turns.index(self._current_turn_widget))
         except ValueError:
             return max(0, len(story_turns) - 1)
+
+    @staticmethod
+    def _requires_first_run_setup(config: UserConfig) -> bool:
+        return not config.setup_completed
+
+    @staticmethod
+    def _detect_ollama_available() -> bool:
+        if shutil.which("ollama") is not None:
+            return True
+
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        parsed = urlparse(base_url)
+        hostname = parsed.hostname or "localhost"
+        port = parsed.port or 11434
+        try:
+            with socket.create_connection((hostname, port), timeout=0.2):
+                return True
+        except OSError:
+            return False
+
+    def _present_first_run_setup(self) -> None:
+        def on_selected(selection: str | None) -> None:
+            if selection in {"mock", "ollama"}:
+                self._apply_first_run_selection(selection)
+                self._resume_startup_flow()
+
+        self.push_screen(FirstRunSetupScreen(ollama_available=self._ollama_available), on_selected)
+
+    def _resume_startup_flow(self) -> None:
+        self.show_loading()
+        autosave_path = self._autosave_path()
+        if autosave_path is not None and (not self.is_headless or self._allow_headless_startup_recovery):
+            self._prompt_autosave_recovery(autosave_path)
+            return
+        self._startup_timer = self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
+
+    def _apply_first_run_selection(self, selection: Literal["mock", "ollama"]) -> None:
+        runtime_preset = "mock-smoke" if selection == "mock" else "ollama-dev"
+        preset = "precise" if selection == "mock" else "balanced"
+        startup_note = (
+            "Quick Demo mode selected during first-run setup."
+            if selection == "mock"
+            else "Using Ollama based on your first-run setup choice."
+        )
+
+        if selection == "mock":
+            self.model_path = ""
+            os.environ.pop("LLM_MODEL_PATH", None)
+        else:
+            os.environ.pop("LLM_MODEL_PATH", None)
+
+        os.environ["LLM_PROVIDER"] = selection
+        os.environ["LLM_PRESET"] = preset
+        self._runtime_diagnostics.update(
+            {
+                "runtime_preset": runtime_preset,
+                "provider": selection,
+                "model": "mock" if selection == "mock" else "ollama default",
+                "startup_note": startup_note,
+            }
+        )
+        self._first_run_setup_pending = False
+        self._user_config = update_user_config(
+            provider=selection,
+            model_path=None,
+            preset=preset,
+            runtime_preset=runtime_preset,
+            setup_completed=True,
+            setup_choice=selection,
+        )
+        try:
+            self._sync_runtime_status()
+        except NoMatches:
+            pass
 
     @work(exclusive=True)
     async def initialize_and_start(self, model_path: str) -> None:

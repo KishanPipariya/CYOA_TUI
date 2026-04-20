@@ -40,6 +40,7 @@ __all__ = [
     "GameWorkspace",
     "OptionListScreen",
     "MainGamePanel",
+    "FirstRunSetupScreen",
     "JournalPanel",
     "StartupChoiceScreen",
     "StoryMapPanel",
@@ -530,6 +531,96 @@ class StartupChoiceScreen(ModalScreen[str]):
 
     def action_new_game(self) -> None:
         self.dismiss("new")
+
+
+class FirstRunSetupScreen(ModalScreen[str]):
+    """First-run setup modal for choosing a safe runtime path."""
+
+    DEFAULT_CSS = """
+    FirstRunSetupScreen {
+        align: center middle;
+        background: $background 80%;
+    }
+    #first-run-dialog {
+        width: 78;
+        max-width: 94%;
+    }
+    .first-run-option {
+        width: 100%;
+        margin-top: 1;
+    }
+    .first-run-note {
+        color: $text-muted;
+    }
+    """
+
+    BINDINGS = [
+        ("q", "quick_demo", "Quick Demo"),
+        ("o", "use_ollama", "Use Ollama"),
+    ]
+
+    def __init__(self, *, ollama_available: bool, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._ollama_available = ollama_available
+
+    def compose(self) -> ComposeResult:
+        ollama_button_label = "[b]O[/b]llama Ready" if self._ollama_available else "Ollama Not Detected"
+        ollama_note = (
+            "Use your local Ollama service and keep the full runtime on your machine."
+            if self._ollama_available
+            else "Install or start Ollama first. This option unlocks automatically once it is detected."
+        )
+
+        with DialogFrame(id="first-run-dialog", classes="dialog-frame dialog-frame-accent dialog-frame-scroll"):
+            yield Static("FIRST RUN SETUP", id="first-run-kicker")
+            yield Label("[b]Choose How To Start[/b]", id="first-run-title", classes="dialog-title")
+            yield Static(
+                "Pick a runtime path before the adventure begins. This choice is saved for later launches.",
+                id="first-run-message",
+                classes="dialog-message",
+            )
+            yield Button(
+                "[b]Q[/b]uick Demo",
+                id="btn-first-run-mock",
+                variant="primary",
+                classes="first-run-option",
+            )
+            yield Label(
+                "Start immediately with the built-in mock engine. Best for first launch and smoke testing.",
+                classes="first-run-note",
+            )
+            yield Button(
+                ollama_button_label,
+                id="btn-first-run-ollama",
+                variant="success" if self._ollama_available else "default",
+                disabled=not self._ollama_available,
+                classes="first-run-option",
+            )
+            yield Label(ollama_note, classes="first-run-note")
+            yield Button(
+                "Download Local Model (Coming Soon)",
+                id="btn-first-run-download",
+                variant="default",
+                disabled=True,
+                classes="first-run-option",
+            )
+            yield Label(
+                "Guided GGUF download lands in the next release slice. For now, use Quick Demo or Ollama.",
+                classes="first-run-note",
+            )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-first-run-mock":
+            self.dismiss("mock")
+        elif event.button.id == "btn-first-run-ollama" and self._ollama_available:
+            self.dismiss("ollama")
+
+    def action_quick_demo(self) -> None:
+        self.dismiss("mock")
+
+    def action_use_ollama(self) -> None:
+        if self._ollama_available:
+            self.dismiss("ollama")
 
 
 class TextPromptScreen(ModalScreen[str]):
