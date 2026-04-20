@@ -25,6 +25,8 @@ class ModelRecommendation:
     filename: str
     label: str
     ram_gb: float
+    minimum_ram_gb: float
+    approx_size_gb: float
 
 
 @dataclass(slots=True, frozen=True)
@@ -63,6 +65,8 @@ def recommend_model(ram_gb: float) -> ModelRecommendation:
             filename="qwen2.5-32b-instruct-q4_k_m.gguf",
             label="32B (Ultra - Q4_K_M)",
             ram_gb=ram_gb,
+            minimum_ram_gb=24,
+            approx_size_gb=20.0,
         )
     if ram_gb >= 24:
         return ModelRecommendation(
@@ -70,6 +74,8 @@ def recommend_model(ram_gb: float) -> ModelRecommendation:
             filename="qwen2.5-14b-instruct-q5_k_m.gguf",
             label="14B (High - Q5_K_M)",
             ram_gb=ram_gb,
+            minimum_ram_gb=18,
+            approx_size_gb=10.0,
         )
     if ram_gb >= 16:
         return ModelRecommendation(
@@ -77,6 +83,8 @@ def recommend_model(ram_gb: float) -> ModelRecommendation:
             filename="qwen2.5-7b-instruct-q5_k_m.gguf",
             label="7B (Balanced - Q5_K_M)",
             ram_gb=ram_gb,
+            minimum_ram_gb=12,
+            approx_size_gb=5.0,
         )
     if ram_gb >= 8:
         return ModelRecommendation(
@@ -84,12 +92,16 @@ def recommend_model(ram_gb: float) -> ModelRecommendation:
             filename="qwen2.5-3b-instruct-q5_k_m.gguf",
             label="3B (Lite - Q5_K_M)",
             ram_gb=ram_gb,
+            minimum_ram_gb=8,
+            approx_size_gb=2.5,
         )
     return ModelRecommendation(
         repo_id=f"{REPO_USER}/Qwen2.5-1.5B-Instruct-GGUF",
         filename="qwen2.5-1.5b-instruct-q5_k_m.gguf",
         label="1.5B (Pocket - Q5_K_M)",
         ram_gb=ram_gb,
+        minimum_ram_gb=6,
+        approx_size_gb=1.5,
     )
 
 

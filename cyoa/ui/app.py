@@ -29,15 +29,20 @@ from textual.widgets import (
 from cyoa.core import constants, utils
 from cyoa.core.engine import StoryEngine
 from cyoa.core.events import Events, bus
-from cyoa.core.models import StoryNode
 from cyoa.core.model_download import (
     DownloadProgress,
     DownloadResult,
     ModelDownloadCancelled,
     ModelDownloadError,
+    download_recommended_model,
     get_models_dir,
     recommend_model_for_current_machine,
-    download_recommended_model,
+)
+from cyoa.core.models import StoryNode
+from cyoa.core.preflight import (
+    check_local_model_preflight,
+    check_ollama_preflight,
+    check_terminal_conditions,
 )
 from cyoa.core.user_config import UserConfig, load_user_config, update_user_config
 from cyoa.db.graph_db import CYOAGraphDB
@@ -523,17 +528,51 @@ class CYOAApp(
     def _present_first_run_setup(self) -> None:
         def on_selected(selection: str | None) -> None:
             if selection == "mock" or selection == "ollama":
-                self._apply_first_run_selection(cast(Literal["mock", "ollama"], selection))
-                self._resume_startup_flow()
+                applied = self._apply_first_run_selection(cast(Literal["mock", "ollama"], selection))
+                if applied:
+                    self._resume_startup_flow()
             elif selection == "download":
                 self._present_model_download_setup()
 
-        self.push_screen(FirstRunSetupScreen(ollama_available=self._ollama_available), on_selected)
+        terminal_report = check_terminal_conditions(
+            width=self.size.width,
+            height=self.size.height,
+            term=os.getenv("TERM"),
+            is_headless=self.is_headless,
+        )
+        ollama_report = check_ollama_preflight(
+            ollama_available=self._ollama_available,
+            width=self.size.width,
+            height=self.size.height,
+            term=os.getenv("TERM"),
+            is_headless=self.is_headless,
+        )
+        self.push_screen(
+            FirstRunSetupScreen(
+                ollama_available=self._ollama_available,
+                general_notes=tuple(terminal_report.render_lines()),
+                ollama_note_override=ollama_report.blocking_reason,
+            ),
+            on_selected,
+        )
 
     def _present_model_download_setup(self) -> None:
         recommendation = recommend_model_for_current_machine()
+        report = check_local_model_preflight(
+            recommendation,
+            models_dir=get_models_dir(),
+            width=self.size.width,
+            height=self.size.height,
+            term=os.getenv("TERM"),
+            is_headless=self.is_headless,
+        )
         self.push_screen(
-            ModelDownloadScreen(recommendation, models_dir=str(get_models_dir()))
+            ModelDownloadScreen(
+                recommendation,
+                models_dir=str(get_models_dir()),
+                preflight_notes=tuple(report.render_lines()),
+                blocked_reason=report.blocking_reason,
+            )
         )
 
     def _resume_startup_flow(self) -> None:
@@ -544,7 +583,19 @@ class CYOAApp(
             return
         self._startup_timer = self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
 
-    def _apply_first_run_selection(self, selection: Literal["mock", "ollama"]) -> None:
+    def _apply_first_run_selection(self, selection: Literal["mock", "ollama"]) -> bool:
+        if selection == "ollama":
+            report = check_ollama_preflight(
+                ollama_available=self._ollama_available,
+                width=self.size.width,
+                height=self.size.height,
+                term=os.getenv("TERM"),
+                is_headless=self.is_headless,
+            )
+            if report.has_blocking_issues:
+                self.notify(report.blocking_reason or "Ollama is not ready.", severity="warning", timeout=5)
+                return False
+
         runtime_preset = "mock-smoke" if selection == "mock" else "ollama-dev"
         preset = "precise" if selection == "mock" else "balanced"
         startup_note = (
@@ -582,6 +633,7 @@ class CYOAApp(
             self._sync_runtime_status()
         except NoMatches:
             pass
+        return True
 
     def _apply_downloaded_model_selection(self, result: DownloadResult) -> None:
         os.environ["LLM_PROVIDER"] = "llama_cpp"

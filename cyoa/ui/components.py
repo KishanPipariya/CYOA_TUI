@@ -562,9 +562,18 @@ class FirstRunSetupScreen(ModalScreen[str]):
         ("d", "download_model", "Download Local Model"),
     ]
 
-    def __init__(self, *, ollama_available: bool, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *,
+        ollama_available: bool,
+        general_notes: tuple[str, ...] = (),
+        ollama_note_override: str | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self._ollama_available = ollama_available
+        self._general_notes = general_notes
+        self._ollama_note_override = ollama_note_override
 
     def compose(self) -> ComposeResult:
         ollama_button_label = "[b]O[/b]llama Ready" if self._ollama_available else "Ollama Not Detected"
@@ -573,6 +582,8 @@ class FirstRunSetupScreen(ModalScreen[str]):
             if self._ollama_available
             else "Install or start Ollama first. This option unlocks automatically once it is detected."
         )
+        if self._ollama_note_override:
+            ollama_note = self._ollama_note_override
 
         with DialogFrame(id="first-run-dialog", classes="dialog-frame dialog-frame-accent dialog-frame-scroll"):
             yield Static("FIRST RUN SETUP", id="first-run-kicker")
@@ -582,6 +593,8 @@ class FirstRunSetupScreen(ModalScreen[str]):
                 id="first-run-message",
                 classes="dialog-message",
             )
+            for note in self._general_notes:
+                yield Label(note, classes="first-run-note")
             yield Button(
                 "[b]Q[/b]uick Demo",
                 id="btn-first-run-mock",
@@ -657,10 +670,20 @@ class ModelDownloadScreen(ModalScreen[None]):
     }
     """
 
-    def __init__(self, recommendation: ModelRecommendation, *, models_dir: str, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        recommendation: ModelRecommendation,
+        *,
+        models_dir: str,
+        preflight_notes: tuple[str, ...] = (),
+        blocked_reason: str | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self._recommendation = recommendation
         self._models_dir = models_dir
+        self._preflight_notes = preflight_notes
+        self._blocked_reason = blocked_reason
         self._started = False
         self._finished = False
 
@@ -689,15 +712,26 @@ class ModelDownloadScreen(ModalScreen[None]):
                 id="model-download-target",
                 classes="model-download-note",
             )
+            for note in self._preflight_notes:
+                yield Label(note, classes="model-download-note")
             yield ProgressBar(total=100, show_percentage=True, show_eta=False, id="model-download-progress")
-            yield Label("Ready to download.", id="model-download-stage")
             yield Label(
-                "Cancellation is best-effort and may wait for the current transfer step to finish.",
+                "Local download unavailable." if self._blocked_reason else "Ready to download.",
+                id="model-download-stage",
+            )
+            yield Label(
+                self._blocked_reason
+                or "Cancellation is best-effort and may wait for the current transfer step to finish.",
                 id="model-download-detail",
                 classes="model-download-note",
             )
             with DialogActions(id="model-download-actions", classes="dialog-actions"):
-                yield Button("Start Download", id="btn-model-download-start", variant="primary")
+                yield Button(
+                    "Start Download",
+                    id="btn-model-download-start",
+                    variant="primary",
+                    disabled=self._blocked_reason is not None,
+                )
                 yield Button("Cancel", id="btn-model-download-cancel", variant="error")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

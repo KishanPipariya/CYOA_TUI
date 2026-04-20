@@ -271,9 +271,19 @@ class LoadScreenHarness(App[None]):
 
 
 class FirstRunScreenHarness(App[None]):
-    def __init__(self, *, ollama_available: bool) -> None:
+    def __init__(
+        self,
+        *,
+        ollama_available: bool,
+        general_notes: tuple[str, ...] = (),
+        ollama_note_override: str | None = None,
+    ) -> None:
         super().__init__()
-        self.screen_ref = FirstRunSetupScreen(ollama_available=ollama_available)
+        self.screen_ref = FirstRunSetupScreen(
+            ollama_available=ollama_available,
+            general_notes=general_notes,
+            ollama_note_override=ollama_note_override,
+        )
 
     def compose(self) -> ComposeResult:
         yield Container()
@@ -516,6 +526,21 @@ async def test_first_run_screen_disables_ollama_when_not_available() -> None:
 
 
 @pytest.mark.asyncio
+async def test_first_run_screen_renders_general_and_ollama_preflight_notes() -> None:
+    app = FirstRunScreenHarness(
+        ollama_available=False,
+        general_notes=("Resize the terminal if panels feel cramped.",),
+        ollama_note_override="Ollama was not detected on this machine.",
+    )
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.1)
+        labels = [label.render().plain for label in app.screen.query(Label)]
+        assert any("Resize the terminal" in text for text in labels)
+        assert any("Ollama was not detected" in text for text in labels)
+
+
+@pytest.mark.asyncio
 async def test_status_display_watchers_and_spinner_tick() -> None:
     app = StatusDisplayHarness()
     async with app.run_test() as pilot:
@@ -709,7 +734,7 @@ def test_cyoa_app_downloaded_model_selection_updates_runtime_and_config(
 
 
 class ModelDownloadHarness(App[None]):
-    def __init__(self) -> None:
+    def __init__(self, *, blocked_reason: str | None = None) -> None:
         super().__init__()
         self.begin_first_run_model_download = MagicMock()
         self.cancel_first_run_model_download = MagicMock()
@@ -720,6 +745,8 @@ class ModelDownloadHarness(App[None]):
                 repo_id="Qwen/demo",
             ),
             models_dir="/tmp/cyoa-models",
+            preflight_notes=("Machine check passed.",),
+            blocked_reason=blocked_reason,
         )
 
     def compose(self) -> ComposeResult:
@@ -753,9 +780,38 @@ async def test_model_download_screen_wires_start_cancel_and_progress() -> None:
         app.cancel_first_run_model_download.assert_called_once_with()
 
 
+@pytest.mark.asyncio
+async def test_model_download_screen_blocks_start_when_preflight_fails() -> None:
+    app = ModelDownloadHarness(blocked_reason="Only 1.0 GB free disk space is available.")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.1)
+        start_button = app.screen.query_one("#btn-model-download-start", Button)
+        detail = app.screen.query_one("#model-download-detail", Label)
+        assert start_button.disabled is True
+        assert "Only 1.0 GB free disk space is available." in detail.render().plain
+        await pilot.click("#btn-model-download-start")
+        await pilot.pause(0.1)
+        app.begin_first_run_model_download.assert_not_called()
+
+
 def test_cyoa_app_requires_first_run_until_setup_completed() -> None:
     assert CYOAApp._requires_first_run_setup(SimpleNamespace(setup_completed=False)) is True
     assert CYOAApp._requires_first_run_setup(SimpleNamespace(setup_completed=True)) is False
+
+
+def test_cyoa_app_refuses_ollama_selection_when_preflight_blocks(monkeypatch: pytest.MonkeyPatch):
+    app = CYOAApp(model_path="")
+    app.notify = MagicMock()
+    monkeypatch.setattr("cyoa.ui.app.check_ollama_preflight", lambda **_kwargs: SimpleNamespace(
+        has_blocking_issues=True,
+        blocking_reason="Ollama was not detected on this machine.",
+    ))
+
+    applied = app._apply_first_run_selection("ollama")
+
+    assert applied is False
+    app.notify.assert_called_once()
 
 
 def test_theme_watch_mood_updates_container_spinner_and_theme(monkeypatch: pytest.MonkeyPatch):
