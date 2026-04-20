@@ -25,6 +25,7 @@ from cyoa.core import constants, utils
 from cyoa.core.engine import StoryEngine
 from cyoa.core.events import Events, bus
 from cyoa.core.models import StoryNode
+from cyoa.db.rag_memory import is_rag_diagnostics_enabled
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.llm.broker import ModelBroker
 from cyoa.ui.components import GameWorkspace, JournalListItem, StatusDisplay, ThemeSpinner
@@ -379,7 +380,7 @@ class CYOAApp(
             return
 
         self._optional_runtime_ready = True
-        if self.engine.db:
+        if self.engine.db and getattr(self.engine.db, "enabled", False):
             is_online = await self.engine.db.verify_connectivity_async()
             if not self.is_runtime_active():
                 return
@@ -390,7 +391,11 @@ class CYOAApp(
                     timeout=5,
                 )
 
-        if self.is_runtime_active() and not self.engine.rag.memory.is_online:
+        if (
+            self.is_runtime_active()
+            and is_rag_diagnostics_enabled()
+            and not self.engine.rag.memory.is_online
+        ):
             self.queue_notification(
                 "RAG Engine unavailable. Basic memory fallback active.",
                 severity="warning",
@@ -507,6 +512,9 @@ class CYOAApp(
                 return
             self._sync_runtime_status()
             self.queue_notification(self._runtime_summary(), severity="information", timeout=4, batch=False)
+            startup_note = self._runtime_diagnostics.get("startup_note", "").strip()
+            if startup_note:
+                self.queue_notification(startup_note, severity="warning", timeout=5, batch=False)
             from cyoa.core.observability import record_startup_latency
 
             record_startup_latency((time.perf_counter() - start_time) * 1000, status="success")

@@ -36,6 +36,22 @@ def test_db_create_story_node(mock_neo4j):
         assert "$final_title" in query
 
 
+def test_graph_db_is_disabled_by_default_for_consumer_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CYOA_ENABLE_GRAPH_DB", raising=False)
+    monkeypatch.delenv("NEO4J_URI", raising=False)
+    monkeypatch.delenv("NEO4J_USER", raising=False)
+    monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
+
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as driver_factory:
+        db = CYOAGraphDB()
+
+    assert db.enabled is False
+    assert db.driver is None
+    driver_factory.assert_not_called()
+
+
 def test_db_create_story_node_resolves_title_collisions(mock_neo4j):
     with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
         mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j

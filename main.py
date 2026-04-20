@@ -1,8 +1,11 @@
 import argparse
 import os
+import shutil
+import socket
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -30,6 +33,7 @@ class StartupConfig:
     prompt: str | None
     preset: str | None
     runtime_preset: str | None
+    startup_note: str | None = None
 
 
 def _build_parser(available_themes: Sequence[str] | None = None) -> argparse.ArgumentParser:
@@ -102,6 +106,29 @@ def _parse_non_negative_float(name: str) -> None:
         raise StartupConfigError(f"{name} must be non-negative; got {parsed}.")
 
 
+def _is_ollama_detected() -> bool:
+    if shutil.which("ollama") is not None:
+        return True
+
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    parsed = urlparse(base_url)
+    hostname = parsed.hostname or "localhost"
+    port = parsed.port or 11434
+    try:
+        with socket.create_connection((hostname, port), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+
+def _select_safe_default_provider(model: str | None) -> str:
+    if model and os.path.exists(model):
+        return "llama_cpp"
+    if _is_ollama_detected():
+        return "ollama"
+    return "mock"
+
+
 def validate_startup_config(args: argparse.Namespace) -> StartupConfig:
     from cyoa.llm.broker import PRESETS
     from cyoa.core.user_config import load_user_config
@@ -127,13 +154,6 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:
         )
 
     runtime_defaults = RUNTIME_PRESETS[runtime_preset] if runtime_preset else {}
-    raw_provider = os.getenv("LLM_PROVIDER") or user_config.provider or str(runtime_defaults.get("provider", "llama_cpp"))
-    provider = raw_provider.strip().lower()
-    if provider not in VALID_PROVIDERS:
-        valid = ", ".join(sorted(VALID_PROVIDERS))
-        raise StartupConfigError(
-            f"Unsupported LLM_PROVIDER {provider!r}. Expected one of: {valid}."
-        )
 
     _parse_positive_int("LLM_N_CTX")
     _parse_positive_int("LLM_MAX_TOKENS")
@@ -158,14 +178,47 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:
         or os.getenv("LLM_MODEL_PATH")
         or user_config.model_path
     )
-    if provider == "llama_cpp" and not model:
-        raise StartupConfigError(
-            "No local model configured for llama_cpp. Use --model or set LLM_MODEL_PATH in .env."
-        )
-    if provider == "llama_cpp" and model and not os.path.exists(model):
-        raise StartupConfigError(
-            f"Configured llama_cpp model file does not exist: {model!r}."
-        )
+
+    provider_source = "default"
+    raw_provider: str | None = None
+    if "LLM_PROVIDER" in os.environ:
+        raw_provider = os.environ["LLM_PROVIDER"]
+        provider_source = "env"
+    elif user_config.provider:
+        raw_provider = user_config.provider
+        provider_source = "user_config"
+    elif runtime_defaults.get("provider"):
+        raw_provider = str(runtime_defaults["provider"])
+        provider_source = "runtime_preset"
+
+    startup_note: str | None = None
+    if raw_provider is None:
+        provider = _select_safe_default_provider(model)
+    else:
+        provider = raw_provider.strip().lower()
+        if provider not in VALID_PROVIDERS:
+            valid = ", ".join(sorted(VALID_PROVIDERS))
+            raise StartupConfigError(
+                f"Unsupported LLM_PROVIDER {provider!r}. Expected one of: {valid}."
+            )
+
+        if provider == "llama_cpp":
+            if not model:
+                if provider_source == "env":
+                    raise StartupConfigError(
+                        "No local model configured for llama_cpp. Use --model or set LLM_MODEL_PATH in .env."
+                    )
+                provider = _select_safe_default_provider(model=None)
+                startup_note = f"Local model was not configured. Starting in {provider} mode instead."
+            elif not os.path.exists(model):
+                if provider_source == "env":
+                    raise StartupConfigError(
+                        f"Configured llama_cpp model file does not exist: {model!r}."
+                    )
+                provider = _select_safe_default_provider(model=None)
+                startup_note = (
+                    f"Configured local model was unavailable. Starting in {provider} mode instead."
+                )
 
     theme = (
         args.theme.strip()
@@ -180,6 +233,7 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:
         prompt=args.prompt,
         preset=preset,
         runtime_preset=runtime_preset,
+        startup_note=startup_note,
     )
 
 
@@ -263,6 +317,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "runtime_preset": config.runtime_preset or "custom",
             "provider": config.provider,
             "model": (config.model or "(provider default)") if config.provider != "mock" else "mock",
+            "startup_note": config.startup_note or "",
         },
     )
 

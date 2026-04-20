@@ -14,6 +14,17 @@ from cyoa.core.observability import DBObservedSession
 logger = logging.getLogger(__name__)
 
 
+def _env_flag_enabled(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def is_graph_db_enabled() -> bool:
+    return _env_flag_enabled("CYOA_ENABLE_GRAPH_DB") or any(
+        os.getenv(name)
+        for name in ("NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD")
+    )
+
+
 class StoryTreeEdge(TypedDict):
     target_id: str
     choice: str | None
@@ -40,11 +51,15 @@ class CYOAGraphDB:
         password: str | None = None,
     ) -> None:
         """Initialize the connection to Neo4j. Reads credentials from env vars if not provided."""
+        self.enabled = any(value is not None for value in (uri, user, password)) or is_graph_db_enabled()
         uri = uri or os.getenv("NEO4J_URI", DEFAULT_NEO4J_URI)
         user = user or os.getenv("NEO4J_USER")
         password = password or os.getenv("NEO4J_PASSWORD")
         self.driver: Any | None = None
         self.cb: CircuitBreaker = CircuitBreaker("Neo4j", failure_threshold=3, reset_timeout=30.0)
+
+        if not self.enabled:
+            return
 
         try:
             # Cast uri to str because the Neo4j driver expects a non-None URI

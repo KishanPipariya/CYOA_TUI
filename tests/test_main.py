@@ -21,7 +21,9 @@ def _args(**overrides: str | None) -> argparse.Namespace:
 
 
 @pytest.mark.smoke
-def test_validate_startup_config_requires_model_for_llama_cpp(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_validate_startup_config_requires_model_for_env_llama_cpp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "llama_cpp")
 
     with pytest.raises(main.StartupConfigError, match="No local model configured"):
@@ -106,6 +108,47 @@ def test_validate_startup_config_applies_runtime_preset_defaults(
     assert config.runtime_preset == "mock-smoke"
     assert config.provider == "mock"
     assert config.preset == "precise"
+
+
+def test_validate_startup_config_defaults_to_mock_when_no_provider_is_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_MODEL_PATH", raising=False)
+    monkeypatch.setattr(main, "_is_ollama_detected", lambda: False)
+    with patch("cyoa.core.user_config.load_user_config", return_value=UserConfig()):
+        config = main.validate_startup_config(_args())
+
+    assert config.provider == "mock"
+    assert config.model is None
+
+
+def test_validate_startup_config_defaults_to_ollama_when_detected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_MODEL_PATH", raising=False)
+    monkeypatch.setattr(main, "_is_ollama_detected", lambda: True)
+    with patch("cyoa.core.user_config.load_user_config", return_value=UserConfig()):
+        config = main.validate_startup_config(_args())
+
+    assert config.provider == "ollama"
+    assert config.model is None
+
+
+def test_validate_startup_config_falls_back_from_saved_llama_cpp_to_mock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(main, "_is_ollama_detected", lambda: False)
+
+    with patch(
+        "cyoa.core.user_config.load_user_config",
+        return_value=UserConfig(provider="llama_cpp", model_path="/missing.gguf"),
+    ):
+        config = main.validate_startup_config(_args())
+
+    assert config.provider == "mock"
+    assert config.startup_note == "Configured local model was unavailable. Starting in mock mode instead."
 
 
 def test_validate_startup_config_uses_saved_user_config_defaults() -> None:

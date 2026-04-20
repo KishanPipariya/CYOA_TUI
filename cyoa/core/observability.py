@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 SERVICE_NAME = "cyoa-tui"
 
 
+def _env_flag_enabled(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _is_otlp_endpoint_reachable(endpoint: str) -> bool:
     """Return whether the configured OTLP collector appears reachable."""
     parsed = urlparse(endpoint)
@@ -56,6 +60,11 @@ def _is_otlp_endpoint_reachable(endpoint: str) -> bool:
 
 def setup_observability() -> None:
     """Initialize OpenTelemetry tracers and meters."""
+    otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if not (_env_flag_enabled("CYOA_ENABLE_OBSERVABILITY") or otlp_endpoint):
+        logger.debug("Observability integrations disabled for default startup.")
+        return
+
     resource = Resource.create({"service.name": SERVICE_NAME})
 
     # Trace setup
@@ -63,8 +72,6 @@ def setup_observability() -> None:
 
     # Check for OTLP endpoint, fallback to console or no-op if you prefer
     # For now we'll use OTLP if an endpoint is set, otherwise maybe just logs?
-    otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-
     otlp_available = bool(otlp_endpoint and _is_otlp_endpoint_reachable(otlp_endpoint))
 
     if otlp_available:
@@ -74,7 +81,7 @@ def setup_observability() -> None:
     elif otlp_endpoint:
         logger.info("OTLP endpoint configured but unavailable; tracing will stay local.")
     else:
-        logger.info("No OTEL_EXPORTER_OTLP_ENDPOINT found; tracing will be no-op or local.")
+        logger.info("Observability enabled without OTLP export endpoint; tracing will stay local.")
 
     trace.set_tracer_provider(tracer_provider)
 

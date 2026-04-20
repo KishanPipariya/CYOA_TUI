@@ -8,6 +8,7 @@ beyond the sliding context window.
 """
 
 import logging
+import os
 import uuid
 from collections import deque
 from collections.abc import Callable
@@ -27,6 +28,19 @@ except ImportError:
     _CHROMA_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+def _env_flag_enabled(name: str) -> bool:
+    return name.strip() != "" and os.getenv(name, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def is_rag_diagnostics_enabled() -> bool:
+    return _env_flag_enabled("CYOA_ENABLE_RAG")
 
 
 @dataclass(slots=True)

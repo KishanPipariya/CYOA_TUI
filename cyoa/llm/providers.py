@@ -10,7 +10,10 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 import httpx
-from llama_cpp import Llama
+try:
+    from llama_cpp import Llama
+except ImportError:  # pragma: no cover - covered via constructor behavior
+    Llama = None
 
 from cyoa.core.observability import LLMObservedSession
 
@@ -129,6 +132,10 @@ class LlamaCppProvider(LLMProvider):
     _THREAD_JOIN_SLICE_SECONDS = 0.05
 
     def __init__(self, model_path: str, n_ctx: int = 4096):
+        if Llama is None:
+            raise RuntimeError(
+                "llama_cpp is not installed. Choose mock or ollama, or install local LLM support."
+            )
         cpu_threads = max(1, (os.cpu_count() or 8) // 2)
         self.model_path = model_path
         self.llm = Llama(

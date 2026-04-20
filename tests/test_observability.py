@@ -342,6 +342,7 @@ def test_setup_observability_without_otlp_endpoint(
     tracer_provider_factory = MagicMock(return_value=tracer_provider)
     meter_provider_factory = MagicMock(return_value=meter_provider)
 
+    monkeypatch.setenv("CYOA_ENABLE_OBSERVABILITY", "true")
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
     monkeypatch.setattr(obs.Resource, "create", create_resource)
     monkeypatch.setattr(obs, "TracerProvider", tracer_provider_factory)
@@ -359,7 +360,24 @@ def test_setup_observability_without_otlp_endpoint(
     tracer_provider.add_span_processor.assert_not_called()
     set_tracer_provider.assert_called_once_with(tracer_provider)
     set_meter_provider.assert_called_once_with(meter_provider)
-    assert "No OTEL_EXPORTER_OTLP_ENDPOINT found" in caplog.text
+    assert "Observability enabled without OTLP export endpoint" in caplog.text
+
+
+def test_setup_observability_returns_early_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracer_provider_factory = MagicMock()
+    meter_provider_factory = MagicMock()
+
+    monkeypatch.delenv("CYOA_ENABLE_OBSERVABILITY", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+    monkeypatch.setattr(obs, "TracerProvider", tracer_provider_factory)
+    monkeypatch.setattr(obs, "MeterProvider", meter_provider_factory)
+
+    obs.setup_observability()
+
+    tracer_provider_factory.assert_not_called()
+    meter_provider_factory.assert_not_called()
 
 
 def test_setup_observability_with_otlp_endpoint(
