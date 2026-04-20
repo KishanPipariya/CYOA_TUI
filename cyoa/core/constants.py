@@ -142,6 +142,7 @@ TYPEWRITER_MAX_BATCH = 5  # max characters to reveal per tick during catchup
 
 CONFIG_FILE = str(get_user_config_dir() / "config.json")
 SAVES_DIR = str(get_user_data_dir() / "saves")
+MODELS_DIR = str(get_user_data_dir() / "models")
 STORY_LOG_FILE = str(get_user_state_dir() / "story.md")
 
 # Error marker used to detect fallback nodes from LLM failures

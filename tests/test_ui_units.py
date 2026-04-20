@@ -18,6 +18,7 @@ from cyoa.ui.components import (
     BranchScreen,
     FirstRunSetupScreen,
     LoadGameScreen,
+    ModelDownloadScreen,
     StartupChoiceScreen,
     StatusDisplay,
     ThemeSpinner,
@@ -511,7 +512,7 @@ async def test_first_run_screen_disables_ollama_when_not_available() -> None:
         ollama_button = app.screen.query_one("#btn-first-run-ollama", Button)
         download_button = app.screen.query_one("#btn-first-run-download", Button)
         assert ollama_button.disabled is True
-        assert download_button.disabled is True
+        assert download_button.disabled is False
 
 
 @pytest.mark.asyncio
@@ -625,14 +626,18 @@ def test_first_run_setup_screen_dismisses_expected_values():
     first_run.dismiss = MagicMock()
     first_run.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-first-run-mock")))
     first_run.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-first-run-ollama")))
+    first_run.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-first-run-download")))
     first_run.action_quick_demo()
     first_run.action_use_ollama()
+    first_run.action_download_model()
 
     assert first_run.dismiss.call_args_list == [
         call("mock"),
         call("ollama"),
+        call("download"),
         call("mock"),
         call("ollama"),
+        call("download"),
     ]
 
 
@@ -660,6 +665,92 @@ def test_cyoa_app_first_run_selection_updates_runtime_and_config(monkeypatch: py
     assert saved["setup_choice"] == "mock"
     assert saved["runtime_preset"] == "mock-smoke"
     app._sync_runtime_status.assert_called_once_with()
+
+
+def test_cyoa_app_downloaded_model_selection_updates_runtime_and_config(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    app = CYOAApp(model_path="")
+    saved: dict[str, object] = {}
+    app._sync_runtime_status = MagicMock()
+    previous_provider = os.environ.get("LLM_PROVIDER")
+    previous_model_path = os.environ.get("LLM_MODEL_PATH")
+    previous_preset = os.environ.get("LLM_PRESET")
+    monkeypatch.setattr(
+        "cyoa.ui.app.update_user_config",
+        lambda **changes: saved.update(changes) or SimpleNamespace(**changes),
+    )
+
+    try:
+        result = SimpleNamespace(path="/tmp/models/demo.gguf")
+        app._apply_downloaded_model_selection(result)
+
+        assert os.environ["LLM_PROVIDER"] == "llama_cpp"
+        assert os.environ["LLM_MODEL_PATH"] == "/tmp/models/demo.gguf"
+        assert os.environ["LLM_PRESET"] == "balanced"
+        assert app.model_path == "/tmp/models/demo.gguf"
+        assert saved["setup_completed"] is True
+        assert saved["setup_choice"] == "download"
+        assert saved["runtime_preset"] == "local-fast"
+        app._sync_runtime_status.assert_called_once_with()
+    finally:
+        if previous_provider is None:
+            os.environ.pop("LLM_PROVIDER", None)
+        else:
+            os.environ["LLM_PROVIDER"] = previous_provider
+        if previous_model_path is None:
+            os.environ.pop("LLM_MODEL_PATH", None)
+        else:
+            os.environ["LLM_MODEL_PATH"] = previous_model_path
+        if previous_preset is None:
+            os.environ.pop("LLM_PRESET", None)
+        else:
+            os.environ["LLM_PRESET"] = previous_preset
+
+
+class ModelDownloadHarness(App[None]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.begin_first_run_model_download = MagicMock()
+        self.cancel_first_run_model_download = MagicMock()
+        self.screen_ref = ModelDownloadScreen(
+            SimpleNamespace(
+                label="7B (Balanced - Q5_K_M)",
+                filename="demo.gguf",
+                repo_id="Qwen/demo",
+            ),
+            models_dir="/tmp/cyoa-models",
+        )
+
+    def compose(self) -> ComposeResult:
+        yield Container()
+
+    async def on_mount(self) -> None:
+        self.push_screen(self.screen_ref)
+
+
+@pytest.mark.asyncio
+async def test_model_download_screen_wires_start_cancel_and_progress() -> None:
+    app = ModelDownloadHarness()
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.1)
+        await pilot.click("#btn-model-download-start")
+        await pilot.pause(0.1)
+        app.begin_first_run_model_download.assert_called_once()
+
+        app.screen_ref.update_progress(
+            SimpleNamespace(percent=40, stage="Downloading", detail="Pulling model weights.")
+        )
+        await pilot.pause(0.1)
+        progress = app.screen.query_one("#model-download-progress", ProgressBar)
+        detail = app.screen.query_one("#model-download-detail", Label)
+        assert progress.progress == 40
+        assert "Pulling model weights." in detail.render().plain
+
+        await pilot.click("#btn-model-download-cancel")
+        await pilot.pause(0.1)
+        app.cancel_first_run_model_download.assert_called_once_with()
 
 
 def test_cyoa_app_requires_first_run_until_setup_completed() -> None:

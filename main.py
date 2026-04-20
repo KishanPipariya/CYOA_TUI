@@ -177,11 +177,9 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:  # noqa:
             f"Unsupported preset {preset!r}. Expected one of: {', '.join(sorted(PRESETS))}."
         )
 
-    model = (
-        (args.model.strip() if isinstance(args.model, str) and args.model.strip() else None)
-        or os.getenv("LLM_MODEL_PATH")
-        or user_config.model_path
-    )
+    cli_model = args.model.strip() if isinstance(args.model, str) and args.model.strip() else None
+    env_model = os.getenv("LLM_MODEL_PATH")
+    saved_model = user_config.model_path
 
     provider_source = "default"
     raw_provider: str | None = None
@@ -194,6 +192,17 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:  # noqa:
     elif runtime_defaults.get("provider"):
         raw_provider = str(runtime_defaults["provider"])
         provider_source = "runtime_preset"
+
+    if cli_model:
+        model = cli_model
+    elif env_model:
+        model = env_model
+    elif raw_provider is None:
+        model = saved_model
+    elif raw_provider.strip().lower() == "llama_cpp" and provider_source in {"user_config", "runtime_preset"}:
+        model = saved_model
+    else:
+        model = None
 
     startup_note: str | None = None
     if raw_provider is None:

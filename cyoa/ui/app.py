@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import socket
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -29,6 +30,15 @@ from cyoa.core import constants, utils
 from cyoa.core.engine import StoryEngine
 from cyoa.core.events import Events, bus
 from cyoa.core.models import StoryNode
+from cyoa.core.model_download import (
+    DownloadProgress,
+    DownloadResult,
+    ModelDownloadCancelled,
+    ModelDownloadError,
+    get_models_dir,
+    recommend_model_for_current_machine,
+    download_recommended_model,
+)
 from cyoa.core.user_config import UserConfig, load_user_config, update_user_config
 from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import is_rag_diagnostics_enabled
@@ -37,6 +47,7 @@ from cyoa.ui.components import (
     FirstRunSetupScreen,
     GameWorkspace,
     JournalListItem,
+    ModelDownloadScreen,
     StatusDisplay,
     ThemeSpinner,
 )
@@ -159,6 +170,7 @@ class CYOAApp(
         self._bookmark_payloads: dict[str, dict[str, object]] = {}
         self._last_manual_save_turn: int | None = None
         self._last_manual_save_scene_id: str | None = None
+        self._model_download_cancel_event: threading.Event | None = None
 
         # Typewriter Narrator state
         self._typewriter_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -513,8 +525,16 @@ class CYOAApp(
             if selection == "mock" or selection == "ollama":
                 self._apply_first_run_selection(cast(Literal["mock", "ollama"], selection))
                 self._resume_startup_flow()
+            elif selection == "download":
+                self._present_model_download_setup()
 
         self.push_screen(FirstRunSetupScreen(ollama_available=self._ollama_available), on_selected)
+
+    def _present_model_download_setup(self) -> None:
+        recommendation = recommend_model_for_current_machine()
+        self.push_screen(
+            ModelDownloadScreen(recommendation, models_dir=str(get_models_dir()))
+        )
 
     def _resume_startup_flow(self) -> None:
         self.show_loading()
@@ -562,6 +582,89 @@ class CYOAApp(
             self._sync_runtime_status()
         except NoMatches:
             pass
+
+    def _apply_downloaded_model_selection(self, result: DownloadResult) -> None:
+        os.environ["LLM_PROVIDER"] = "llama_cpp"
+        os.environ["LLM_MODEL_PATH"] = result.path
+        os.environ["LLM_PRESET"] = "balanced"
+        self.model_path = result.path
+        self._runtime_diagnostics.update(
+            {
+                "runtime_preset": "local-fast",
+                "provider": "llama_cpp",
+                "model": os.path.basename(result.path),
+                "startup_note": "Using the local model downloaded during first-run setup.",
+            }
+        )
+        self._first_run_setup_pending = False
+        self._user_config = update_user_config(
+            provider="llama_cpp",
+            model_path=result.path,
+            preset="balanced",
+            runtime_preset="local-fast",
+            setup_completed=True,
+            setup_choice="download",
+        )
+        try:
+            self._sync_runtime_status()
+        except NoMatches:
+            pass
+
+    def begin_first_run_model_download(self, screen: ModelDownloadScreen) -> None:
+        if self._model_download_cancel_event is not None:
+            return
+        self._model_download_cancel_event = threading.Event()
+        self.run_worker(
+            self._run_first_run_model_download(screen, self._model_download_cancel_event),
+            exclusive=False,
+            group="setup",
+        )
+
+    def cancel_first_run_model_download(self) -> None:
+        if self._model_download_cancel_event is not None:
+            self._model_download_cancel_event.set()
+
+    def _publish_model_download_progress(
+        self,
+        screen: ModelDownloadScreen,
+        progress: DownloadProgress,
+    ) -> None:
+        if self.is_runtime_active():
+            screen.update_progress(progress)
+
+    async def _run_first_run_model_download(
+        self,
+        screen: ModelDownloadScreen,
+        cancel_event: threading.Event,
+    ) -> None:
+        try:
+            result = await asyncio.to_thread(
+                download_recommended_model,
+                progress_callback=lambda progress: self.call_from_thread(
+                    self._publish_model_download_progress, screen, progress
+                ),
+                cancel_event=cancel_event,
+            )
+        except ModelDownloadCancelled:
+            if self.is_runtime_active():
+                screen.mark_failed("Download cancelled before the model finished saving.")
+            self._model_download_cancel_event = None
+            return
+        except ModelDownloadError as exc:
+            if self.is_runtime_active():
+                screen.mark_failed(str(exc))
+            self._model_download_cancel_event = None
+            return
+
+        self._model_download_cancel_event = None
+        if not self.is_runtime_active():
+            return
+
+        self._apply_downloaded_model_selection(result)
+        screen.mark_complete(result.path)
+        self.notify("Local model ready. Continuing startup.", severity="information", timeout=4)
+        screen.dismiss(None)
+        self._resume_startup_flow()
 
     @work(exclusive=True)
     async def initialize_and_start(self, model_path: str) -> None:

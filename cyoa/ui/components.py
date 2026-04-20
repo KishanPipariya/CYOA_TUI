@@ -18,6 +18,7 @@ from textual.widgets import (
 )
 
 from cyoa.core import constants
+from cyoa.core.model_download import DownloadProgress, ModelRecommendation
 from cyoa.ui.presenters import (
     build_branch_preview,
     format_directives_label,
@@ -38,6 +39,7 @@ __all__ = [
     "HelpScreen",
     "LoadGameScreen",
     "GameWorkspace",
+    "ModelDownloadScreen",
     "OptionListScreen",
     "MainGamePanel",
     "FirstRunSetupScreen",
@@ -557,6 +559,7 @@ class FirstRunSetupScreen(ModalScreen[str]):
     BINDINGS = [
         ("q", "quick_demo", "Quick Demo"),
         ("o", "use_ollama", "Use Ollama"),
+        ("d", "download_model", "Download Local Model"),
     ]
 
     def __init__(self, *, ollama_available: bool, **kwargs: Any) -> None:
@@ -598,14 +601,13 @@ class FirstRunSetupScreen(ModalScreen[str]):
             )
             yield Label(ollama_note, classes="first-run-note")
             yield Button(
-                "Download Local Model (Coming Soon)",
+                "[b]D[/b]ownload Local Model",
                 id="btn-first-run-download",
                 variant="default",
-                disabled=True,
                 classes="first-run-option",
             )
             yield Label(
-                "Guided GGUF download lands in the next release slice. For now, use Quick Demo or Ollama.",
+                "Download a recommended GGUF into the app data folder and use it on future launches.",
                 classes="first-run-note",
             )
 
@@ -614,6 +616,8 @@ class FirstRunSetupScreen(ModalScreen[str]):
             self.dismiss("mock")
         elif event.button.id == "btn-first-run-ollama" and self._ollama_available:
             self.dismiss("ollama")
+        elif event.button.id == "btn-first-run-download":
+            self.dismiss("download")
 
     def action_quick_demo(self) -> None:
         self.dismiss("mock")
@@ -621,6 +625,123 @@ class FirstRunSetupScreen(ModalScreen[str]):
     def action_use_ollama(self) -> None:
         if self._ollama_available:
             self.dismiss("ollama")
+
+    def action_download_model(self) -> None:
+        self.dismiss("download")
+
+
+class ModelDownloadScreen(ModalScreen[None]):
+    """Modal that guides users through downloading a recommended local model."""
+
+    DEFAULT_CSS = """
+    ModelDownloadScreen {
+        align: center middle;
+        background: $background 80%;
+    }
+    #model-download-dialog {
+        width: 82;
+        max-width: 94%;
+    }
+    #model-download-progress {
+        margin: 1 0;
+    }
+    #model-download-actions {
+        width: 100%;
+        margin-top: 1;
+    }
+    #model-download-actions Button {
+        width: 1fr;
+    }
+    .model-download-note {
+        color: $text-muted;
+    }
+    """
+
+    def __init__(self, recommendation: ModelRecommendation, *, models_dir: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._recommendation = recommendation
+        self._models_dir = models_dir
+        self._started = False
+        self._finished = False
+
+    def compose(self) -> ComposeResult:
+        with DialogFrame(
+            id="model-download-dialog",
+            classes="dialog-frame dialog-frame-accent dialog-frame-scroll",
+        ):
+            yield Static("LOCAL MODEL SETUP", id="model-download-kicker")
+            yield Label("[b]Download A Recommended Model[/b]", classes="dialog-title")
+            yield Static(
+                (
+                    f"Recommended for this machine: {self._recommendation.label} "
+                    f"({self._recommendation.filename})"
+                ),
+                id="model-download-summary",
+                classes="dialog-message",
+            )
+            yield Label(
+                f"Source: {self._recommendation.repo_id}",
+                id="model-download-source",
+                classes="model-download-note",
+            )
+            yield Label(
+                f"Storage: {self._models_dir}",
+                id="model-download-target",
+                classes="model-download-note",
+            )
+            yield ProgressBar(total=100, show_percentage=True, show_eta=False, id="model-download-progress")
+            yield Label("Ready to download.", id="model-download-stage")
+            yield Label(
+                "Cancellation is best-effort and may wait for the current transfer step to finish.",
+                id="model-download-detail",
+                classes="model-download-note",
+            )
+            with DialogActions(id="model-download-actions", classes="dialog-actions"):
+                yield Button("Start Download", id="btn-model-download-start", variant="primary")
+                yield Button("Cancel", id="btn-model-download-cancel", variant="error")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-model-download-start" and not self._started:
+            self._started = True
+            self._set_busy_state()
+            if self.app is not None:
+                self.app.begin_first_run_model_download(self)
+        elif event.button.id == "btn-model-download-cancel":
+            if self._finished:
+                self.dismiss(None)
+            elif self.app is not None:
+                self.app.cancel_first_run_model_download()
+                self.mark_cancelling()
+
+    def _set_busy_state(self) -> None:
+        self.query_one("#btn-model-download-start", Button).disabled = True
+
+    def update_progress(self, progress: DownloadProgress) -> None:
+        self.query_one("#model-download-progress", ProgressBar).progress = progress.percent
+        self.query_one("#model-download-stage", Label).update(progress.stage)
+        self.query_one("#model-download-detail", Label).update(progress.detail)
+
+    def mark_cancelling(self) -> None:
+        self.query_one("#model-download-stage", Label).update("Cancelling")
+        self.query_one("#model-download-detail", Label).update(
+            "Stopping after the current transfer step finishes."
+        )
+        self.query_one("#btn-model-download-cancel", Button).disabled = True
+
+    def mark_failed(self, message: str) -> None:
+        self._finished = True
+        self.query_one("#model-download-stage", Label).update("Download failed")
+        self.query_one("#model-download-detail", Label).update(message)
+        self.query_one("#btn-model-download-cancel", Button).label = "Close"
+        self.query_one("#btn-model-download-cancel", Button).disabled = False
+
+    def mark_complete(self, path: str) -> None:
+        self._finished = True
+        self.query_one("#model-download-progress", ProgressBar).progress = 100
+        self.query_one("#model-download-stage", Label).update("Download complete")
+        self.query_one("#model-download-detail", Label).update(f"Saved model to {path}")
+        self.query_one("#btn-model-download-cancel", Button).label = "Continue"
+        self.query_one("#btn-model-download-cancel", Button).disabled = False
 
 
 class TextPromptScreen(ModalScreen[str]):
