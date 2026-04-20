@@ -1442,7 +1442,16 @@ async def test_restore_from_save_rebuilds_story_timeline(mock_app_dependencies, 
             {"kind": "branch_marker", "text": "**[Time fractures... you return to Turn 2]**"},
             {"kind": "story_turn", "text": "You return to the crossroads."},
         ]
-        assert len(list(app.query_one("#story-container").query(".story-turn"))) == 3
+        story_turns = list(app.query_one("#story-container").query(".story-turn"))
+        assert len(story_turns) == 3
+        assert story_turns[-1].has_class("current-turn")
+        assert not story_turns[-1].has_class("archived-turn")
+        assert all(turn.has_class("archived-turn") for turn in story_turns[:-1])
+
+        choice_widgets = list(app.query_one("#story-container").query(".player-choice"))
+        assert len(choice_widgets) == 2
+        assert choice_widgets[-1].has_class("latest-choice")
+        assert choice_widgets[0].has_class("archived-choice")
         assert app.engine.state.timeline_metadata == [
             {
                 "kind": "branch_restore",

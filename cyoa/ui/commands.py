@@ -40,6 +40,7 @@ class RestartCommand:
         new_turn = Markdown(constants.LOADING_ART, classes="story-turn", id="initial-turn")
         await container.mount(new_turn, before="#scene-art")
         host._current_turn_widget = new_turn
+        host._refresh_story_timeline_classes()
 
         app.query_one("#scene-art", Static).update("")
         app.query_one("#scene-art", Static).add_class("hidden")
@@ -95,6 +96,8 @@ class UndoCommand:
         else:
             host._current_turn_text = host._current_story
             host._current_turn_widget.update(host._current_turn_text)
+
+        host._refresh_story_timeline_classes()
 
         host._trim_story_segments_for_undo(host)
         if not host._story_segments:

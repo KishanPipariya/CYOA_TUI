@@ -261,6 +261,7 @@ class NavigationMixin:
         container.mount(new_turn, before="#scene-art")
         host._current_turn_widget = new_turn
         host._current_turn_text = ""
+        host._refresh_story_timeline_classes()
 
         host._scroll_to_bottom()
 

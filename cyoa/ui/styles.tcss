@@ -205,19 +205,47 @@ Toast.-error {
 }
 
 .story-turn {
-    background: $panel;
+    background: $panel 88%;
+    color: $text;
     padding: 1 2;
     margin: 0 0 1 0;
     border-left: wide $accent 35%;
+    border-right: solid $secondary 12%;
 }
 
 .player-choice {
-    background: $boost 45%;
-    color: $text-muted;
+    background: $accent 12%;
+    color: $text;
     padding: 1 2;
     margin: 0 0 1 4;
-    border-right: wide $accent 25%;
+    border-right: wide $accent 55%;
+    border-left: solid $accent 20%;
     text-align: right;
+}
+
+.story-turn.current-turn {
+    background: $panel;
+    border-left: wide $accent;
+    border-right: solid $accent 22%;
+}
+
+.story-turn.archived-turn {
+    background: $panel 72%;
+    color: $text-muted;
+    border-left: solid $secondary 38%;
+    border-right: solid $secondary 10%;
+}
+
+.player-choice.latest-choice {
+    background: $accent 18%;
+    border-right: wide $accent;
+}
+
+.player-choice.archived-choice {
+    background: $surface 55%;
+    color: $text-muted;
+    border-right: solid $secondary 28%;
+    border-left: solid $secondary 18%;
 }
 
 #scene-art {
@@ -454,6 +482,11 @@ Footer > .footer--highlight {
 .compact-layout .player-choice {
     margin-left: 2;
     padding: 1 1;
+}
+
+.compact-layout .story-turn.archived-turn,
+.compact-layout .player-choice.archived-choice {
+    color: $text;
 }
 
 .compact-layout #action-panel {

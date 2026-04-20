@@ -164,6 +164,8 @@ class PersistenceMixin:
             container.mount(new_turn, before="#scene-art")
             mixin_host._current_turn_widget = new_turn
 
+        mixin_host._refresh_story_timeline_classes()
+
         mixin_host._scroll_to_bottom()
 
     def _restore_journal_and_panels(self, app: object, ui_state: dict[str, object]) -> None:

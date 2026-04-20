@@ -216,6 +216,7 @@ class CYOAApp(
         self.query_one("#story-container", VerticalScroll).border_title = "Story"
 
         self._current_turn_widget = self.query_one("#initial-turn", Markdown)
+        self._refresh_story_timeline_classes()
         self._set_compact_layout(self.size.width)
         self.query_one(StatusDisplay).generation_preset = "balanced"
         self._sync_runtime_status()
@@ -512,6 +513,25 @@ class CYOAApp(
             return max(0, story_turns.index(self._current_turn_widget))
         except ValueError:
             return max(0, len(story_turns) - 1)
+
+    def _refresh_story_timeline_classes(self) -> None:
+        """Keep the latest narrative turn and latest player action visually distinct."""
+        story_container = self.query_one("#story-container")
+        story_turns = list(story_container.query(".story-turn"))
+        current_turn = self._current_turn_widget if self._current_turn_widget in story_turns else None
+        if current_turn is None and story_turns:
+            current_turn = story_turns[-1]
+            self._current_turn_widget = current_turn
+
+        for turn in story_turns:
+            turn.set_class(turn is current_turn, "current-turn")
+            turn.set_class(turn is not current_turn, "archived-turn")
+
+        choice_widgets = list(story_container.query(".player-choice"))
+        latest_choice = choice_widgets[-1] if choice_widgets else None
+        for choice in choice_widgets:
+            choice.set_class(choice is latest_choice, "latest-choice")
+            choice.set_class(choice is not latest_choice, "archived-choice")
 
     @staticmethod
     def _requires_first_run_setup(config: UserConfig) -> bool:

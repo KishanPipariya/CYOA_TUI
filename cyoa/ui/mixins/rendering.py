@@ -282,6 +282,7 @@ class RenderingMixin:
         container.mount(new_turn, before="#scene-art")
         host._current_turn_widget = new_turn
         host._current_turn_text = ""
+        host._refresh_story_timeline_classes()
 
         self.show_loading(selected_button_id=selected_button_id)
 
