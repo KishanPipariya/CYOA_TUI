@@ -79,12 +79,108 @@ Screen {
     align: center middle;
     width: 100%;
     height: auto;
+    margin-top: 1;
 }
 
 .dialog-actions Button {
     width: 1fr;
     min-width: 12;
-    margin: 0;
+    margin: 0 1 0 0;
+    min-height: 5;
+    padding: 0;
+    border: round $secondary 28%;
+    background: $panel 92%;
+    color: $text;
+}
+
+.dialog-actions Button:last-child {
+    margin-right: 0;
+}
+
+.dialog-actions Button > .textual-button--label {
+    text-align: center;
+    padding: 1 2;
+    text-style: bold;
+}
+
+.dialog-actions Button:focus {
+    border: round $accent;
+    background: $accent 16%;
+    color: $text;
+    tint: $accent 6%;
+}
+
+#confirm-dialog {
+    background: $surface;
+    border-title-color: $warning;
+}
+
+#confirm-message {
+    margin-bottom: 2;
+}
+
+#btn-confirm-yes {
+    background: $error 18%;
+    border: round $error 70%;
+    color: $text;
+}
+
+#btn-confirm-yes:focus {
+    background: $error 28%;
+    border: round $error;
+    tint: $error 10%;
+}
+
+#btn-confirm-no {
+    background: $primary 16%;
+    border: round $primary 65%;
+    color: $text;
+}
+
+#btn-confirm-no:focus {
+    background: $primary 26%;
+    border: round $primary;
+    tint: $primary 8%;
+}
+
+#startup-dialog {
+    background: $panel;
+}
+
+#startup-title {
+    color: $text;
+}
+
+#startup-message {
+    margin-bottom: 2;
+}
+
+#startup-hint {
+    margin-bottom: 1;
+}
+
+#btn-startup-resume {
+    background: $accent 20%;
+    border: round $accent 75%;
+    color: $text;
+}
+
+#btn-startup-resume:focus {
+    background: $accent 30%;
+    border: round $accent;
+    tint: $accent 10%;
+}
+
+#btn-startup-new {
+    background: $success 16%;
+    border: round $success 68%;
+    color: $text;
+}
+
+#btn-startup-new:focus {
+    background: $success 24%;
+    border: round $success;
+    tint: $success 8%;
 }
 
 /* ── Notifications ───────────────────────────────────────────── */
@@ -298,12 +394,16 @@ Toast.-error {
     overflow-x: hidden;
 }
 
+#story-container.loading-state {
+    overflow-y: hidden;
+}
+
 .story-turn {
     background: $panel 88%;
     color: $text;
     padding: 1 2;
     margin: 0 0 1 0;
-    border-left: wide $accent 35%;
+    border-left: solid $accent 45%;
     border-right: solid $secondary 12%;
 }
 
@@ -319,7 +419,7 @@ Toast.-error {
 
 .story-turn.current-turn {
     background: $panel;
-    border-left: wide $accent;
+    border-left: solid $accent;
     border-right: solid $accent 22%;
 }
 
@@ -485,6 +585,10 @@ ThemeSpinner {
     background: transparent;
 }
 
+#choices-container.loading-state {
+    display: none;
+}
+
 /* ── Buttons ────────────────────────────────────────────────── */
 Button {
     width: 100%;
@@ -500,7 +604,7 @@ Button {
     background: $surface;
     color: $text;
     border: round $secondary 30%;
-    border-left: wide $secondary 30%;
+    border-left: solid $secondary 42%;
     tint: transparent;
 }
 
@@ -512,15 +616,14 @@ Button > .textual-button--label {
 #choices-container Button > .textual-button--label {
     text-wrap: wrap;
     padding: 1 2;
-    text-style: bold;
+    text-style: none;
 }
 
 #choices-container Button:focus {
     background: $accent 15%;
     border: round $accent;
-    border-left: wide $accent;
+    border-left: solid $accent;
     color: $text;
-    text-style: bold;
     tint: $accent 6%;
 }
 
@@ -528,7 +631,7 @@ Button > .textual-button--label {
     background: $surface;
     color: $text-muted;
     border: round $secondary 20%;
-    border-left: wide $secondary 20%;
+    border-left: solid $secondary 28%;
     tint: transparent;
 }
 
@@ -538,21 +641,22 @@ Button > .textual-button--label {
 
 #choices-container Button.choice-card-available:hover {
     background: $panel;
-    border-left: wide $accent 48%;
+    border-left: solid $accent 60%;
 }
 
 #choices-container Button.choice-card-locked {
     background: $surface 82%;
+    border-left: solid $warning 42%;
 }
 
 #choices-container Button.choice-card-error {
     background: $warning 10%;
-    border-left: wide $warning 45%;
+    border-left: solid $warning 65%;
 }
 
 #choices-container Button.choice-card-ending {
     background: $success 12%;
-    border-left: wide $success 48%;
+    border-left: solid $success 65%;
 }
 
 .compact-layout #choices-container Button {

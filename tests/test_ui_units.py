@@ -156,6 +156,7 @@ class DummyChoiceContainer:
     def __init__(self) -> None:
         self.mounted: list[object] = []
         self.removed = False
+        self.classes: set[str] = set()
 
     def mount(self, widget: object) -> None:
         self.mounted.append(widget)
@@ -168,6 +169,12 @@ class DummyChoiceContainer:
         if getattr(widget_type, "__name__", "") == "Button":
             return list(self.mounted)
         return [widget for widget in self.mounted if isinstance(widget, widget_type)]
+
+    def add_class(self, name: str) -> None:
+        self.classes.add(name)
+
+    def remove_class(self, name: str) -> None:
+        self.classes.discard(name)
 
 
 class DummyChoiceButton:
@@ -1089,10 +1096,19 @@ def test_apply_ui_theme_styles_primary_surfaces_and_dynamic_widgets() -> None:
 def test_rendering_show_loading_and_mount_choice_buttons_cover_states():
     host = DummyRenderingChoiceHost()
     choices_container = DummyChoiceContainer()
+    story_container = MagicMock()
     keep = DummyChoiceButton("choice-keep")
     drop = DummyChoiceButton("choice-drop")
     loading_widget = MagicMock()
-    host.query_one = lambda selector, *_args: choices_container if selector == "#choices-container" else loading_widget
+    host.query_one = (
+        lambda selector, *_args: (
+            choices_container
+            if selector == "#choices-container"
+            else story_container
+            if selector == "#story-container"
+            else loading_widget
+        )
+    )
     host.is_runtime_active = lambda: True
 
     choices_container.mounted = [keep, drop]
@@ -1101,6 +1117,8 @@ def test_rendering_show_loading_and_mount_choice_buttons_cover_states():
     assert drop.removed is True
     assert keep.disabled is True
     assert keep.variant == "default"
+    story_container.add_class.assert_called_once_with("loading-state")
+    assert "loading-state" not in choices_container.classes
     loading_widget.remove_class.assert_called_once_with("hidden")
     assert host._loading_suffix_shown is True
 

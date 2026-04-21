@@ -53,7 +53,7 @@ def format_runtime_text(
 
 
 def build_choice_label(index: int, choice_text: str, disabled_reason: str | None = None) -> str:
-    label = f"[reverse]{index + 1}[/reverse]  {choice_text}"
+    label = f"[dim]{index + 1}.[/dim] {choice_text}"
     if disabled_reason:
-        return f"{label} [dim](Locked: {disabled_reason})[/dim]"
+        return f"{label}\n[dim]Locked: {disabled_reason}[/dim]"
     return label

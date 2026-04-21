@@ -151,8 +151,8 @@ async def test_app_startup_and_loading_state(mock_app_dependencies):
         choices_container = app.query_one("#choices-container", Container)
         buttons = list(choices_container.query(Button))
         assert len(buttons) == 2
-        assert str(buttons[0].label) == "1  Go North"
-        assert str(buttons[1].label) == "2  Go South"
+        assert str(buttons[0].label) == "1. Go North"
+        assert str(buttons[1].label) == "2. Go South"
 
         # Verify inventory was updated
         inventory_label = app.query_one("#inventory-label", Label)
@@ -433,8 +433,8 @@ async def test_choice_selection_via_keyboard(mock_app_dependencies):
         choices_container = app.query_one("#choices-container", Container)
         buttons = list(choices_container.query(Button))
         assert len(buttons) == 2
-        assert str(buttons[0].label) == "1  Open Door"
-        assert str(buttons[1].label) == "2  Go Back"
+        assert str(buttons[0].label) == "1. Open Door"
+        assert str(buttons[1].label) == "2. Go Back"
 
         # Verify inventory accumulated the new item
         inventory_label = app.query_one("#inventory-label", Label)
@@ -475,8 +475,8 @@ async def test_choice_selection_via_click(mock_app_dependencies):
         choices_container = app.query_one("#choices-container", Container)
         buttons = list(choices_container.query(Button))
         assert len(buttons) == 2
-        assert str(buttons[0].label) == "1  Open Door"
-        assert str(buttons[1].label) == "2  Go Back"
+        assert str(buttons[0].label) == "1. Open Door"
+        assert str(buttons[1].label) == "2. Go Back"
 
 
 @pytest.mark.asyncio
@@ -848,7 +848,7 @@ async def test_typewriter_worker_stops_cleanly_on_shutdown(mock_app_dependencies
 
 @pytest.mark.asyncio
 async def test_choice_buttons_have_number_labels(mock_app_dependencies):
-    """Test that choice buttons display numbered labels like [1], [2], etc."""
+    """Test that choice buttons display numbered labels like 1. and 2.."""
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
@@ -858,8 +858,8 @@ async def test_choice_buttons_have_number_labels(mock_app_dependencies):
         buttons = list(choices_container.query(Button))
 
         assert len(buttons) == 2
-        assert str(buttons[0].label).startswith("1 ")
-        assert str(buttons[1].label).startswith("2 ")
+        assert str(buttons[0].label).startswith("1.")
+        assert str(buttons[1].label).startswith("2.")
 
 
 @pytest.mark.asyncio

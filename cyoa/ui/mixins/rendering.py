@@ -35,6 +35,7 @@ class RenderingMixin:
             # First token batch arrived — loading state is visual-only (spinner).
             host._loading_suffix_shown = False
             app.query_one("#loading", Static).add_class("hidden")
+            app.query_one("#story-container", VerticalScroll).remove_class("loading-state")
 
             if host._current_story == constants.LOADING_ART:
                 host._current_story = ""
@@ -58,7 +59,9 @@ class RenderingMixin:
         if not host.is_runtime_active():
             return
         choices_container = app.query_one("#choices-container", Container)
+        app.query_one("#story-container", VerticalScroll).add_class("loading-state")
         if selected_button_id is not None:
+            choices_container.remove_class("loading-state")
             # Keep only the selected button, disable and dim it
             for btn in list(choices_container.query(Button)):
                 if btn.id != selected_button_id:
@@ -68,6 +71,7 @@ class RenderingMixin:
                     btn.variant = "default"
         else:
             choices_container.remove_children()
+            choices_container.add_class("loading-state")
         app.query_one("#loading", Static).remove_class("hidden")
 
         host._loading_suffix_shown = True
@@ -98,6 +102,7 @@ class RenderingMixin:
         if not host.is_runtime_active():
             return
         app.query_one("#loading", Static).add_class("hidden")
+        app.query_one("#story-container", VerticalScroll).remove_class("loading-state")
         host.mood = getattr(node, "mood", "default")
 
         is_error = node.narrative.startswith(constants.ERROR_NARRATIVE_PREFIX)
@@ -126,6 +131,7 @@ class RenderingMixin:
 
         # 6. Mount choices
         choices_container = app.query_one("#choices-container", Container)
+        choices_container.remove_class("loading-state")
         choices_container.remove_children()
         self._mount_choice_buttons(node, choices_container, is_error)
         host.apply_ui_theme()
@@ -208,7 +214,7 @@ class RenderingMixin:
             for i, choice in enumerate(node.choices):
                 # Unique ID per mount to avoid collisions if previous buttons haven't fully unmounted
                 btn_id = f"choice-t{as_mixin_host(self).turn_count}-{uuid4().hex[:6]}-{i}"
-                btn = Button(f"[b]{i + 1}[/b]  {choice.text}", id=btn_id, variant="default")
+                btn = Button(build_choice_label(i, choice.text), id=btn_id, variant="default")
                 btn.add_class("choice-card")
                 btn.add_class("choice-card-error")
                 choices_container.mount(btn)

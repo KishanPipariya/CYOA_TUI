@@ -116,7 +116,7 @@ class StatusBar(Container):
         self._spinner_frames = spinner_frames
 
     def compose(self) -> ComposeResult:
-        yield ThemeSpinner(frames=self._spinner_frames, id="loading")
+        yield ThemeSpinner(frames=self._spinner_frames, id="loading", classes="hidden")
         yield StatusDisplay(id="status-display")
 
 
