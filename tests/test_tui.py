@@ -962,6 +962,20 @@ async def test_notifications_remain_fully_visible_on_small_terminals(mock_app_de
 
 
 @pytest.mark.asyncio
+async def test_notifications_anchor_to_top_right(mock_app_dependencies) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(80, 24), notifications=True) as pilot:
+        await pilot.pause(1.0)
+        app.notify("Top-right placement check", severity="information", timeout=10)
+        await pilot.pause(0.2)
+
+        toast = app.query_one(Toast)
+        assert toast.region.y <= 2
+        assert toast.region.right >= app.size.width - 2
+
+
+@pytest.mark.asyncio
 async def test_story_container_defaults_to_borderless_surface(mock_app_dependencies) -> None:
     app = CYOAApp(model_path="dummy_path.gguf")
 
@@ -984,21 +998,23 @@ async def test_main_game_layout_fits_standard_terminal(mock_app_dependencies) ->
 
         assert app.compact_layout is False
 
-        main_container = app.query_one("#main-container", Container)
+        main_container = app.query_one("#main-container")
         story_container = app.query_one("#story-container", VerticalScroll)
         action_panel = app.query_one("#action-panel", Container)
-        action_dock = app.query_one("#action-dock", Container)
         status_bar = app.query_one("#status-bar", Container)
         choices_container = app.query_one("#choices-container", Container)
 
-        for widget in (main_container, story_container, action_panel):
+        for widget in (main_container, story_container, action_panel, status_bar, choices_container):
             _assert_region_within_screen(widget, app.size)
 
-        assert action_dock.styles.layout.name == "horizontal"
         assert status_bar.region.x >= action_panel.region.x
         assert status_bar.region.right <= action_panel.region.right
+        assert status_bar.region.y >= action_panel.region.y
+        assert status_bar.region.bottom <= action_panel.region.bottom
         assert choices_container.region.x >= action_panel.region.x
         assert choices_container.region.right <= action_panel.region.right
+        assert choices_container.region.y >= status_bar.region.bottom
+        assert choices_container.region.bottom <= action_panel.region.bottom
 
 
 @pytest.mark.asyncio
@@ -1010,21 +1026,23 @@ async def test_main_game_layout_fits_compact_terminal(mock_app_dependencies) -> 
 
         assert app.compact_layout is True
 
-        main_container = app.query_one("#main-container", Container)
+        main_container = app.query_one("#main-container")
         story_container = app.query_one("#story-container", VerticalScroll)
         action_panel = app.query_one("#action-panel", Container)
-        action_dock = app.query_one("#action-dock", Container)
         status_bar = app.query_one("#status-bar", Container)
         choices_container = app.query_one("#choices-container", Container)
 
-        for widget in (main_container, story_container, action_panel):
+        for widget in (main_container, story_container, action_panel, status_bar, choices_container):
             _assert_region_within_screen(widget, app.size)
 
-        assert action_dock.styles.layout.name == "vertical"
         assert status_bar.region.x >= action_panel.region.x
         assert status_bar.region.right <= action_panel.region.right
+        assert status_bar.region.y >= action_panel.region.y
+        assert status_bar.region.bottom <= action_panel.region.bottom
         assert choices_container.region.x >= action_panel.region.x
         assert choices_container.region.right <= action_panel.region.right
+        assert choices_container.region.y >= status_bar.region.bottom
+        assert choices_container.region.bottom <= action_panel.region.bottom
 
 
 @pytest.mark.asyncio
@@ -1046,7 +1064,7 @@ async def test_shipped_themes_render_stable_layouts(theme_name: str, mock_app_de
 
         assert "You awaken in a test dungeon." in app._current_story
 
-        main_container = app.query_one("#main-container", Container)
+        main_container = app.query_one("#main-container")
         story_container = app.query_one("#story-container", VerticalScroll)
         action_panel = app.query_one("#action-panel", Container)
 
@@ -1069,6 +1087,7 @@ async def test_modal_dialog_borders_do_not_clip_on_small_terminals(mock_app_depe
             (HelpScreen(), "#help-dialog"),
             (ConfirmScreen("Confirm a risky action?"), "#confirm-dialog"),
             (LoadGameScreen(["autosave_slot_1.json"]), "#load-dialog"),
+            (StartupChoiceScreen("Resume your last session?"), "#startup-dialog"),
             (TextPromptScreen("Rename bookmark", value="turn-3"), "#text-prompt-dialog"),
             (
                 BranchScreen(
@@ -1086,6 +1105,54 @@ async def test_modal_dialog_borders_do_not_clip_on_small_terminals(mock_app_depe
             _assert_region_within_screen(dialog, app.size)
             app.pop_screen()
             await pilot.pause(0.1)
+
+
+@pytest.mark.asyncio
+async def test_confirm_screen_supports_keyboard_focus_and_enter(mock_app_dependencies) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+    result: list[bool] = []
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        app.push_screen(ConfirmScreen("Quit the current run?"), result.append)
+        await pilot.pause(0.2)
+
+        yes_button = app.screen.query_one("#btn-confirm-yes", Button)
+        no_button = app.screen.query_one("#btn-confirm-no", Button)
+        assert app.focused is yes_button
+
+        await pilot.press("right")
+        await pilot.pause(0.1)
+        assert app.focused is no_button
+
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+        assert result == [False]
+
+
+@pytest.mark.asyncio
+async def test_startup_choice_screen_supports_keyboard_focus_and_enter(
+    mock_app_dependencies,
+) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+    result: list[str] = []
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        app.push_screen(StartupChoiceScreen("Resume your last session?"), result.append)
+        await pilot.pause(0.2)
+
+        resume_button = app.screen.query_one("#btn-startup-resume", Button)
+        new_button = app.screen.query_one("#btn-startup-new", Button)
+        assert app.focused is resume_button
+
+        await pilot.press("tab")
+        await pilot.pause(0.1)
+        assert app.focused is new_button
+
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+        assert result == ["new"]
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,7 @@
 from typing import Any
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.markup import escape
 from textual.reactive import reactive
 from textual.screen import ModalScreen
@@ -132,9 +132,8 @@ class ActionPanel(Container):
         self._spinner_frames = spinner_frames
 
     def compose(self) -> ComposeResult:
-        with Container(id="action-dock"):
-            yield StatusBar(spinner_frames=self._spinner_frames, id="status-bar")
-            yield ChoicePanel(id="choices-container")
+        yield StatusBar(spinner_frames=self._spinner_frames, id="status-bar")
+        yield ChoicePanel(id="choices-container")
 
 
 class JournalPanel(Container):
@@ -161,7 +160,7 @@ class StoryMapPanel(Container):
                 yield Tree("Story", id="story-map-tree")
 
 
-class MainGamePanel(Container):
+class MainGamePanel(Vertical):
     """Organism for the main play area within the workspace template."""
 
     def __init__(self, *, spinner_frames: list[str], **kwargs: Any) -> None:
@@ -192,6 +191,41 @@ class DialogFrame(Container):
 
 class DialogActions(Horizontal):
     """Reusable modal action row."""
+
+
+class ButtonGroupScreen(ModalScreen[Any]):
+    """Modal helper that provides keyboard-first button group navigation."""
+
+    def _action_buttons(self) -> list[Button]:
+        return [button for button in self.query(Button) if not button.disabled]
+
+    def _focus_first_action_button(self) -> None:
+        buttons = self._action_buttons()
+        if buttons:
+            self.call_after_refresh(buttons[0].focus)
+
+    def _move_action_focus(self, step: int) -> None:
+        buttons = self._action_buttons()
+        if not buttons:
+            return
+
+        focused = self.focused
+        try:
+            current_index = buttons.index(focused) if isinstance(focused, Button) else -1
+        except ValueError:
+            current_index = -1
+
+        if current_index == -1:
+            target = buttons[0] if step > 0 else buttons[-1]
+        else:
+            target = buttons[(current_index + step) % len(buttons)]
+        target.focus()
+
+    def action_focus_next_button(self) -> None:
+        self._move_action_focus(1)
+
+    def action_focus_previous_button(self) -> None:
+        self._move_action_focus(-1)
 
 
 class BranchScreen(ModalScreen[int]):
@@ -278,7 +312,7 @@ class ThemeSpinner(Static):
         self.update(escape(self.frames[self._frame_idx]))
 
 
-class ConfirmScreen(ModalScreen[bool]):
+class ConfirmScreen(ButtonGroupScreen):
     """A simple Yes/No confirmation dialog."""
 
     DEFAULT_CSS = """
@@ -289,11 +323,21 @@ class ConfirmScreen(ModalScreen[bool]):
     #confirm-dialog {
         width: 50;
     }
+    #confirm-buttons {
+        width: 1fr;
+        margin-top: 1;
+    }
     """
 
     BINDINGS = [
         ("y", "confirm", "Yes"),
         ("n", "cancel", "No"),
+        ("left", "focus_previous_button", "Previous"),
+        ("right", "focus_next_button", "Next"),
+        ("up", "focus_previous_button", "Previous"),
+        ("down", "focus_next_button", "Next"),
+        ("tab", "focus_next_button", "Next"),
+        ("shift+tab", "focus_previous_button", "Previous"),
         ("escape", "cancel", "Cancel"),
     ]
 
@@ -307,6 +351,9 @@ class ConfirmScreen(ModalScreen[bool]):
             with DialogActions(id="confirm-buttons", classes="dialog-actions"):
                 yield Button("[b]Y[/b]es", id="btn-confirm-yes", variant="error")
                 yield Button("[b]N[/b]o", id="btn-confirm-no", variant="primary")
+
+    def on_mount(self) -> None:
+        self._focus_first_action_button()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-confirm-yes":
@@ -490,7 +537,7 @@ class OptionListScreen(ModalScreen[str]):
         self.dismiss(None)
 
 
-class StartupChoiceScreen(ModalScreen[str]):
+class StartupChoiceScreen(ButtonGroupScreen):
     """Startup modal that lets the player resume or begin a fresh run."""
 
     DEFAULT_CSS = """
@@ -503,7 +550,7 @@ class StartupChoiceScreen(ModalScreen[str]):
         max-width: 92%;
     }
     #startup-buttons {
-        width: 100%;
+        width: 1fr;
         margin-top: 1;
     }
     #startup-buttons Button {
@@ -515,6 +562,12 @@ class StartupChoiceScreen(ModalScreen[str]):
     BINDINGS = [
         ("r", "resume", "Resume"),
         ("n", "new_game", "New Game"),
+        ("left", "focus_previous_button", "Previous"),
+        ("right", "focus_next_button", "Next"),
+        ("up", "focus_previous_button", "Previous"),
+        ("down", "focus_next_button", "Next"),
+        ("tab", "focus_next_button", "Next"),
+        ("shift+tab", "focus_previous_button", "Previous"),
     ]
 
     def __init__(self, message: str, **kwargs: Any) -> None:
@@ -533,6 +586,9 @@ class StartupChoiceScreen(ModalScreen[str]):
             with DialogActions(id="startup-buttons", classes="dialog-actions"):
                 yield Button("[b]R[/b]esume Previous Save", id="btn-startup-resume", variant="primary")
                 yield Button("[b]N[/b]ew Game", id="btn-startup-new", variant="success")
+
+    def on_mount(self) -> None:
+        self._focus_first_action_button()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-startup-resume":
