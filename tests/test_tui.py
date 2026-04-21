@@ -13,6 +13,7 @@ from textual.worker import WorkerFailed
 
 from cyoa.core.events import EventBus, EventDispatchError, Events, bus
 from cyoa.core.models import Choice, ChoiceRequirement, StoryNode
+from cyoa.core.theme_loader import load_theme
 from cyoa.ui.app import CYOAApp
 from cyoa.ui.components import (
     BranchScreen,
@@ -972,6 +973,89 @@ async def test_story_container_defaults_to_borderless_surface(mock_app_dependenc
         assert story.styles.border_right[0] == ""
         assert story.styles.border_bottom[0] == ""
         assert story.styles.border_left[0] == ""
+
+
+@pytest.mark.asyncio
+async def test_main_game_layout_fits_standard_terminal(mock_app_dependencies) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(160, 42)) as pilot:
+        await pilot.pause(1.0)
+
+        assert app.compact_layout is False
+
+        main_container = app.query_one("#main-container", Container)
+        story_container = app.query_one("#story-container", VerticalScroll)
+        action_panel = app.query_one("#action-panel", Container)
+        action_dock = app.query_one("#action-dock", Container)
+        status_bar = app.query_one("#status-bar", Container)
+        choices_container = app.query_one("#choices-container", Container)
+
+        for widget in (main_container, story_container, action_panel):
+            _assert_region_within_screen(widget, app.size)
+
+        assert action_dock.styles.layout.name == "horizontal"
+        assert status_bar.region.x >= action_panel.region.x
+        assert status_bar.region.right <= action_panel.region.right
+        assert choices_container.region.x >= action_panel.region.x
+        assert choices_container.region.right <= action_panel.region.right
+
+
+@pytest.mark.asyncio
+async def test_main_game_layout_fits_compact_terminal(mock_app_dependencies) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(100, 34)) as pilot:
+        await pilot.pause(1.0)
+
+        assert app.compact_layout is True
+
+        main_container = app.query_one("#main-container", Container)
+        story_container = app.query_one("#story-container", VerticalScroll)
+        action_panel = app.query_one("#action-panel", Container)
+        action_dock = app.query_one("#action-dock", Container)
+        status_bar = app.query_one("#status-bar", Container)
+        choices_container = app.query_one("#choices-container", Container)
+
+        for widget in (main_container, story_container, action_panel):
+            _assert_region_within_screen(widget, app.size)
+
+        assert action_dock.styles.layout.name == "vertical"
+        assert status_bar.region.x >= action_panel.region.x
+        assert status_bar.region.right <= action_panel.region.right
+        assert choices_container.region.x >= action_panel.region.x
+        assert choices_container.region.right <= action_panel.region.right
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "theme_name",
+    ["dark_dungeon", "space_explorer", "haunted_observatory"],
+)
+async def test_shipped_themes_render_stable_layouts(theme_name: str, mock_app_dependencies) -> None:
+    theme = load_theme(theme_name)
+    app = CYOAApp(
+        model_path="dummy_path.gguf",
+        accent_color=theme["accent_color"],
+        spinner_frames=theme["spinner_frames"],
+        ui_theme=theme["ui"],
+    )
+
+    async with app.run_test(size=(140, 38)) as pilot:
+        await pilot.pause(1.0)
+
+        assert "You awaken in a test dungeon." in app._current_story
+
+        main_container = app.query_one("#main-container", Container)
+        story_container = app.query_one("#story-container", VerticalScroll)
+        action_panel = app.query_one("#action-panel", Container)
+
+        for widget in (main_container, story_container, action_panel):
+            _assert_region_within_screen(widget, app.size)
+
+        buttons = list(app.query_one("#choices-container", Container).query(Button))
+        assert len(buttons) == 2
+        assert app._ui_theme == theme["ui"]
 
 
 @pytest.mark.asyncio
