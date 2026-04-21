@@ -555,17 +555,19 @@ Footer {
     color: $text-muted;
     dock: bottom;
     padding: 0 1;
+    border-top: solid $secondary 10%;
 }
 
 Footer > .footer--key {
-    background: $accent 20%;
+    background: $accent 14%;
     color: $accent;
     text-style: bold;
     margin-right: 1;
+    padding: 0 1;
 }
 
 Footer > .footer--highlight {
-    background: $accent;
+    background: $accent 22%;
     color: $surface;
 }
 
@@ -585,58 +587,137 @@ Footer > .footer--highlight {
     transition: background 300ms, border 300ms;
 }
 
-/* Mysterious: Deep purples and indigo */
+/* Mysterious: Deep indigo with arcane highlights */
 .mood-mysterious #story-container {
-    border: thick $primary;
-    background: $panel 10%;
+    border-left: wide $primary;
+    background: $primary 7%;
 }
 .mood-mysterious #choices-container {
-    border: none;
+    background: $primary 3%;
+}
+.mood-mysterious #choices-container Button:focus {
+    background: $primary 16%;
+    border: round $primary;
+    border-left: wide $accent;
+}
+.mood-mysterious #status-display,
+.mood-mysterious .side-panel-shell {
+    border: round $primary 32%;
+    background: $primary 8%;
 }
 
-/* Heroic: Gold and bright highlights */
+/* Heroic: Brass and lifted contrast */
 .mood-heroic #story-container {
-    border: thick #FFD700;
+    border-left: wide #FFD700;
     background: #FFD700 8%;
 }
 .mood-heroic #choices-container {
-    border: none;
+    background: #FFD700 3%;
+}
+.mood-heroic #choices-container Button:focus {
+    background: #FFD700 16%;
+    border: round #FFD700;
+    border-left: wide #FFD700;
+    color: $text;
+}
+.mood-heroic #status-display,
+.mood-heroic .side-panel-shell {
+    border: round #FFD700 30%;
+    background: #FFD700 7%;
 }
 
-/* Combat: Red alerts and aggressive borders */
+/* Combat: Sharper danger treatment without overpowering the screen */
 .mood-combat #story-container {
-    border: heavy $error;
+    border-left: wide $error;
     background: $error 8%;
 }
 .mood-combat #choices-container {
-    border: none;
+    background: $error 3%;
+}
+.mood-combat #choices-container Button:focus {
+    background: $error 16%;
+    border: round $error;
+    border-left: wide $error;
+}
+.mood-combat #status-display,
+.mood-combat .side-panel-shell {
+    border: round $error 34%;
+    background: $error 7%;
 }
 
-/* Ethereal: Cyan, celestial glow */
+/* Ethereal: Cool cyan glow */
 .mood-ethereal #story-container {
-    border: outer cyan;
+    border-left: wide cyan;
     background: cyan 8%;
 }
 .mood-ethereal #choices-container {
-    border: none;
+    background: cyan 3%;
+}
+.mood-ethereal #choices-container Button:focus {
+    background: cyan 16%;
+    border: round cyan;
+    border-left: wide cyan;
+}
+.mood-ethereal #status-display,
+.mood-ethereal .side-panel-shell {
+    border: round cyan 34%;
+    background: cyan 7%;
 }
 
-/* Dark: Gritty grays and dim text */
+/* Dark: Low-light slate and reduced glow */
 .mood-dark #story-container {
-    border: tall gray;
+    border-left: wide gray;
     background: gray 8%;
 }
 .mood-dark #choices-container {
-    border: none;
+    background: gray 3%;
+}
+.mood-dark #choices-container Button:focus {
+    background: gray 16%;
+    border: round gray;
+    border-left: wide gray;
+}
+.mood-dark #status-display,
+.mood-dark .side-panel-shell {
+    border: round gray 30%;
+    background: gray 7%;
 }
 
-/* Grimy: Earthy greens and browns */
+/* Grimy: Mossy, weathered surfaces */
 .mood-grimy #story-container {
-    border: heavy #556B2F;
+    border-left: wide #556B2F;
     background: #556B2F 8%;
 }
 .mood-grimy #choices-container {
-    border: none;
+    background: #556B2F 3%;
+}
+.mood-grimy #choices-container Button:focus {
+    background: #556B2F 16%;
+    border: round #556B2F;
+    border-left: wide #556B2F;
+}
+.mood-grimy #status-display,
+.mood-grimy .side-panel-shell {
+    border: round #556B2F 30%;
+    background: #556B2F 7%;
+}
+
+.mood-mysterious #action-panel,
+.mood-heroic #action-panel,
+.mood-combat #action-panel,
+.mood-ethereal #action-panel,
+.mood-dark #action-panel,
+.mood-grimy #action-panel {
+    border-top: solid $accent 32%;
+}
+
+.mood-mysterious ThemeSpinner,
+.mood-heroic ThemeSpinner,
+.mood-combat ThemeSpinner,
+.mood-ethereal ThemeSpinner,
+.mood-dark ThemeSpinner,
+.mood-grimy ThemeSpinner {
+    text-style: bold;
 }
 
 /* ── Utilities ──────────────────────────────────────────────── */
