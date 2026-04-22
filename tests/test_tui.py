@@ -113,6 +113,24 @@ def _assert_region_within_screen(widget: Any, screen_size: Any) -> None:
     assert region.bottom <= screen_size.height
 
 
+def _assert_region_within_parent(widget: Any, parent: Any) -> None:
+    """Assert that a widget's full box, including borders, remains inside its parent."""
+    region = widget.region
+    parent_region = parent.region
+    assert region.x >= parent_region.x
+    assert region.y >= parent_region.y
+    assert region.right <= parent_region.right
+    assert region.bottom <= parent_region.bottom
+
+
+def _assert_horizontal_region_within_parent(widget: Any, parent: Any) -> None:
+    """Assert that a widget's horizontal border box remains inside its parent."""
+    region = widget.region
+    parent_region = parent.region
+    assert region.x >= parent_region.x
+    assert region.right <= parent_region.right
+
+
 @pytest.fixture
 def mock_app_dependencies():
     """Mock the LLM Generator and DB to be fast and deterministic in UI tests."""
@@ -862,6 +880,24 @@ async def test_choice_buttons_have_number_labels(mock_app_dependencies):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("size", [(160, 42), (100, 34)])
+async def test_choice_buttons_keep_top_and_left_borders(
+    size: tuple[int, int], mock_app_dependencies
+) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause(1.0)
+
+        buttons = list(app.query_one("#choices-container", Container).query(Button))
+        assert buttons
+
+        for button in buttons:
+            assert button.styles.border_top[0] != ""
+            assert button.styles.border_left[0] != ""
+
+
+@pytest.mark.asyncio
 async def test_undo_restores_previous_state(mock_app_dependencies):
     """Test that pressing 'u' after a choice restores the previous turn state."""
     app = CYOAApp(model_path="dummy_path.gguf")
@@ -1015,6 +1051,27 @@ async def test_main_game_layout_fits_standard_terminal(mock_app_dependencies) ->
         assert choices_container.region.y >= status_bar.region.bottom
         assert choices_container.region.bottom <= action_panel.region.bottom
 
+        for button in choices_container.query(Button):
+            _assert_region_within_screen(button, app.size)
+            _assert_region_within_parent(button, action_panel)
+
+        status_display = app.query_one("#status-display")
+        _assert_region_within_screen(status_display, app.size)
+        _assert_region_within_parent(status_display, status_bar)
+
+        for widget in (
+            app.query_one("#stats-text"),
+            app.query_one("#runtime-text"),
+            app.query_one("#inventory-label"),
+            app.query_one("#objectives-label"),
+            app.query_one("#directives-label"),
+        ):
+            _assert_region_within_screen(widget, app.size)
+            _assert_region_within_parent(widget, status_bar)
+
+        for story_widget in story_container.query(".story-turn"):
+            _assert_horizontal_region_within_parent(story_widget, story_container)
+
 
 @pytest.mark.asyncio
 async def test_main_game_layout_fits_compact_terminal(mock_app_dependencies) -> None:
@@ -1042,6 +1099,47 @@ async def test_main_game_layout_fits_compact_terminal(mock_app_dependencies) -> 
         assert choices_container.region.right <= action_panel.region.right
         assert choices_container.region.y >= status_bar.region.bottom
         assert choices_container.region.bottom <= action_panel.region.bottom
+
+        for button in choices_container.query(Button):
+            _assert_region_within_screen(button, app.size)
+            _assert_region_within_parent(button, action_panel)
+
+        status_display = app.query_one("#status-display")
+        _assert_region_within_screen(status_display, app.size)
+        _assert_region_within_parent(status_display, status_bar)
+
+        for widget in (
+            app.query_one("#stats-text"),
+            app.query_one("#runtime-text"),
+            app.query_one("#inventory-label"),
+            app.query_one("#objectives-label"),
+            app.query_one("#directives-label"),
+        ):
+            _assert_region_within_screen(widget, app.size)
+            _assert_region_within_parent(widget, status_bar)
+
+        for story_widget in story_container.query(".story-turn"):
+            _assert_horizontal_region_within_parent(story_widget, story_container)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", [(160, 42), (100, 34)])
+async def test_story_entries_and_player_choice_borders_stay_inside_story_pane(
+    size: tuple[int, int], mock_app_dependencies
+) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause(1.0)
+        app.action_skip_typewriter()
+        await pilot.press("1")
+        await pilot.pause(1.0)
+        app.action_skip_typewriter()
+
+        story_container = app.query_one("#story-container", VerticalScroll)
+
+        for story_widget in story_container.query(".story-turn, .player-choice"):
+            _assert_horizontal_region_within_parent(story_widget, story_container)
 
 
 @pytest.mark.asyncio
@@ -1102,6 +1200,11 @@ async def test_modal_dialog_borders_do_not_clip_on_small_terminals(mock_app_depe
             await pilot.pause(0.1)
             dialog = app.screen.query_one(selector)
             _assert_region_within_screen(dialog, app.size)
+
+            for widget in dialog.query("Button, Input, ListView, Tree"):
+                _assert_region_within_screen(widget, app.size)
+                _assert_region_within_parent(widget, dialog)
+
             app.pop_screen()
             await pilot.pause(0.1)
 

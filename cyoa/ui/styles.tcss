@@ -222,6 +222,34 @@ Toast.-error {
     min-width: 0;
 }
 
+.compact-layout .dialog-frame {
+    padding: 1;
+}
+
+.compact-layout .dialog-actions {
+    margin-top: 0;
+}
+
+.compact-layout .dialog-actions Button {
+    min-height: 3;
+}
+
+.compact-layout .dialog-actions Button > .textual-button--label {
+    padding: 0 1;
+}
+
+.compact-layout #startup-kicker,
+.compact-layout .dialog-title,
+.compact-layout #startup-hint,
+.compact-layout #startup-buttons {
+    margin-bottom: 0;
+}
+
+.compact-layout #startup-message {
+    margin-bottom: 1;
+    padding: 0 1;
+}
+
 /* ── Main Layout Containers ──────────────────────────────────── */
 #workspace {
     height: 1fr;
@@ -882,4 +910,5 @@ Footer > .footer--highlight {
 
 .compact-layout #choices-container {
     max-height: 14;
+    padding: 0 1;
 }

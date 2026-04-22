@@ -1182,6 +1182,12 @@ def test_app_notification_and_cache_helpers_cover_ui_shell(monkeypatch: pytest.M
     monkeypatch.setattr(app, "notify", lambda message, *, severity, timeout: notified.append((message, severity, timeout)))
     monkeypatch.setattr(app, "set_timer", lambda *_args, **_kwargs: timer)
 
+    app._running = False
+    app.queue_notification("ignored", severity="information", timeout=2)
+    assert app._notification_buffer == []
+    assert app._notification_timer is None
+
+    app._running = True
     app.queue_notification("alpha", severity="information", timeout=2)
     app.queue_notification("alpha", severity="information", timeout=2)
     app.queue_notification("beta", severity="warning", timeout=4)

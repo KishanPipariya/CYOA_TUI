@@ -130,7 +130,10 @@ class ProviderResponseError(RuntimeError):
 
 
 class LlamaCppProvider(LLMProvider):
-    _CLOSE_TIMEOUT_SECONDS = 2.0
+    # Cancellation is only observed at token boundaries inside llama.cpp. On
+    # slower local models the current token can easily take longer than a
+    # couple of seconds, so teardown needs a more patient grace window.
+    _CLOSE_TIMEOUT_SECONDS = 10.0
     _THREAD_JOIN_SLICE_SECONDS = 0.05
 
     def __init__(self, model_path: str, n_ctx: int = 4096):
@@ -202,6 +205,50 @@ class LlamaCppProvider(LLMProvider):
             ]
         return params
 
+    def _build_json_repair_messages(
+        self,
+        messages: list[dict[str, str]],
+        schema: dict[str, Any] | None,
+    ) -> list[dict[str, str]]:
+        """Fallback prompt for models/backends that reject native JSON grammar mode."""
+        repaired_messages = list(messages)
+        instruction = (
+            "Respond with ONLY a valid JSON object. "
+            "Do not include markdown fences, commentary, or any text before or after the JSON."
+        )
+        if schema:
+            instruction += f" Follow this JSON schema as closely as possible: {json.dumps(schema, separators=(',', ':'))}"
+        repaired_messages.append({"role": "user", "content": instruction})
+        return repaired_messages
+
+    def _stream_completion_with_json_fallback(
+        self,
+        messages: list[dict[str, str]],
+        schema: dict[str, Any] | None,
+        max_tokens: int,
+        temperature: float,
+        cancel_event: threading.Event,
+    ) -> Iterator[Any]:
+        params = self._prepare_stream_params(messages, schema, max_tokens, temperature, cancel_event)
+        try:
+            return cast(Iterator[Any], self.llm.create_chat_completion(**cast(Any, params)))
+        except RuntimeError as exc:
+            if not schema:
+                raise
+            logger.warning(
+                "llama.cpp structured JSON failed, retrying without response_format: %s",
+                exc,
+            )
+            fallback_messages = self._build_json_repair_messages(messages, schema)
+            fallback_params = self._prepare_stream_params(
+                fallback_messages,
+                None,
+                max_tokens,
+                temperature,
+                cancel_event,
+            )
+            return cast(Iterator[Any], self.llm.create_chat_completion(**cast(Any, fallback_params)))
+
     def _start_generation_session(self) -> LLMObservedSession:
         return LLMObservedSession(model_name=self.model_path, task="generation").start()
 
@@ -252,8 +299,13 @@ class LlamaCppProvider(LLMProvider):
         temperature: float,
         cancel_event: threading.Event,
     ) -> Iterator[Any]:
-        params = self._prepare_stream_params(messages, schema, max_tokens, temperature, cancel_event)
-        return cast(Iterator[Any], self.llm.create_chat_completion(**cast(Any, params)))
+        return self._stream_completion_with_json_fallback(
+            messages,
+            schema,
+            max_tokens,
+            temperature,
+            cancel_event,
+        )
 
     def _extract_stream_token(self, chunk: Any) -> str:
         if not isinstance(chunk, dict):
@@ -450,7 +502,8 @@ class LlamaCppProvider(LLMProvider):
                     del self.llm
                 else:
                     logger.warning(
-                        "LlamaCpp lock held during close(); active generation did not stop in time."
+                        "LlamaCpp lock held during close() after %.1fs; active generation did not stop in time.",
+                        self._CLOSE_TIMEOUT_SECONDS,
                     )
         finally:
             if acquired:

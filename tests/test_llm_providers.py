@@ -112,6 +112,54 @@ def test_llama_cpp_prepare_stream_params_omits_optional_fields(mock_llama) -> No
     }
 
 
+def test_llama_cpp_build_json_repair_messages_appends_instruction(mock_llama) -> None:
+    provider = LlamaCppProvider(model_path="dummy.gguf")
+    schema = {"type": "object", "required": ["narrative"]}
+
+    repaired = provider._build_json_repair_messages(
+        [{"role": "user", "content": "Tell me a story"}],
+        schema,
+    )
+
+    assert repaired[:-1] == [{"role": "user", "content": "Tell me a story"}]
+    assert repaired[-1]["role"] == "user"
+    assert "ONLY a valid JSON object" in repaired[-1]["content"]
+    assert '"required":["narrative"]' in repaired[-1]["content"]
+
+
+def test_llama_cpp_stream_completion_retries_without_response_format_on_runtime_error(mock_llama) -> None:
+    provider = LlamaCppProvider(model_path="dummy.gguf")
+    cancel_event = threading.Event()
+    schema = {"type": "object"}
+    streamed = [{"choices": [{"delta": {"content": '{"narrative":"Recovered"}'}}]}]
+
+    mock_llama.return_value.create_chat_completion.side_effect = [
+        RuntimeError("Unexpected empty grammar stack after accepting piece: @entries"),
+        streamed,
+    ]
+
+    result = list(
+        provider._stream_completion(
+            [{"role": "user", "content": "hi"}],
+            schema,
+            32,
+            0.2,
+            cancel_event,
+        )
+    )
+
+    assert result == streamed
+    assert mock_llama.return_value.create_chat_completion.call_count == 2
+
+    first_call = mock_llama.return_value.create_chat_completion.call_args_list[0].kwargs
+    second_call = mock_llama.return_value.create_chat_completion.call_args_list[1].kwargs
+
+    assert first_call["response_format"] == {"type": "json_object", "schema": schema}
+    assert "response_format" not in second_call
+    assert second_call["messages"][-1]["role"] == "user"
+    assert "ONLY a valid JSON object" in second_call["messages"][-1]["content"]
+
+
 def test_provider_capabilities_are_normalized(mock_llama) -> None:
     from cyoa.llm.providers import MockProvider
 
