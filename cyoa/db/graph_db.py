@@ -4,21 +4,33 @@ import uuid
 from collections.abc import Iterable
 from typing import Any, TypedDict, cast
 
-try:
-    from neo4j import GraphDatabase
-    from neo4j.exceptions import AuthError, ServiceUnavailable
+from cyoa.core.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
+from cyoa.core.constants import DEFAULT_NEO4J_URI
+from cyoa.core.observability import DBObservedSession
 
+GraphDatabase: Any
+AuthError: Any
+ServiceUnavailable: Any
+
+try:
+    from neo4j import GraphDatabase as Neo4jGraphDatabase
+    from neo4j.exceptions import AuthError as Neo4jAuthError
+    from neo4j.exceptions import ServiceUnavailable as Neo4jServiceUnavailable
+
+    GraphDatabase = Neo4jGraphDatabase
+    AuthError = Neo4jAuthError
+    ServiceUnavailable = Neo4jServiceUnavailable
     _NEO4J_AVAILABLE = True
 except ImportError:  # pragma: no cover - exercised via fallback behavior
     _NEO4J_AVAILABLE = False
 
-    class AuthError(Exception):
+    class _FallbackAuthError(Exception):
         """Fallback when the optional neo4j dependency is absent."""
 
-    class ServiceUnavailable(Exception):
+    class _FallbackServiceUnavailable(Exception):
         """Fallback when the optional neo4j dependency is absent."""
 
-    class GraphDatabase:
+    class _FallbackGraphDatabase:
         @staticmethod
         def driver(*args: Any, **kwargs: Any) -> Any:
             del args, kwargs
@@ -26,10 +38,9 @@ except ImportError:  # pragma: no cover - exercised via fallback behavior
                 "neo4j is not installed. Install the 'graph' extra to enable graph persistence."
             )
 
-from cyoa.core.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
-from cyoa.core.constants import DEFAULT_NEO4J_URI
-from cyoa.core.observability import DBObservedSession
-
+    GraphDatabase = _FallbackGraphDatabase
+    AuthError = _FallbackAuthError
+    ServiceUnavailable = _FallbackServiceUnavailable
 logger = logging.getLogger(__name__)
 
 

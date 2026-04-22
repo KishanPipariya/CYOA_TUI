@@ -346,7 +346,6 @@ class PersistenceMixin:
                     "✦ Start a New Adventure",
                     id="btn-new-adventure",
                     variant="success",
-                    action="restart",
                 )
             )
         host.apply_ui_theme()

@@ -102,8 +102,8 @@ def test_validate_startup_config_applies_runtime_preset_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
-
-    config = main.validate_startup_config(_args(runtime_preset="mock-smoke"))
+    with patch("cyoa.core.user_config.load_user_config", return_value=UserConfig()):
+        config = main.validate_startup_config(_args(runtime_preset="mock-smoke"))
 
     assert config.runtime_preset == "mock-smoke"
     assert config.provider == "mock"
@@ -156,7 +156,10 @@ def test_validate_startup_config_uses_saved_user_config_defaults(
     assert config.preset == "balanced"
 
 
-def test_validate_startup_config_prefers_cli_args_over_saved_config() -> None:
+def test_validate_startup_config_prefers_cli_args_over_saved_config(tmp_path) -> None:
+    model_path = tmp_path / "cli.gguf"
+    model_path.write_text("stub", encoding="utf-8")
+
     with patch(
         "cyoa.core.user_config.load_user_config",
         return_value=UserConfig(
@@ -167,12 +170,25 @@ def test_validate_startup_config_prefers_cli_args_over_saved_config() -> None:
         ),
     ):
         config = main.validate_startup_config(
-            _args(model="/models/cli.gguf", theme="dark_dungeon", preset="precise")
+            _args(model=str(model_path), theme="dark_dungeon", preset="precise")
         )
 
-    assert config.model == "/models/cli.gguf"
+    assert config.model == str(model_path)
     assert config.theme == "dark_dungeon"
     assert config.preset == "precise"
+
+
+def test_validate_startup_config_cli_model_overrides_mock_provider_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    model_path = tmp_path / "cli.gguf"
+    model_path.write_text("stub", encoding="utf-8")
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+
+    config = main.validate_startup_config(_args(model=str(model_path)))
+
+    assert config.provider == "llama_cpp"
+    assert config.model == str(model_path)
 
 
 @pytest.mark.smoke

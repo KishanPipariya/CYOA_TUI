@@ -162,7 +162,12 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:  # noqa:
 
     provider_source = "default"
     raw_provider: str | None = None
-    if "LLM_PROVIDER" in os.environ:
+    if cli_model:
+        # An explicit CLI model path should boot the local provider even if a prior
+        # session or shell exported mock mode.
+        raw_provider = "llama_cpp"
+        provider_source = "cli_model"
+    elif "LLM_PROVIDER" in os.environ:
         raw_provider = os.environ["LLM_PROVIDER"]
         provider_source = "env"
     elif user_config.provider:
@@ -172,6 +177,7 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:  # noqa:
         raw_provider = str(runtime_defaults["provider"])
         provider_source = "runtime_preset"
 
+    model: str | None
     if cli_model:
         model = cli_model
     elif env_model:
@@ -184,6 +190,7 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:  # noqa:
         model = None
 
     startup_note: str | None = None
+    provider: str
     if raw_provider is None:
         provider = _select_safe_default_provider(model)
     else:
@@ -196,14 +203,14 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:  # noqa:
 
         if provider == "llama_cpp":
             if not model:
-                if provider_source == "env":
+                if provider_source in {"env", "cli_model"}:
                     raise StartupConfigError(
                         "No local model configured for llama_cpp. Use --model or set LLM_MODEL_PATH in .env."
                     )
                 provider = _select_safe_default_provider(model=None)
                 startup_note = f"Local model was not configured. Starting in {provider} mode instead."
             elif not os.path.exists(model):
-                if provider_source == "env":
+                if provider_source in {"env", "cli_model"}:
                     raise StartupConfigError(
                         f"Configured llama_cpp model file does not exist: {model!r}."
                     )

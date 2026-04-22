@@ -38,6 +38,7 @@ Press `o` in the app to open Settings for provider choice, local model path, the
 
 - [Consumer Guide](docs/consumer-guide.md)
 - [Advanced Setup](docs/advanced-setup.md)
+- [Non-Docker Neo4j Setup](docs/non-docker-neo4j.md)
 
 ## Demo Snapshot
 

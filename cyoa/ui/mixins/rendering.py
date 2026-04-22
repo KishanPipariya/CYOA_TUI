@@ -35,7 +35,10 @@ class RenderingMixin:
             # First token batch arrived — loading state is visual-only (spinner).
             host._loading_suffix_shown = False
             app.query_one("#loading", Static).add_class("hidden")
-            app.query_one("#story-container", VerticalScroll).remove_class("loading-state")
+            try:
+                app.query_one("#story-container", VerticalScroll).remove_class("loading-state")
+            except Exception as exc:
+                logger.debug("Unable to clear loading state styling from story container: %s", exc)
 
             if host._current_story == constants.LOADING_ART:
                 host._current_story = ""
@@ -223,7 +226,6 @@ class RenderingMixin:
                 "✦ Start a New Adventure",
                 id="btn-new-adventure",
                 variant="success",
-                action="restart",
             )
             end_btn.add_class("choice-card")
             end_btn.add_class("choice-card-ending")

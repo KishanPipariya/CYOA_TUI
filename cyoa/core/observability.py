@@ -4,11 +4,18 @@ import socket
 import time
 from enum import Enum
 from types import TracebackType
-from typing import Self
+from typing import Any, Self
 from urllib.parse import urlparse
 
+otel_metrics: Any
+otel_trace: Any
+OTelSpan: Any
+OTelStatus: Any
+OTelStatusCode: Any
+
 try:
-    from opentelemetry import metrics, trace
+    from opentelemetry import metrics as otel_metrics
+    from opentelemetry import trace as otel_trace
     from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
     from opentelemetry.sdk.metrics import MeterProvider
@@ -16,27 +23,29 @@ try:
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.trace import Span, Status, StatusCode
+    from opentelemetry.trace import Span as OTelSpan
+    from opentelemetry.trace import Status as OTelStatus
+    from opentelemetry.trace import StatusCode as OTelStatusCode
 
     _OTEL_AVAILABLE = True
 except ImportError:  # pragma: no cover - exercised via fallback behavior
     _OTEL_AVAILABLE = False
 
-    class StatusCode(Enum):
+    class _FallbackStatusCode(Enum):
         ERROR = "ERROR"
 
-    class Status:
-        def __init__(self, status_code: StatusCode):
+    class _FallbackStatus:
+        def __init__(self, status_code: _FallbackStatusCode):
             self.status_code = status_code
 
-    class Span:
+    class _FallbackSpan:
         def add_event(self, name: str, attributes: dict[str, object] | None = None) -> None:
             del name, attributes
 
         def record_exception(self, exc: BaseException) -> None:
             del exc
 
-        def set_status(self, status: Status) -> None:
+        def set_status(self, status: "_FallbackStatus") -> None:
             del status
 
         def set_attribute(self, key: str, value: object) -> None:
@@ -62,9 +71,9 @@ except ImportError:  # pragma: no cover - exercised via fallback behavior
             return _NoopMetric()
 
     class _NoopTracer:
-        def start_span(self, name: str, attributes: dict[str, object]) -> Span:
+        def start_span(self, name: str, attributes: dict[str, object]) -> "_FallbackSpan":
             del name, attributes
-            return Span()
+            return _FallbackSpan()
 
     class _NoopMetricsAPI:
         @staticmethod
@@ -86,8 +95,17 @@ except ImportError:  # pragma: no cover - exercised via fallback behavior
         def set_tracer_provider(provider: object) -> None:
             del provider
 
-    metrics = _NoopMetricsAPI()
-    trace = _NoopTraceAPI()
+    otel_metrics = _NoopMetricsAPI()
+    otel_trace = _NoopTraceAPI()
+    OTelSpan = _FallbackSpan
+    OTelStatus = _FallbackStatus
+    OTelStatusCode = _FallbackStatusCode
+
+metrics: Any = otel_metrics
+trace: Any = otel_trace
+Span = OTelSpan
+Status = OTelStatus
+StatusCode = OTelStatusCode
 
 logger = logging.getLogger(__name__)
 
@@ -262,7 +280,7 @@ class DBObservedSession:
         self.db_type = db_type
         self.operation = operation
         self.start_time: float | None = None
-        self.span: Span | None = None
+        self.span: OTelSpan | None = None
 
     def __enter__(self) -> Self:
         self.start_time = time.perf_counter()
@@ -299,7 +317,7 @@ class DBObservedSession:
             )
             if self.span and exc_val is not None:
                 self.span.record_exception(exc_val)
-                self.span.set_status(Status(StatusCode.ERROR))
+                self.span.set_status(OTelStatus(OTelStatusCode.ERROR))
 
         if self.span:
             self.span.end()
@@ -321,7 +339,7 @@ class EngineObservedSession:
     def __init__(self, operation: str) -> None:
         self.operation = operation
         self.start_time: float | None = None
-        self.span: Span | None = None
+        self.span: OTelSpan | None = None
 
     def __enter__(self) -> Self:
         self.start_time = time.perf_counter()
@@ -348,7 +366,7 @@ class EngineObservedSession:
 
         if exc_type and self.span and exc_val is not None:
             self.span.record_exception(exc_val)
-            self.span.set_status(Status(StatusCode.ERROR))
+            self.span.set_status(OTelStatus(OTelStatusCode.ERROR))
 
         if self.span:
             self.span.end()
@@ -372,7 +390,7 @@ class LLMObservedSession:
         self.start_time: float | None = None
         self.first_token_time: float | None = None
         self.token_count = 0
-        self.span: Span | None = None
+        self.span: OTelSpan | None = None
 
     def start(self) -> Self:
         self.start_time = time.perf_counter()

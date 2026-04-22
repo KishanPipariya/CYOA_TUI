@@ -58,6 +58,8 @@ Included services:
 
 Chroma is used in-process and is not launched by `docker-compose`.
 
+If you want Neo4j graph persistence without Docker, see [Non-Docker Neo4j Setup](./non-docker-neo4j.md).
+
 ## Packaged Builds
 
 Build standalone terminal bundles for macOS or Linux:

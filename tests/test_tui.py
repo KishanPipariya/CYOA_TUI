@@ -233,7 +233,6 @@ async def test_stats_display_reflects_player_stats(mock_app_dependencies):
     async with app.run_test() as pilot:
         await pilot.pause(1.0)
         status_display = app.query_one("#status-display")
-        stats_label = app.query_one("#stats-text", Label)
         health_value = app.query_one("#health-value", Label)
 
         # Initial stats: Health 100 (high)

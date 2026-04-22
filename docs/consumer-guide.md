@@ -137,3 +137,7 @@ Open Settings and use `Reveal Saves` if you need to inspect your files manually,
 ### I want the advanced stack
 
 See [Advanced Setup](./advanced-setup.md) for source builds, optional extras, Docker services, monitoring, and development workflow.
+
+### I want Neo4j without Docker
+
+See [Non-Docker Neo4j Setup](./non-docker-neo4j.md).

@@ -1,12 +1,12 @@
 import asyncio
 import logging
 import os
-from pathlib import Path
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal
+from pathlib import Path
+from typing import Any, ClassVar, Literal, cast
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -523,7 +523,7 @@ class CYOAApp(
         story_turns = list(story_container.query(".story-turn"))
         current_turn = self._current_turn_widget if self._current_turn_widget in story_turns else None
         if current_turn is None and story_turns:
-            current_turn = story_turns[-1]
+            current_turn = cast(Markdown, story_turns[-1])
             self._current_turn_widget = current_turn
 
         for turn in story_turns:
@@ -883,8 +883,8 @@ class CYOAApp(
                 self._confirm_settings_reset,
             )
 
-    def _confirm_settings_reset(self, confirmed: bool) -> None:
-        if confirmed:
+    def _confirm_settings_reset(self, confirmed: object | None) -> None:
+        if confirmed is True:
             self._reset_settings_to_safe_defaults()
 
     def _apply_settings(self, payload: dict[str, Any]) -> None:
@@ -1063,6 +1063,10 @@ class CYOAApp(
             logger.debug("Click handler failed: %s", e)
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-new-adventure":
+            self.run_worker(self.action_restart(), exclusive=True)
+            return
+
         if event.button.id == "btn-retry":
             self.show_loading()
             if self.engine:

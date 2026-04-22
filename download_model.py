@@ -1,5 +1,5 @@
-import sys
 import logging
+import sys
 
 from cyoa.core.model_download import (
     ModelDownloadCancelled,
@@ -12,9 +12,10 @@ from cyoa.core.user_config import update_user_config
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S"
+    datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("model-downloader")
+
 
 def main() -> int:
     logger.info("--- CYOA Model Bootstrapper ---")
@@ -45,6 +46,7 @@ def main() -> int:
     except ModelDownloadError as exc:
         logger.error("Download Error: %s", exc)
         return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

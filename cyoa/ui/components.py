@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
@@ -288,7 +288,7 @@ class BranchScreen(ModalScreen[int]):
         if isinstance(event.item, SceneListItem):
             self.dismiss(event.item.scene_index)
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_button_pressed(self, event: Button.Pressed) -> None:  # noqa: C901
         if event.button.id == "cancel-branch":
             self.dismiss(None)
 
@@ -774,17 +774,17 @@ class ModelDownloadScreen(ModalScreen[None]):
                 )
                 yield Button("Cancel", id="btn-model-download-cancel", variant="error")
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_button_pressed(self, event: Button.Pressed) -> None:  # noqa: C901
         if event.button.id == "btn-model-download-start" and not self._started:
             self._started = True
             self._set_busy_state()
             if self.app is not None:
-                self.app.begin_first_run_model_download(self)
+                cast(Any, self.app).begin_first_run_model_download(self)
         elif event.button.id == "btn-model-download-cancel":
             if self._finished:
                 self.dismiss(None)
             elif self.app is not None:
-                self.app.cancel_first_run_model_download()
+                cast(Any, self.app).cancel_first_run_model_download()
                 self.mark_cancelling()
 
     def _set_busy_state(self) -> None:
@@ -1019,7 +1019,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             }
         )
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_button_pressed(self, event: Button.Pressed) -> None:  # noqa: C901
         button_id = event.button.id
         if button_id == "btn-settings-save":
             self._dismiss_with_value()
