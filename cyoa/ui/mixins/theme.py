@@ -1,6 +1,7 @@
 import logging
 
 from textual.containers import Container
+from textual.color import Color
 from textual.theme import BUILTIN_THEMES, Theme
 from textual.widget import Widget
 
@@ -9,6 +10,43 @@ from cyoa.ui.components import ThemeSpinner
 from cyoa.ui.mixins.contracts import as_mixin_host, as_textual_app
 
 logger = logging.getLogger(__name__)
+
+_FALLBACK_ACCENT = "#6EA8FF"
+_LOCKED_ACCENT = "#D0A85C"
+
+
+def _parse_color(value: str | None) -> Color | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return Color.parse(value)
+    except Exception:
+        return None
+
+
+def _build_surface_style(
+    background: str,
+    *,
+    accent: str | None = None,
+    muted: bool = False,
+) -> str:
+    background_color = _parse_color(background)
+    if background_color is None:
+        return f"background: {background};"
+
+    accent_color = _parse_color(accent) or background_color.lighten(0.22)
+    border_color = background_color.lighten(0.12).hex6
+    left_border_color = background_color.blend(accent_color, 0.58).hex6
+    text_color = background_color.get_contrast_text(alpha=1).hex6
+    if muted:
+        text_color = background_color.blend(Color.parse(text_color), 0.62).hex6
+
+    return (
+        f"background: {background_color.hex6};"
+        f" border: round {border_color} 68%;"
+        f" border-left: solid {left_border_color};"
+        f" color: {text_color};"
+    )
 
 
 class ThemeMixin:
@@ -50,18 +88,36 @@ class ThemeMixin:
         if not isinstance(ui_theme, dict) or not ui_theme:
             return
 
+        accent_color = getattr(host, "_accent_color", None) or _FALLBACK_ACCENT
         widget_styles = {
-            ".story-turn.current-turn": ui_theme.get("story_card_surface"),
-            ".story-turn.archived-turn": ui_theme.get("story_card_muted_surface"),
-            ".player-choice": ui_theme.get("player_choice_surface"),
-            "#choices-container .choice-card-available": ui_theme.get("choice_surface"),
-            "#choices-container .choice-card-locked": ui_theme.get("choice_locked_surface"),
+            ".story-turn.current-turn": _build_surface_style(
+                ui_theme.get("story_card_surface", ""),
+                accent=accent_color,
+            ),
+            ".story-turn.archived-turn": _build_surface_style(
+                ui_theme.get("story_card_muted_surface", ""),
+                accent=ui_theme.get("story_card_surface"),
+                muted=True,
+            ),
+            ".player-choice": _build_surface_style(
+                ui_theme.get("player_choice_surface", ""),
+                accent=accent_color,
+            ),
+            "#choices-container .choice-card-available": _build_surface_style(
+                ui_theme.get("choice_surface", ""),
+                accent=accent_color,
+            ),
+            "#choices-container .choice-card-locked": _build_surface_style(
+                ui_theme.get("choice_locked_surface", ""),
+                accent=_LOCKED_ACCENT,
+                muted=True,
+            ),
         }
-        for selector, color in widget_styles.items():
-            if not isinstance(color, str) or not color.strip():
+        for selector, style in widget_styles.items():
+            if not isinstance(style, str) or not style.strip():
                 continue
             for widget in app.query(selector):
-                widget.set_styles(f"background: {color};")
+                widget.set_styles(style)
 
     def watch_mood(self, old_mood: str, new_mood: str) -> None:
         """Update the main container class and application theme when the mood changes."""

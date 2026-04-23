@@ -304,6 +304,36 @@ def test_main_writes_crash_log_for_unexpected_failure(monkeypatch: pytest.Monkey
     logger_service.close.assert_called_once_with()
 
 
+def test_main_returns_actionable_error_for_terminal_attach_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    logger_service = MagicMock()
+    app = MagicMock()
+    app.run.side_effect = RuntimeError("Attach failed")
+    stderr = io.StringIO()
+
+    with (
+        patch("sys.stderr", stderr),
+        patch("cyoa.core.constants.ensure_user_directories"),
+        patch("cyoa.core.observability.setup_observability"),
+        patch("cyoa.core.theme_loader.list_themes", return_value=["dark_dungeon"]),
+        patch(
+            "cyoa.core.theme_loader.load_theme",
+            return_value={"prompt": "Start", "spinner_frames": ["-"], "accent_color": None},
+        ),
+        patch("cyoa.core.support.write_crash_log") as write_crash_log,
+        patch("cyoa.db.story_logger.StoryLogger", return_value=logger_service),
+        patch("cyoa.ui.app.CYOAApp", return_value=app),
+    ):
+        exit_code = main.main([])
+
+    assert exit_code == 2
+    assert "could not attach to this terminal session" in stderr.getvalue().lower()
+    write_crash_log.assert_not_called()
+    logger_service.close.assert_called_once_with()
+
+
 def test_main_persists_resolved_user_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "mock")
 

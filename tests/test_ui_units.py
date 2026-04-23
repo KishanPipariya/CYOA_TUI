@@ -28,7 +28,7 @@ from cyoa.ui.mixins.events import EventsMixin
 from cyoa.ui.mixins.navigation import NavigationMixin
 from cyoa.ui.mixins.persistence import PersistenceMixin
 from cyoa.ui.mixins.rendering import RenderingMixin, _detect_scene_art
-from cyoa.ui.mixins.theme import ThemeMixin
+from cyoa.ui.mixins.theme import ThemeMixin, _build_surface_style
 from cyoa.ui.mixins.typewriter import TypewriterMixin
 
 
@@ -1086,11 +1086,21 @@ def test_apply_ui_theme_styles_primary_surfaces_and_dynamic_widgets() -> None:
     host.action_panel.set_styles.assert_called_once_with("background: #111827;")
     host.status_display.set_styles.assert_called_once_with("background: #17212b;")
     host.side_panel.set_styles.assert_called_once_with("background: #131a22;")
-    host.story_turn.set_styles.assert_called_once_with("background: #18242d;")
-    host.archived_turn.set_styles.assert_called_once_with("background: #0f161d;")
-    host.player_choice.set_styles.assert_called_once_with("background: #1b3140;")
-    host.choice_card.set_styles.assert_called_once_with("background: #213646;")
-    host.locked_choice.set_styles.assert_called_once_with("background: #15191d;")
+    host.story_turn.set_styles.assert_called_once_with(
+        _build_surface_style("#18242d", accent="#6EA8FF")
+    )
+    host.archived_turn.set_styles.assert_called_once_with(
+        _build_surface_style("#0f161d", accent="#18242d", muted=True)
+    )
+    host.player_choice.set_styles.assert_called_once_with(
+        _build_surface_style("#1b3140", accent="#6EA8FF")
+    )
+    host.choice_card.set_styles.assert_called_once_with(
+        _build_surface_style("#213646", accent="#6EA8FF")
+    )
+    host.locked_choice.set_styles.assert_called_once_with(
+        _build_surface_style("#15191d", accent="#D0A85C", muted=True)
+    )
 
 
 def test_rendering_show_loading_and_mount_choice_buttons_cover_states():
@@ -1154,7 +1164,7 @@ def test_rendering_show_loading_and_mount_choice_buttons_cover_states():
     )
     mounted_button = locked_container.mounted[0]
     assert mounted_button.disabled is True
-    assert "Locked:" in str(mounted_button.label)
+    assert "Unavailable:" in str(mounted_button.label)
 
 
 def test_typewriter_settings_actions_persist_preferences(monkeypatch: pytest.MonkeyPatch):

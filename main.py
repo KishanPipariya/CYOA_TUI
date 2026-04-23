@@ -32,6 +32,13 @@ class StartupConfig:
     startup_note: str | None = None
 
 
+def _is_terminal_attach_failure(exc: BaseException) -> bool:
+    message = str(exc).strip().lower()
+    if "attach failed" in message:
+        return True
+    return type(exc).__name__.lower() == "attacherror"
+
+
 def _build_parser(available_themes: Sequence[str] | None = None) -> argparse.ArgumentParser:
     themes_help = "Story theme to use (default: dark_dungeon)."
     if available_themes:
@@ -329,6 +336,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 130
     except Exception as exc:
+        if _is_terminal_attach_failure(exc):
+            print(
+                (
+                    "Error: the Textual UI could not attach to this terminal session. "
+                    "Run `cyoa-tui` in a real interactive terminal such as Terminal, iTerm2, "
+                    "Windows Terminal, Kitty, or Alacritty."
+                ),
+                file=sys.stderr,
+            )
+            return 2
         crash_log_path = write_crash_log(
             exc,
             resolved_config={

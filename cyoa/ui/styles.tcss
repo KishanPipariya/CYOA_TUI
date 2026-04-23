@@ -629,10 +629,10 @@ Button {
     margin-bottom: 1;
     min-height: 4;
     padding: 0;
-    background: $surface;
+    background: $panel 92%;
     color: $text;
-    border: round $secondary 30%;
-    border-left: solid $secondary 42%;
+    border: round $secondary 42%;
+    border-left: solid $secondary 52%;
     tint: transparent;
 }
 
@@ -648,43 +648,49 @@ Button > .textual-button--label {
 }
 
 #choices-container Button:focus {
-    background: $accent 15%;
+    background: $accent 16%;
     border: round $accent;
     border-left: solid $accent;
     color: $text;
-    tint: $accent 6%;
+    tint: $accent 9%;
 }
 
 #choices-container Button:disabled {
-    background: $surface;
+    background: $surface 88%;
     color: $text-muted;
-    border: round $secondary 20%;
-    border-left: solid $secondary 28%;
+    border: round $secondary 24%;
+    border-left: solid $warning 38%;
     tint: transparent;
 }
 
 #choices-container Button.choice-card-available {
-    background: $panel 88%;
+    background: $panel;
+    border-left: solid $accent 55%;
 }
 
 #choices-container Button.choice-card-available:hover {
-    background: $panel;
-    border-left: solid $accent 60%;
+    background: $accent 8%;
+    border: round $accent 72%;
+    border-left: solid $accent 78%;
 }
 
 #choices-container Button.choice-card-locked {
-    background: $surface 82%;
-    border-left: solid $warning 42%;
+    background: $warning 7%;
+    color: $text-muted;
+    border: round $warning 24%;
+    border-left: solid $warning 60%;
 }
 
 #choices-container Button.choice-card-error {
-    background: $warning 10%;
-    border-left: solid $warning 65%;
+    background: $error 12%;
+    border: round $error 28%;
+    border-left: solid $error 70%;
 }
 
 #choices-container Button.choice-card-ending {
-    background: $success 12%;
-    border-left: solid $success 65%;
+    background: $success 14%;
+    border: round $success 30%;
+    border-left: solid $success 72%;
 }
 
 .compact-layout #choices-container Button {
