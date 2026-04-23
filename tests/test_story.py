@@ -1128,3 +1128,16 @@ class TestProceduralItemSystem:
         sys_msg = messages[0]
         assert sys_msg["role"] == "system"
         assert "Current Inventory: Empty" in sys_msg["content"]
+
+    def test_story_context_add_turn_copies_inventory_and_stats(self):
+        """Turn state should not retain live references to caller-owned containers."""
+        ctx = StoryContext(starting_prompt="Start")
+        inventory = ["Torch"]
+        stats = {"health": 95, "gold": 1, "reputation": 0}
+
+        ctx.add_turn("You wait.", "Wait", inventory=inventory, player_stats=stats)
+        inventory.append("Key")
+        stats["gold"] = 99
+
+        assert ctx.inventory == ["Torch"]
+        assert ctx.player_stats == {"health": 95, "gold": 1, "reputation": 0}

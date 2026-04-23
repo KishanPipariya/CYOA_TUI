@@ -157,9 +157,9 @@ class StoryContext:
         self.history.append({"role": "user", "content": f"I choose: {user_choice}"})
 
         if inventory is not None:
-            self.inventory = inventory
+            self.inventory = list(inventory)
         if player_stats is not None:
-            self.player_stats = player_stats
+            self.player_stats = dict(player_stats)
 
         # Sliding window: keep only initial prompt (0) and as many tail turns as fit in budget
         self._prune_history()

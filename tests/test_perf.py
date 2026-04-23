@@ -16,6 +16,7 @@ from cyoa.ui.app import CYOAApp
 async def test_stream_narrative_fills_queue():
     """Verify that _stream_narrative populates the typewriter queue correctly."""
     app = CYOAApp(model_path="dummy.gguf")
+    app._running = True
     app._loading_suffix_shown = False
 
     # Simulate streaming 10 tokens one by one
@@ -144,6 +145,7 @@ async def test_app_startup_records_latency_guardrail(monkeypatch):
     app.show_loading = lambda selected_button_id=None: None
     app.notify = lambda *args, **kwargs: None
     app.query_one = MagicMock(return_value=MagicMock())  # type: ignore[method-assign]
+    app._running = True
     app.generator = MagicMock()  # type: ignore[assignment]
     app.generator.runtime_controls.return_value = {"preset": "balanced"}
     app.engine = MagicMock()  # type: ignore[assignment]

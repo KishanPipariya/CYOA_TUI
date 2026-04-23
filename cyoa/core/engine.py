@@ -393,7 +393,7 @@ class StoryEngine:
 
         data = {
             "starting_prompt": self.starting_prompt,
-            "context_history": self.story_context.history,
+            "context_history": [message.copy() for message in self.story_context.history],
             "prompt_config": {
                 "goals": list(self.story_context.goals),
                 "directives": list(self.story_context.directives),

@@ -1235,8 +1235,35 @@ def test_app_notification_and_cache_helpers_cover_ui_shell(monkeypatch: pytest.M
     assert app._story_map_cache == {}
 
 
+def test_app_cache_helpers_isolate_mutable_payloads() -> None:
+    app = CYOAApp(model_path="dummy.gguf")
+    history_payload = {"scenes": [{"id": "scene-1"}], "choices": ["Wait"]}
+    map_payload = {"nodes": [{"id": "scene-1", "children": []}]}
+
+    app.cache_story_history("scene-1", history_payload)
+    app.cache_story_map("scene-1", map_payload)
+
+    history_payload["scenes"][0]["id"] = "mutated-source"
+    map_payload["nodes"][0]["children"].append("mutated-source")
+
+    cached_history = app.get_cached_story_history("scene-1")
+    cached_map = app.get_cached_story_map("scene-1")
+
+    assert cached_history == {"scenes": [{"id": "scene-1"}], "choices": ["Wait"]}
+    assert cached_map == {"nodes": [{"id": "scene-1", "children": []}]}
+
+    assert cached_history is not None
+    assert cached_map is not None
+    cached_history["scenes"][0]["id"] = "mutated-copy"
+    cached_map["nodes"][0]["children"].append("mutated-copy")
+
+    assert app.get_cached_story_history("scene-1") == {"scenes": [{"id": "scene-1"}], "choices": ["Wait"]}
+    assert app.get_cached_story_map("scene-1") == {"nodes": [{"id": "scene-1", "children": []}]}
+
+
 def test_app_marks_first_scene_and_tears_down_runtime(monkeypatch: pytest.MonkeyPatch):
     app = CYOAApp(model_path="dummy.gguf")
+    app._running = True
     startup_timer = DummyAppTimer()
     warmup_timer = DummyAppTimer()
     notification_timer = DummyAppTimer()

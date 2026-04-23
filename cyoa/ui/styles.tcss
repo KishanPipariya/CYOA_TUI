@@ -422,10 +422,6 @@ Toast.-error {
     overflow-x: hidden;
 }
 
-#story-container.loading-state {
-    overflow-y: hidden;
-}
-
 .story-turn {
     background: $panel 88%;
     color: $text;

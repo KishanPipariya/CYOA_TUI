@@ -191,6 +191,19 @@ def test_engine_save_payload_uses_current_ui_state_contract():
     assert "current_story_text" not in data
 
 
+def test_engine_get_save_data_copies_context_history():
+    broker, _provider = _make_broker_with_mock_provider()
+    engine = StoryEngine(broker=broker, starting_prompt="Start")
+    engine.story_context = StoryContext("Start")
+    engine.story_context.history = [{"role": "user", "content": "Start"}]
+    engine.state.current_node = _make_story_node("Node")
+
+    data = engine.get_save_data()
+    data["context_history"].append({"role": "assistant", "content": "Mutated"})
+
+    assert engine.story_context.history == [{"role": "user", "content": "Start"}]
+
+
 def test_game_state_redo_reapplies_last_undone_snapshot():
     state = GameState()
     node = _make_story_node("Original")
@@ -226,6 +239,17 @@ def test_game_state_bookmark_round_trip_survives_save_payload():
     assert restored.turn_count == 4
     assert restored.current_node is not None
     assert restored.current_node.narrative == "Checkpoint"
+
+
+def test_game_state_get_save_data_copies_inventory_and_stats():
+    state = GameState(inventory=["Torch"], player_stats={"health": 90, "gold": 4, "reputation": 1})
+
+    payload = state.get_save_data()
+    payload["inventory"].append("Key")
+    payload["player_stats"]["gold"] = 99
+
+    assert state.inventory == ["Torch"]
+    assert state.player_stats == {"health": 90, "gold": 4, "reputation": 1}
 
 
 @pytest.mark.asyncio

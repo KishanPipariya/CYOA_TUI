@@ -1025,6 +1025,20 @@ async def test_story_container_defaults_to_borderless_surface(mock_app_dependenc
 
 
 @pytest.mark.asyncio
+async def test_story_container_remains_scrollable_in_loading_state(mock_app_dependencies) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+
+        story = app.query_one("#story-container", VerticalScroll)
+        story.add_class("loading-state")
+        await pilot.pause(0.1)
+
+        assert str(story.styles.overflow_y) == "auto"
+
+
+@pytest.mark.asyncio
 async def test_main_game_layout_fits_standard_terminal(mock_app_dependencies) -> None:
     app = CYOAApp(model_path="dummy_path.gguf")
 

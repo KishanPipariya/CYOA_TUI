@@ -26,7 +26,7 @@ class GameState:
         inventory: list[str] | None = None,
         player_stats: dict[str, int] | None = None,
     ) -> None:
-        self.inventory: list[str] = inventory or []
+        self.inventory: list[str] = list(inventory) if inventory is not None else []
         self.player_stats: dict[str, int] = dict(player_stats) if player_stats else dict(self._DEFAULT_STATS)
         self.turn_count: int = 1
         self.current_node: StoryNode | None = None
@@ -176,8 +176,8 @@ class GameState:
         return {
             "story_title": self.story_title,
             "turn_count": self.turn_count,
-            "inventory": self.inventory,
-            "player_stats": self.player_stats,
+            "inventory": list(self.inventory),
+            "player_stats": dict(self.player_stats),
             "current_node": self.current_node.model_dump() if self.current_node else None,
             "current_scene_id": self.current_scene_id,
             "last_choice_text": self.last_choice_text,

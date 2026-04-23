@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import logging
 import os
 import threading
@@ -315,25 +316,27 @@ class CYOAApp(
         """Memoize branch-history payloads for the active scene."""
         if not scene_id:
             return
-        self._story_history_cache[scene_id] = history
+        self._story_history_cache[scene_id] = copy.deepcopy(history)
         self._evict_scene_cache(self._story_history_cache)
 
     def get_cached_story_history(self, scene_id: str | None) -> dict[str, Any] | None:
         if not scene_id:
             return None
-        return self._story_history_cache.get(scene_id)
+        history = self._story_history_cache.get(scene_id)
+        return copy.deepcopy(history) if history is not None else None
 
     def cache_story_map(self, scene_id: str | None, tree_data: dict[str, Any]) -> None:
         """Memoize story-map payloads for the active scene."""
         if not scene_id:
             return
-        self._story_map_cache[scene_id] = tree_data
+        self._story_map_cache[scene_id] = copy.deepcopy(tree_data)
         self._evict_scene_cache(self._story_map_cache)
 
     def get_cached_story_map(self, scene_id: str | None) -> dict[str, Any] | None:
         if not scene_id:
             return None
-        return self._story_map_cache.get(scene_id)
+        tree_data = self._story_map_cache.get(scene_id)
+        return copy.deepcopy(tree_data) if tree_data is not None else None
 
     def invalidate_scene_caches(self, keep_scene_id: str | None = None) -> None:
         """Drop memoized panel data except for the current scene when desired."""
