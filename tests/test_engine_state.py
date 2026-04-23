@@ -13,6 +13,29 @@ from cyoa.llm.broker import ModelBroker, StoryContext
 from cyoa.llm.providers import LLMProvider
 
 
+class _RecordingSpan:
+    def __init__(self) -> None:
+        self.attributes: dict[str, object] = {}
+
+    def set_attribute(self, key: str, value: object) -> None:
+        self.attributes[key] = value
+
+
+class _RecordingEngineSession:
+    last_span: _RecordingSpan | None = None
+
+    def __init__(self, operation: str) -> None:
+        self.operation = operation
+        self.span = _RecordingSpan()
+
+    def __enter__(self) -> "_RecordingEngineSession":
+        type(self).last_span = self.span
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        del exc_type, exc_val, exc_tb
+
+
 def _make_story_node(narrative: str = "N") -> StoryNode:
     return StoryNode(narrative=narrative, choices=[Choice(text="A"), Choice(text="B")])
 
@@ -41,6 +64,26 @@ async def test_engine_retry_uses_last_choice_text():
     await engine.retry()
 
     engine._generate_next.assert_awaited_once_with(choice_text="Go North")
+
+
+@pytest.mark.asyncio
+async def test_engine_make_choice_records_choice_length_not_raw_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broker, _provider = _make_broker_with_mock_provider()
+    engine = StoryEngine(broker=broker, starting_prompt="Start")
+    engine.story_context = StoryContext("Start", token_counter=lambda _x: 1)
+    engine.state.current_node = _make_story_node("Current scene")
+    engine._generate_next = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    monkeypatch.setattr("cyoa.core.engine.EngineObservedSession", _RecordingEngineSession)
+
+    await engine.make_choice("Open the hidden door")
+
+    assert _RecordingEngineSession.last_span is not None
+    assert _RecordingEngineSession.last_span.attributes["choice.length"] == len(
+        "Open the hidden door"
+    )
+    assert "choice.text" not in _RecordingEngineSession.last_span.attributes
 
 
 @pytest.mark.asyncio

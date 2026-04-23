@@ -360,7 +360,7 @@ class CYOAGraphDB:
                     """
                     session.run(query_create, story_id=str(uuid.uuid4()), final_title=final_title)
                     if session_obs.span:
-                        session_obs.span.set_attribute("story.title", final_title)
+                        session_obs.span.set_attribute("story.title_length", len(final_title))
                     return final_title
 
         try:

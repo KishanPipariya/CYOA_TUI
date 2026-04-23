@@ -3,8 +3,8 @@ services:
     image: neo4j:latest
     container_name: cyoa_graph_db
     ports:
-      - "7474:7474" # Browser interface
-      - "7687:7687" # Bolt routing 
+      - "127.0.0.1:7474:7474" # Browser interface
+      - "127.0.0.1:7687:7687" # Bolt routing
     environment:
       - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD}
       # Add APOC (Awesome Procedures on Cypher) plugin which is very useful for advanced graphs
@@ -18,8 +18,8 @@ services:
     image: cr.jaegertracing.io/jaegertracing/jaeger:2.17.0
     container_name: jaeger
     ports:
-      - "16686:16686" # Web UI
-      - "4317:4317"  # OTLP gRPC
+      - "127.0.0.1:16686:16686" # Web UI
+      - "127.0.0.1:4317:4317" # OTLP gRPC
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
@@ -28,8 +28,8 @@ services:
     volumes:
       - ./monitoring/otel-collector-config.yaml:/etc/otel-collector-config.yaml
     ports:
-      - "4318:4318" # OTLP HTTP
-      - "8889:8889" # Prometheus exporter
+      - "127.0.0.1:4318:4318" # OTLP HTTP
+      - "127.0.0.1:8889:8889" # Prometheus exporter
     depends_on:
       - jaeger
 
@@ -41,7 +41,7 @@ services:
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
 
   grafana:
     image: grafana/grafana:latest
@@ -50,7 +50,7 @@ services:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
       - ./monitoring/grafana/dashboards:/etc/grafana/dashboards
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
       - GF_USERS_ALLOW_SIGN_UP=false

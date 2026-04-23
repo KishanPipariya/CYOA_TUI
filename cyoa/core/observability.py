@@ -152,8 +152,14 @@ def _is_otlp_endpoint_reachable(endpoint: str) -> bool:
 def setup_observability() -> None:
     """Initialize OpenTelemetry tracers and meters."""
     otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-    if not (_env_flag_enabled("CYOA_ENABLE_OBSERVABILITY") or otlp_endpoint):
-        logger.debug("Observability integrations disabled for default startup.")
+    observability_enabled = _env_flag_enabled("CYOA_ENABLE_OBSERVABILITY")
+    if not observability_enabled:
+        if otlp_endpoint:
+            logger.info(
+                "OTLP endpoint configured but observability is disabled; set CYOA_ENABLE_OBSERVABILITY=true to export telemetry."
+            )
+        else:
+            logger.debug("Observability integrations disabled for default startup.")
         return
     if not _OTEL_AVAILABLE:
         logger.warning(

@@ -198,7 +198,13 @@ def load_theme(name: str) -> dict[str, Any]:
     Returns a dict with keys: name, description, accent_color, prompt.
     Raises SystemExit with a helpful message if the theme is not found.
     """
-    theme_path = THEMES_DIR / f"{name}.toml"
+    themes_dir = THEMES_DIR.resolve()
+    theme_path = (THEMES_DIR / f"{name}.toml").resolve(strict=False)
+
+    if theme_path.parent != themes_dir:
+        raise FileNotFoundError(
+            f"Theme '{name}' is invalid. Theme names must resolve inside {THEMES_DIR}."
+        )
 
     if not theme_path.exists():
         available = [p.stem for p in THEMES_DIR.glob("*.toml")]

@@ -11,6 +11,7 @@ from textual.css.query import NoMatches
 from textual.widgets import Button, Label, ListView, Markdown
 
 from cyoa.core import constants
+from cyoa.core.support import open_private_text_file
 from cyoa.ui.commands import ExportStoryCommand, SaveGameCommand, UICommandContext
 from cyoa.ui.components import JournalListItem
 from cyoa.ui.mixins.contracts import (
@@ -407,7 +408,7 @@ class PersistenceMixin:
         """Persist a JSON payload to disk."""
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
+            with open_private_text_file(path, "w") as f:
                 json.dump(payload, f, indent=2, ensure_ascii=False)
         except OSError as exc:
             logger.warning("Unable to write persistence payload to %s: %s", path, exc)
@@ -526,7 +527,7 @@ class PersistenceMixin:
         json_path = f"{stem}.timeline.json"
         markdown = self._render_markdown_export(payload)
         timeline_payload = self._build_timeline_export(payload)
-        with open(markdown_path, "w", encoding="utf-8") as f:
+        with open_private_text_file(markdown_path, "w") as f:
             f.write(markdown)
         self._write_json_payload(json_path, timeline_payload)
         return markdown_path, json_path

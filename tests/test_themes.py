@@ -130,6 +130,11 @@ def test_load_non_existent_theme():
         load_theme("non_existent_theme_9999")
 
 
+def test_load_theme_rejects_path_traversal():
+    with pytest.raises(FileNotFoundError, match="must resolve inside"):
+        load_theme("../secrets")
+
+
 def test_validate_theme_accepts_richer_content_bundle():
     theme = validate_theme(
         {

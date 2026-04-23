@@ -1,10 +1,10 @@
 import logging
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 from cyoa.core.events import Events, bus
 from cyoa.core.models import StoryNode
+from cyoa.core.support import open_private_text_file
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +32,10 @@ class StoryLogger:
         if self._file_handle:
             self._file_handle.close()
 
-        Path(self.filepath).parent.mkdir(parents=True, exist_ok=True)
-        with open(self.filepath, "w", encoding="utf-8") as f:
+        with open_private_text_file(self.filepath, "w") as f:
             f.write(f"# {title}\n\n")
 
-        self._file_handle = open(self.filepath, "a", encoding="utf-8")
+        self._file_handle = open_private_text_file(self.filepath, "a")
 
     def write_append(self, content: str) -> None:
         if self._file_handle:

@@ -145,7 +145,7 @@ class StoryEngine:
 
         with EngineObservedSession("make_choice") as session:
             if session.span:
-                session.span.set_attribute("choice.text", choice_text)
+                session.span.set_attribute("choice.length", len(choice_text))
 
             # Snapshot for undo BEFORE making changes, including history because it belongs to story_context
             self.state.create_undo_snapshot({

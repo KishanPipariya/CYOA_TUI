@@ -6,6 +6,30 @@ from neo4j.exceptions import AuthError, ServiceUnavailable
 from cyoa.db.graph_db import CYOAGraphDB
 
 
+class _RecordingSpan:
+    def __init__(self) -> None:
+        self.attributes: dict[str, object] = {}
+
+    def set_attribute(self, key: str, value: object) -> None:
+        self.attributes[key] = value
+
+
+class _RecordingDBSession:
+    last_span: _RecordingSpan | None = None
+
+    def __init__(self, db_type: str, operation: str) -> None:
+        self.db_type = db_type
+        self.operation = operation
+        self.span = _RecordingSpan()
+
+    def __enter__(self) -> "_RecordingDBSession":
+        type(self).last_span = self.span
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        del exc_type, exc_val, exc_tb
+
+
 @pytest.fixture
 def mock_neo4j():
     with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock:
@@ -34,6 +58,26 @@ def test_db_create_story_node(mock_neo4j):
         query = create_call[0][0]
         assert "CREATE (s:Story" in query
         assert "$final_title" in query
+
+
+def test_db_create_story_node_records_title_length_not_raw_title(
+    mock_neo4j,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
+        monkeypatch.setattr("cyoa.db.graph_db.DBObservedSession", _RecordingDBSession)
+
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+        mock_neo4j.run.return_value = []
+
+        db.create_story_node_and_get_title("New Adventure")
+
+        assert _RecordingDBSession.last_span is not None
+        assert _RecordingDBSession.last_span.attributes["story.title_length"] == len(
+            "New Adventure"
+        )
+        assert "story.title" not in _RecordingDBSession.last_span.attributes
 
 
 def test_graph_db_is_disabled_by_default_for_consumer_startup(

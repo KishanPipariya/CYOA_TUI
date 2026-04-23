@@ -4,7 +4,7 @@ import sys
 import traceback
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from cyoa.core.constants import (
     APP_NAME,
@@ -28,6 +28,30 @@ def support_paths() -> dict[str, Path]:
         "story_log_file": Path(STORY_LOG_FILE),
         "crash_log_file": Path(CRASH_LOG_FILE),
     }
+
+
+def open_private_text_file(path: str | Path, mode: str) -> TextIO:
+    """Open a text file with owner-only permissions where supported."""
+    if mode not in {"w", "a"}:
+        raise ValueError(f"Unsupported mode {mode!r}; expected 'w' or 'a'.")
+
+    target = Path(path).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    flags = os.O_WRONLY | os.O_CREAT
+    if mode == "w":
+        flags |= os.O_TRUNC
+    else:
+        flags |= os.O_APPEND
+
+    fd = os.open(target, flags, 0o600)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        return os.fdopen(fd, mode, encoding="utf-8")
+    except Exception:
+        os.close(fd)
+        raise
 
 
 def reveal_in_file_manager(path: str | Path) -> tuple[bool, str]:
@@ -82,5 +106,6 @@ def write_crash_log(
             lines.append(f"  {key}: {value}")
 
     lines.extend(["", "traceback:", traceback.format_exc().rstrip(), ""])
-    crash_log_path.write_text("\n".join(lines), encoding="utf-8")
+    with open_private_text_file(crash_log_path, "w") as handle:
+        handle.write("\n".join(lines))
     return crash_log_path

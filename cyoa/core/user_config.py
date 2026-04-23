@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from cyoa.core.constants import CONFIG_FILE
+from cyoa.core.support import open_private_text_file
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ def load_user_config() -> UserConfig:
 def save_user_config(config: UserConfig) -> None:
     try:
         Path(CONFIG_FILE).parent.mkdir(parents=True, exist_ok=True)
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        with open_private_text_file(CONFIG_FILE, "w") as f:
             json.dump(config.to_dict(), f, indent=2, ensure_ascii=False)
     except OSError as exc:
         logger.warning("Unable to persist user config to %s: %s", CONFIG_FILE, exc)
