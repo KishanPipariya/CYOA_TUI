@@ -38,6 +38,41 @@ class NavigationMixin:
             as_textual_app(app).call_after_refresh(buttons[0].focus)
 
     @staticmethod
+    def _highlight_region(app: object, widget: object) -> None:
+        try:
+            widget.add_class("region-jump-highlight")
+        except Exception:
+            return
+
+        def clear_highlight() -> None:
+            try:
+                widget.remove_class("region-jump-highlight")
+            except Exception:
+                return
+
+        as_textual_app(app).set_timer(1.2, clear_highlight)
+
+    @staticmethod
+    def _show_journal_panel(app: object, *, compact_layout: bool) -> ListView:
+        textual_app = as_textual_app(app)
+        panel = textual_app.query_one("#journal-panel", Container)
+        if compact_layout:
+            textual_app.query_one("#story-map-panel", Container).add_class("panel-collapsed")
+        panel.remove_class("panel-collapsed")
+        journal_list = textual_app.query_one("#journal-list", ListView)
+        journal_list.scroll_end(animate=not as_mixin_host(app).reduced_motion)
+        return journal_list
+
+    @staticmethod
+    def _show_story_map_panel(app: object, *, compact_layout: bool) -> Tree:
+        textual_app = as_textual_app(app)
+        panel = textual_app.query_one("#story-map-panel", Container)
+        if compact_layout:
+            textual_app.query_one("#journal-panel", Container).add_class("panel-collapsed")
+        panel.remove_class("panel-collapsed")
+        return textual_app.query_one("#story-map-tree", Tree)
+
+    @staticmethod
     def _collect_branch_targets(timeline_metadata: list[dict[str, Any]]) -> dict[str, list[int]]:
         """Group branch restore metadata by target scene id for story-map markers."""
         branch_targets: dict[str, list[int]] = {}
@@ -142,6 +177,48 @@ class NavigationMixin:
         app = as_textual_app(self)
         app.push_screen(NotificationHistoryScreen(as_mixin_host(self).get_notification_history_lines()))
 
+    def action_focus_story_region(self) -> None:
+        """Jump focus to the story viewport."""
+        app = as_textual_app(self)
+        story = app.query_one("#story-container", VerticalScroll)
+        self._highlight_region(app, story)
+        app.call_after_refresh(story.focus)
+
+    def action_focus_choices_region(self) -> None:
+        """Jump focus to the first visible choice."""
+        app = as_textual_app(self)
+        choices = app.query_one("#choices-container", Container)
+        self._highlight_region(app, choices)
+        self._focus_first_available_choice(app)
+
+    def action_focus_status_region(self) -> None:
+        """Jump focus to the runtime and player status block."""
+        app = as_textual_app(self)
+        status_display = app.query_one("#status-display", Static)
+        self._highlight_region(app, status_display)
+        app.call_after_refresh(status_display.focus)
+
+    def action_focus_journal_region(self) -> None:
+        """Ensure the journal is visible and move focus into it."""
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        journal_list = self._show_journal_panel(app, compact_layout=host.compact_layout)
+        self._highlight_region(app, app.query_one("#journal-panel", Container))
+        app.call_after_refresh(journal_list.focus)
+
+    def action_focus_story_map_region(self) -> None:
+        """Ensure the story map is visible and move focus into it."""
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        tree = self._show_story_map_panel(app, compact_layout=host.compact_layout)
+        self._highlight_region(app, app.query_one("#story-map-panel", Container))
+        host.update_story_map()
+        app.call_after_refresh(tree.focus)
+
+    def action_focus_notifications_region(self) -> None:
+        """Open notification history as the notifications region."""
+        self.action_show_notification_history()
+
     def action_undo(self) -> None:
         """Restore the game state to before the last choice was made."""
         UndoCommand().execute(
@@ -219,13 +296,11 @@ class NavigationMixin:
         if as_mixin_host(self).compact_layout and panel.has_class("panel-collapsed"):
             # In compact mode, keep only one side panel open at a time.
             app.query_one("#story-map-panel", Container).add_class("panel-collapsed")
-        panel.toggle_class("panel-collapsed")
-        # Ensure scroll to end if opening
-        if not panel.has_class("panel-collapsed"):
-            journal_list = app.query_one("#journal-list", ListView)
-            journal_list.scroll_end(animate=not as_mixin_host(self).reduced_motion)
+        if panel.has_class("panel-collapsed"):
+            journal_list = self._show_journal_panel(app, compact_layout=as_mixin_host(self).compact_layout)
             app.call_after_refresh(journal_list.focus)
             return
+        panel.add_class("panel-collapsed")
         self._focus_first_available_choice(app)
 
     def action_toggle_story_map(self) -> None:
@@ -235,11 +310,12 @@ class NavigationMixin:
         if as_mixin_host(self).compact_layout and panel.has_class("panel-collapsed"):
             # In compact mode, keep only one side panel open at a time.
             app.query_one("#journal-panel", Container).add_class("panel-collapsed")
-        panel.toggle_class("panel-collapsed")
-        if not panel.has_class("panel-collapsed"):
+        if panel.has_class("panel-collapsed"):
+            tree = self._show_story_map_panel(app, compact_layout=as_mixin_host(self).compact_layout)
             as_mixin_host(self).update_story_map()
-            app.call_after_refresh(app.query_one("#story-map-tree", Tree).focus)
+            app.call_after_refresh(tree.focus)
             return
+        panel.add_class("panel-collapsed")
         self._focus_first_available_choice(app)
 
     @work(exclusive=True)

@@ -102,6 +102,12 @@ class JournalListItem(ListItem):
         self.label_text = label_text
 
 
+class StoryViewport(VerticalScroll):
+    """Scrollable story viewport that can receive structural focus jumps."""
+
+    can_focus = True
+
+
 class StoryPane(Container):
     """Organism for the story stream and contextual ASCII art."""
 
@@ -110,7 +116,7 @@ class StoryPane(Container):
         self._screen_reader_mode = screen_reader_mode
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(id="story-container"):
+        with StoryViewport(id="story-container"):
             yield Markdown(
                 loading_story_text(screen_reader_mode=self._screen_reader_mode),
                 classes="story-turn",
@@ -1287,6 +1293,7 @@ class TextPromptScreen(ModalScreen[str]):
 class StatusDisplay(Static):
     """A reactive status area that groups player state and runtime metadata."""
 
+    can_focus = True
     health = reactive(100)
     gold = reactive(0)
     reputation = reactive(0)

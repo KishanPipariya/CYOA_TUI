@@ -553,6 +553,49 @@ async def test_choice_focus_moves_with_arrow_keys(mock_app_dependencies):
 
 
 @pytest.mark.asyncio
+async def test_structural_navigation_shortcuts_jump_to_major_regions(mock_app_dependencies):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(100, 34)) as pilot:
+        await pilot.pause(1.0)
+
+        story = app.query_one("#story-container", VerticalScroll)
+        status_display = app.query_one("#status-display")
+        journal_panel = app.query_one("#journal-panel", Container)
+        journal_list = app.query_one("#journal-list", ListView)
+        map_panel = app.query_one("#story-map-panel", Container)
+        story_map_tree = app.query_one("#story-map-tree")
+        choices = list(app.query_one("#choices-container", Container).query(Button))
+
+        await pilot.press("shift+s")
+        await pilot.pause(0.1)
+        assert app.focused is story
+
+        await pilot.press("shift+i")
+        await pilot.pause(0.1)
+        assert app.focused is status_display
+
+        await pilot.press("shift+c")
+        await pilot.pause(0.1)
+        assert app.focused is choices[0]
+
+        await pilot.press("shift+j")
+        await pilot.pause(0.2)
+        assert not journal_panel.has_class("panel-collapsed")
+        assert app.focused is journal_list
+
+        await pilot.press("shift+m")
+        await pilot.pause(0.2)
+        assert journal_panel.has_class("panel-collapsed")
+        assert not map_panel.has_class("panel-collapsed")
+        assert app.focused is story_map_tree
+
+        await pilot.press("shift+n")
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, NotificationHistoryScreen)
+
+
+@pytest.mark.asyncio
 async def test_game_over_state_and_restart(mock_app_dependencies):
     """Test the game over state ends the choices and 'r' restarts the app."""
     app = CYOAApp(model_path="dummy_path.gguf")

@@ -156,6 +156,12 @@ def build_help_text(*, screen_reader_mode: bool) -> str:
 | [b][reverse] 1 – 4 [/reverse][/b] | Select a choice by number |
 | [b][reverse] ↑ / ↓ [/reverse][/b] | Move between choices |
 | [b][reverse]ENTER[/reverse][/b] | Confirm focused choice |
+| [b][reverse]Shift+S[/reverse][/b] | Jump to Story |
+| [b][reverse]Shift+C[/reverse][/b] | Jump to Choices |
+| [b][reverse]Shift+I[/reverse][/b] | Jump to Status |
+| [b][reverse]Shift+J[/reverse][/b] | Jump to Journal |
+| [b][reverse]Shift+M[/reverse][/b] | Jump to Story Map |
+| [b][reverse]Shift+N[/reverse][/b] | Open Notifications |
 | [b][reverse]  N  [/reverse][/b] | Repeat latest status message |
 | [b][reverse]  D  [/reverse][/b] | Change Theme (Dark/Light) |
 | [b][reverse]  J  [/reverse][/b] | Toggle Journal panel |
@@ -183,7 +189,7 @@ def build_help_text(*, screen_reader_mode: bool) -> str:
 - Screen Reader Friendly mode removes ASCII art, uses plainer labels, and keeps the latest status message in the status panel.
 - High Contrast mode uses a fixed readable palette for story cards, choices, and side panels.
 - Press [b]N[/b] at any time to repeat the latest status message.
-- Press [b]Shift+N[/b] to open notification history.
+- Use [b]Shift+S / Shift+C / Shift+I / Shift+J / Shift+M / Shift+N[/b] to jump directly between major regions.
 - Reduced Motion disables spinner animation and narrated text animation.
 - Journal and Story Map panels move keyboard focus automatically when opened.
 
@@ -199,6 +205,12 @@ def build_help_text(*, screen_reader_mode: bool) -> str:
 | [b][reverse] 1 – 4 [/reverse][/b] | Select a choice by number |
 | [b][reverse] ↑ / ↓ [/reverse][/b] | Move between choices |
 | [b][reverse]ENTER[/reverse][/b] | Confirm focused choice |
+| [b][reverse]Shift+S[/reverse][/b] | Jump to Story |
+| [b][reverse]Shift+C[/reverse][/b] | Jump to Choices |
+| [b][reverse]Shift+I[/reverse][/b] | Jump to Status |
+| [b][reverse]Shift+J[/reverse][/b] | Jump to Journal |
+| [b][reverse]Shift+M[/reverse][/b] | Jump to Story Map |
+| [b][reverse]Shift+N[/reverse][/b] | Open Notifications |
 | [b][reverse]  N  [/reverse][/b] | Repeat latest status message |
 | [b][reverse]  D  [/reverse][/b] | Change Theme (Dark/Light) |
 | [b][reverse]  J  [/reverse][/b] | Toggle Journal panel |
@@ -237,7 +249,7 @@ def build_help_text(*, screen_reader_mode: bool) -> str:
 - Screen Reader Friendly mode removes ASCII art, uses plainer labels, and keeps the latest status message in the status panel.
 - High Contrast mode uses a fixed readable palette for story cards, choices, and side panels.
 - Press [b]N[/b] at any time to repeat the latest status message.
-- Press [b]Shift+N[/b] to open notification history.
+- Use [b]Shift+S / Shift+C / Shift+I / Shift+J / Shift+M / Shift+N[/b] to jump directly between major regions.
 - Locked choices include a written reason and do not rely on color alone.
 - Reduced Motion is available in Settings and disables spinner animation and narrated text animation.
 - Journal and Story Map panels move keyboard focus automatically when opened.

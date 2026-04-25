@@ -435,6 +435,11 @@ Toast.-error {
     overflow-x: hidden;
 }
 
+#story-container:focus,
+#story-container.region-jump-highlight {
+    tint: $accent 7%;
+}
+
 .story-turn {
     background: $panel 88%;
     color: $text;
@@ -506,6 +511,12 @@ StatusDisplay {
     border: round $secondary 18%;
     padding: 1;
     margin: 0;
+}
+
+StatusDisplay:focus,
+StatusDisplay.region-jump-highlight {
+    background: $panel 62%;
+    border: round $accent;
 }
 
 #stats-row {
@@ -633,6 +644,15 @@ ThemeSpinner {
 
 #choices-container.loading-state {
     display: none;
+}
+
+#choices-container.region-jump-highlight {
+    tint: $accent 6%;
+}
+
+#journal-panel.region-jump-highlight .side-panel-shell,
+#story-map-panel.region-jump-highlight .side-panel-shell {
+    tint: $accent 6%;
 }
 
 /* ── Buttons ────────────────────────────────────────────────── */
