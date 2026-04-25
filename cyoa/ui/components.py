@@ -255,6 +255,8 @@ class BranchScreen(ModalScreen[int]):
     }
     """
 
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
     def __init__(self, scenes: list[dict[str, Any]], choices: list[str], **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.scenes = scenes
@@ -283,6 +285,7 @@ class BranchScreen(ModalScreen[int]):
             label_text = self._build_scene_preview(scene, i, choice_text)
             item = SceneListItem(Label(label_text, classes="scene-preview"), scene_index=i)
             list_view.append(item)
+        self.call_after_refresh(list_view.focus)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, SceneListItem):
@@ -291,6 +294,9 @@ class BranchScreen(ModalScreen[int]):
     def on_button_pressed(self, event: Button.Pressed) -> None:  # noqa: C901
         if event.button.id == "cancel-branch":
             self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class ThemeSpinner(Static):
@@ -306,7 +312,7 @@ class ThemeSpinner(Static):
         self.set_interval(0.1, self.tick)
 
     def tick(self) -> None:
-        if "hidden" in self.classes:
+        if "hidden" in self.classes or bool(getattr(self.app, "reduced_motion", False)):
             return
         self._frame_idx = (self._frame_idx + 1) % len(self.frames)
         self.update(escape(self.frames[self._frame_idx]))
@@ -409,6 +415,14 @@ HELP_TEXT = """\
 
 ---
 
+# ♿ Accessibility
+
+- Locked choices include a written reason and do not rely on color alone.
+- Reduced Motion is available in Settings and disables spinner animation and narrated text animation.
+- Journal and Story Map panels move keyboard focus automatically when opened.
+
+---
+
 *Press Escape or click Close to return to the adventure.*
 """
 
@@ -441,6 +455,9 @@ class HelpScreen(ModalScreen[None]):
             with Container(id="help-content", classes="dialog-content"):
                 yield Markdown(HELP_TEXT, id="help-text")
             yield Button("Close [b](Esc)[/b]", id="btn-help-close", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#btn-help-close", Button).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-help-close":
@@ -486,6 +503,7 @@ class LoadGameScreen(ModalScreen[str]):
                 Label(display_name, classes="dialog-entry"), save_filename=save_file
             )
             list_view.append(item)
+        self.call_after_refresh(list_view.focus if self._save_files else self.query_one("#btn-load-cancel", Button).focus)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, SaveListItem):
@@ -521,9 +539,10 @@ class OptionListScreen(ModalScreen[str]):
         list_view = self.query_one("#load-list", ListView)
         if not self._options:
             list_view.append(OptionListItem(Label(self._empty_message, classes="dialog-entry"), option_value=""))
-            return
-        for option in self._options:
-            list_view.append(OptionListItem(Label(option, classes="dialog-entry"), option_value=option))
+        else:
+            for option in self._options:
+                list_view.append(OptionListItem(Label(option, classes="dialog-entry"), option_value=option))
+        self.call_after_refresh(list_view.focus if self._options else self.query_one("#btn-load-cancel", Button).focus)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, OptionListItem) and event.item.option_value:
@@ -603,7 +622,7 @@ class StartupChoiceScreen(ButtonGroupScreen):
         self.dismiss("new")
 
 
-class FirstRunSetupScreen(ModalScreen[str]):
+class FirstRunSetupScreen(ButtonGroupScreen):
     """First-run setup modal for choosing a safe runtime path."""
 
     DEFAULT_CSS = """
@@ -627,6 +646,10 @@ class FirstRunSetupScreen(ModalScreen[str]):
     BINDINGS = [
         ("q", "quick_demo", "Quick Demo"),
         ("d", "download_model", "Download Local Model"),
+        ("tab", "focus_next_button", "Next"),
+        ("shift+tab", "focus_previous_button", "Previous"),
+        ("up", "focus_previous_button", "Previous"),
+        ("down", "focus_next_button", "Next"),
     ]
 
     def __init__(
@@ -676,6 +699,9 @@ class FirstRunSetupScreen(ModalScreen[str]):
         elif event.button.id == "btn-first-run-download":
             self.dismiss("download")
 
+    def on_mount(self) -> None:
+        self._focus_first_action_button()
+
     def action_quick_demo(self) -> None:
         self.dismiss("mock")
 
@@ -683,7 +709,7 @@ class FirstRunSetupScreen(ModalScreen[str]):
         self.dismiss("download")
 
 
-class ModelDownloadScreen(ModalScreen[None]):
+class ModelDownloadScreen(ButtonGroupScreen):
     """Modal that guides users through downloading a recommended local model."""
 
     DEFAULT_CSS = """
@@ -709,6 +735,14 @@ class ModelDownloadScreen(ModalScreen[None]):
         color: $text-muted;
     }
     """
+
+    BINDINGS = [
+        ("tab", "focus_next_button", "Next"),
+        ("shift+tab", "focus_previous_button", "Previous"),
+        ("left", "focus_previous_button", "Previous"),
+        ("right", "focus_next_button", "Next"),
+        ("escape", "cancel", "Cancel"),
+    ]
 
     def __init__(
         self,
@@ -774,6 +808,9 @@ class ModelDownloadScreen(ModalScreen[None]):
                 )
                 yield Button("Cancel", id="btn-model-download-cancel", variant="error")
 
+    def on_mount(self) -> None:
+        self._focus_first_action_button()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:  # noqa: C901
         if event.button.id == "btn-model-download-start" and not self._started:
             self._started = True
@@ -786,6 +823,9 @@ class ModelDownloadScreen(ModalScreen[None]):
             elif self.app is not None:
                 cast(Any, self.app).cancel_first_run_model_download()
                 self.mark_cancelling()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
     def _set_busy_state(self) -> None:
         self.query_one("#btn-model-download-start", Button).disabled = True
@@ -870,6 +910,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         model_path: str | None,
         theme: str,
         dark: bool,
+        reduced_motion: bool,
         typewriter: bool,
         typewriter_speed: str,
         diagnostics_enabled: bool,
@@ -882,6 +923,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         self._theme_names = available_themes or [theme]
         self._theme_index = self._resolve_theme_index(theme)
         self._dark = dark
+        self._reduced_motion = reduced_motion
         self._typewriter = typewriter
         self._typewriter_speed = (
             typewriter_speed if typewriter_speed in constants.TYPEWRITER_SPEEDS else "normal"
@@ -935,6 +977,15 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             with Horizontal(classes="settings-row settings-section"):
                 yield Button("Dark", id="btn-settings-dark-on")
                 yield Button("Light", id="btn-settings-dark-off")
+
+            yield Label("Motion", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Standard", id="btn-settings-motion-standard")
+                yield Button("Reduced", id="btn-settings-motion-reduced")
+            yield Label(
+                "Reduced motion disables spinner animation and renders narrated text instantly.",
+                classes="settings-value",
+            )
 
             yield Label("Typewriter", classes="settings-label")
             with Horizontal(classes="settings-row settings-section"):
@@ -990,6 +1041,8 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
 
         self._set_selected("btn-settings-dark-on", self._dark)
         self._set_selected("btn-settings-dark-off", not self._dark)
+        self._set_selected("btn-settings-motion-standard", not self._reduced_motion)
+        self._set_selected("btn-settings-motion-reduced", self._reduced_motion)
         self._set_selected("btn-settings-typewriter-on", self._typewriter)
         self._set_selected("btn-settings-typewriter-off", not self._typewriter)
 
@@ -1013,6 +1066,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 "model_path": model_path,
                 "theme": self._current_theme,
                 "dark": self._dark,
+                "reduced_motion": self._reduced_motion,
                 "typewriter": self._typewriter,
                 "typewriter_speed": self._typewriter_speed,
                 "diagnostics_enabled": self._diagnostics_enabled,
@@ -1048,6 +1102,10 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             self._dark = True
         elif button_id == "btn-settings-dark-off":
             self._dark = False
+        elif button_id == "btn-settings-motion-standard":
+            self._reduced_motion = False
+        elif button_id == "btn-settings-motion-reduced":
+            self._reduced_motion = True
         elif button_id == "btn-settings-typewriter-on":
             self._typewriter = True
         elif button_id == "btn-settings-typewriter-off":
@@ -1133,9 +1191,9 @@ class StatusDisplay(Static):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="stats-row"):
-            yield Label("❤️ Health", id="health-label")
+            yield Label("Health", id="health-label")
             yield ProgressBar(total=100, show_percentage=False, show_eta=False, id="health-bar")
-            yield Label("100%", id="health-value")
+            yield Label("100% Stable", id="health-value")
         with Horizontal(id="status-meta-row"):
             yield Label("", id="stats-text")
             yield Label("", id="runtime-text")
@@ -1145,7 +1203,7 @@ class StatusDisplay(Static):
 
     def watch_health(self, health: int) -> None:
         self.query_one("#health-bar", ProgressBar).progress = health
-        self.query_one("#health-value", Label).update(f"{health}%")
+        self.query_one("#health-value", Label).update(f"{health}% {self._health_status_text(health)}")
         self._update_stats_text()
         self._set_health_class(health)
 
@@ -1206,3 +1264,11 @@ class StatusDisplay(Static):
             self.add_class("health-mid")
         else:
             self.add_class("health-high")
+
+    @staticmethod
+    def _health_status_text(health: int) -> str:
+        if health < 30:
+            return "Critical"
+        if health < 70:
+            return "Watch"
+        return "Stable"

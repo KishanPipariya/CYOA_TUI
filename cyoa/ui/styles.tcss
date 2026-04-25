@@ -108,6 +108,7 @@ Screen {
     background: $accent 16%;
     color: $text;
     tint: $accent 6%;
+    text-style: bold underline;
 }
 
 #confirm-dialog {
@@ -371,6 +372,7 @@ Toast.-error {
 #journal-list > ListItem:hover {
     background: $accent 12%;
     border-left: thick $accent 70%;
+    text-style: bold underline;
 }
 
 #journal-list Label {
@@ -395,9 +397,9 @@ Toast.-error {
 }
 
 #story-map-tree .tree--cursor {
-    background: $accent 16%;
+    background: $accent 22%;
     color: $text;
-    text-style: bold;
+    text-style: bold underline;
 }
 
 .compact-layout .side-panel-shell {
@@ -531,7 +533,7 @@ StatusDisplay {
 .health-low #health-bar .bar--complete { background: $error; }
 
 #health-value {
-    width: 6;
+    width: 14;
     text-align: right;
     color: $text;
     text-style: bold;
@@ -644,11 +646,15 @@ Button > .textual-button--label {
 }
 
 #choices-container Button:focus {
-    background: $accent 16%;
+    background: $accent 20%;
     border: round $accent;
-    border-left: solid $accent;
+    border-left: wide $accent;
     color: $text;
     tint: $accent 9%;
+}
+
+#choices-container Button:focus > .textual-button--label {
+    text-style: bold underline;
 }
 
 #choices-container Button:disabled {
@@ -733,6 +739,11 @@ Footer > .footer--highlight {
 
 #main-container {
     transition: background 300ms, border 300ms;
+}
+
+.reduced-motion #main-container,
+.reduced-motion #health-bar .bar--complete {
+    transition: none;
 }
 
 /* Mysterious: Deep indigo with arcane highlights */

@@ -15,6 +15,7 @@ from textual.binding import Binding
 from textual.containers import Container, VerticalScroll
 from textual.css.query import NoMatches
 from textual.events import Click, Resize
+from textual.notifications import SeverityLevel
 from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widgets import (
@@ -135,6 +136,7 @@ class CYOAApp(
     mood: reactive[str] = reactive("default")
     typewriter_enabled: reactive[bool] = reactive(True)
     typewriter_speed: reactive[str] = reactive("normal")
+    reduced_motion: reactive[bool] = reactive(False)
     compact_layout: reactive[bool] = reactive(False)
 
     def __init__(
@@ -196,6 +198,7 @@ class CYOAApp(
         # Restore preferences
         config = utils.load_config()
         self.dark = config.get("dark", True)
+        self.reduced_motion = config.get("reduced_motion", False)
         self.typewriter_enabled = config.get("typewriter", True)
         self.typewriter_speed = config.get("typewriter_speed", "normal")
 
@@ -224,6 +227,7 @@ class CYOAApp(
         self.query_one(StatusDisplay).generation_preset = "balanced"
         self._sync_runtime_status()
         self.apply_ui_theme()
+        self.set_class(self.reduced_motion, "reduced-motion")
 
         self._subscribe_engine_events()
         self._typewriter_worker()
@@ -238,6 +242,41 @@ class CYOAApp(
 
     def on_resize(self, event: Resize) -> None:
         self._set_compact_layout(event.size.width)
+
+    def watch_reduced_motion(self, enabled: bool) -> None:
+        self.set_class(enabled, "reduced-motion")
+        if enabled:
+            self.action_skip_typewriter()
+
+    @staticmethod
+    def _notification_title(severity: SeverityLevel) -> str:
+        titles = {
+            "information": "Information",
+            "warning": "Warning",
+            "error": "Error",
+        }
+        return titles.get(severity, "Notice")
+
+    def notify(
+        self,
+        message: str,
+        *,
+        title: str = "",
+        severity: SeverityLevel = "information",
+        timeout: float | None = None,
+        markup: bool = True,
+    ) -> None:
+        prefix = self._notification_title(severity)
+        cleaned = message.strip()
+        if cleaned and not cleaned.lower().startswith(f"{prefix.lower()}:"):
+            cleaned = f"{prefix}: {cleaned}"
+        super().notify(
+            cleaned,
+            title=title or prefix,
+            severity=severity,
+            timeout=timeout,
+            markup=markup,
+        )
 
     def is_runtime_active(self) -> bool:
         """Return whether UI workers and event handlers may still touch widgets."""
@@ -492,7 +531,11 @@ class CYOAApp(
         target.add_class("turn-highlight")
 
         self.call_after_refresh(
-            lambda: story_container.scroll_to_widget(target, animate=True, top=True)
+            lambda: story_container.scroll_to_widget(
+                target,
+                animate=not self.reduced_motion,
+                top=True,
+            )
         )
         self.set_timer(1.2, lambda: target.remove_class("turn-highlight"))
 
@@ -865,6 +908,7 @@ class CYOAApp(
                 model_path=config.model_path,
                 theme=config.theme,
                 dark=config.dark,
+                reduced_motion=getattr(config, "reduced_motion", False),
                 typewriter=config.typewriter,
                 typewriter_speed=config.typewriter_speed,
                 diagnostics_enabled=config.diagnostics_enabled,
@@ -901,6 +945,7 @@ class CYOAApp(
         model_path = raw_model_path.strip() if isinstance(raw_model_path, str) and raw_model_path.strip() else None
         theme_name = str(payload.get("theme") or self._user_config.theme).strip() or self._user_config.theme
         dark = bool(payload.get("dark", self._user_config.dark))
+        reduced_motion = bool(payload.get("reduced_motion", getattr(self._user_config, "reduced_motion", False)))
         typewriter = bool(payload.get("typewriter", self._user_config.typewriter))
         typewriter_speed = str(payload.get("typewriter_speed") or self._user_config.typewriter_speed).strip()
         if typewriter_speed not in constants.TYPEWRITER_SPEEDS:
@@ -915,9 +960,10 @@ class CYOAApp(
             os.environ.pop("CYOA_ENABLE_RAG", None)
 
         self.dark = dark
+        self.reduced_motion = reduced_motion
         self.typewriter_enabled = typewriter
         self.typewriter_speed = typewriter_speed
-        if not self.typewriter_enabled:
+        if self.reduced_motion or not self.typewriter_enabled:
             self.action_skip_typewriter()
 
         self._user_config = update_user_config(
@@ -925,6 +971,7 @@ class CYOAApp(
             model_path=model_path,
             theme=theme_name,
             dark=dark,
+            reduced_motion=reduced_motion,
             typewriter=typewriter,
             typewriter_speed=typewriter_speed,
             diagnostics_enabled=diagnostics_enabled,
@@ -949,6 +996,7 @@ class CYOAApp(
         os.environ.pop("LLM_MODEL_PATH", None)
 
         self.dark = self._user_config.dark
+        self.reduced_motion = getattr(self._user_config, "reduced_motion", False)
         self.typewriter_enabled = self._user_config.typewriter
         self.typewriter_speed = self._user_config.typewriter_speed
         self.notify(

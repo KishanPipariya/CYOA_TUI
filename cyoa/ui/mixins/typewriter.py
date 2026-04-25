@@ -50,7 +50,9 @@ class TypewriterMixin:
                 last_refresh = now
 
             if host._typewriter_active_chunk:
-                delay = constants.TYPEWRITER_SPEEDS.get(host.typewriter_speed, 0.02)
+                delay = 0 if host.reduced_motion else constants.TYPEWRITER_SPEEDS.get(
+                    host.typewriter_speed, 0.02
+                )
                 if delay > 0:
                     await asyncio.sleep(delay)
 

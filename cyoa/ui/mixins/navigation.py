@@ -4,7 +4,7 @@ from typing import Any, cast
 
 from textual import work
 from textual.containers import Container, VerticalScroll
-from textual.widgets import Label, ListView, Markdown, Static, Tree
+from textual.widgets import Button, Label, ListView, Markdown, Static, Tree
 
 from cyoa.ui.commands import RedoCommand, RestartCommand, UICommandContext, UndoCommand
 from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, JournalListItem
@@ -19,6 +19,16 @@ logger = logging.getLogger(__name__)
 
 class NavigationMixin:
     """Mixin for app navigation and branching."""
+
+    @staticmethod
+    def _focus_first_available_choice(app: object) -> None:
+        buttons = [
+            button
+            for button in as_textual_app(app).query("#choices-container Button")
+            if isinstance(button, Button) and not button.disabled
+        ]
+        if buttons:
+            as_textual_app(app).call_after_refresh(buttons[0].focus)
 
     @staticmethod
     def _collect_branch_targets(timeline_metadata: list[dict[str, Any]]) -> dict[str, list[int]]:
@@ -198,7 +208,11 @@ class NavigationMixin:
         panel.toggle_class("panel-collapsed")
         # Ensure scroll to end if opening
         if not panel.has_class("panel-collapsed"):
-            app.query_one("#journal-list", ListView).scroll_end(animate=False)
+            journal_list = app.query_one("#journal-list", ListView)
+            journal_list.scroll_end(animate=not as_mixin_host(self).reduced_motion)
+            app.call_after_refresh(journal_list.focus)
+            return
+        self._focus_first_available_choice(app)
 
     def action_toggle_story_map(self) -> None:
         """Toggle the visibility of the story map panel."""
@@ -210,6 +224,9 @@ class NavigationMixin:
         panel.toggle_class("panel-collapsed")
         if not panel.has_class("panel-collapsed"):
             as_mixin_host(self).update_story_map()
+            app.call_after_refresh(app.query_one("#story-map-tree", Tree).focus)
+            return
+        self._focus_first_available_choice(app)
 
     @work(exclusive=True)
     async def action_branch_past(self) -> None:
@@ -286,7 +303,7 @@ class NavigationMixin:
                 label_text=f"Timeline fracture → resumed from Turn {idx + 1}",
             )
         )
-        journal_list.scroll_end(animate=False)
+        journal_list.scroll_end(animate=not host.reduced_motion)
 
         # 3. Hand off the core logic to the engine
         # Engine events (STATS_UPDATED, INVENTORY_UPDATED, NODE_COMPLETED) will refresh the UI

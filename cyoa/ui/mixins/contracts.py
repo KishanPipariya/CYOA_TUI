@@ -20,6 +20,7 @@ class CYOAAppMixinContract(Protocol):
     turn_count: int
     mood: str
     dark: bool
+    reduced_motion: bool
     compact_layout: bool
     typewriter_enabled: bool
     typewriter_speed: str

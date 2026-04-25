@@ -14,6 +14,9 @@ def save_config(data: dict[str, Any]) -> None:
     dark = data.get("dark")
     if isinstance(dark, bool):
         config.dark = dark
+    reduced_motion = data.get("reduced_motion")
+    if isinstance(reduced_motion, bool):
+        config.reduced_motion = reduced_motion
     typewriter = data.get("typewriter")
     if isinstance(typewriter, bool):
         config.typewriter = typewriter

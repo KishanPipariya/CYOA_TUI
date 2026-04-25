@@ -19,6 +19,7 @@ class UserConfig:
     model_path: str | None = None
     theme: str = "dark_dungeon"
     dark: bool = True
+    reduced_motion: bool = False
     typewriter: bool = True
     typewriter_speed: str = "normal"
     diagnostics_enabled: bool = False
@@ -38,6 +39,7 @@ class UserConfig:
             "model_path",
             "theme",
             "dark",
+            "reduced_motion",
             "typewriter",
             "typewriter_speed",
             "diagnostics_enabled",
@@ -55,6 +57,7 @@ class UserConfig:
         model_path = payload.get("model_path")
         theme = payload.get("theme")
         dark = payload.get("dark")
+        reduced_motion = payload.get("reduced_motion")
         typewriter = payload.get("typewriter")
         typewriter_speed = payload.get("typewriter_speed")
         diagnostics_enabled = payload.get("diagnostics_enabled")
@@ -68,6 +71,7 @@ class UserConfig:
             model_path=model_path.strip() if isinstance(model_path, str) and model_path.strip() else None,
             theme=theme.strip() if isinstance(theme, str) and theme.strip() else "dark_dungeon",
             dark=dark if isinstance(dark, bool) else True,
+            reduced_motion=reduced_motion if isinstance(reduced_motion, bool) else False,
             typewriter=typewriter if isinstance(typewriter, bool) else True,
             typewriter_speed=(
                 typewriter_speed.strip()
@@ -101,6 +105,7 @@ class UserConfig:
                 "model_path": self.model_path,
                 "theme": self.theme,
                 "dark": self.dark,
+                "reduced_motion": self.reduced_motion,
                 "typewriter": self.typewriter,
                 "typewriter_speed": self.typewriter_speed,
                 "diagnostics_enabled": self.diagnostics_enabled,
@@ -115,6 +120,7 @@ class UserConfig:
     def to_ui_preferences(self) -> dict[str, Any]:
         return {
             "dark": self.dark,
+            "reduced_motion": self.reduced_motion,
             "typewriter": self.typewriter,
             "typewriter_speed": self.typewriter_speed,
         }

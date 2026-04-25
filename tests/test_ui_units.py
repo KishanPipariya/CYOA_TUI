@@ -35,6 +35,7 @@ from cyoa.ui.mixins.typewriter import TypewriterMixin
 class DummyTypewriterHost(TypewriterMixin):
     def __init__(self) -> None:
         self.runtime_active = True
+        self.reduced_motion = False
         self._is_typing = True
         self._typewriter_active_chunk: list[str] = []
         self._typewriter_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -66,6 +67,7 @@ class DummyTypewriterHost(TypewriterMixin):
 class DummyThemeHost(ThemeMixin):
     def __init__(self) -> None:
         self.dark = True
+        self.reduced_motion = False
         self.theme = "textual-dark"
         self.registered_theme_names: list[str] = []
         self._ui_theme: dict[str, str] = {}
@@ -114,6 +116,7 @@ class DummyThemeHost(ThemeMixin):
 class DummyRenderingHost(RenderingMixin):
     def __init__(self) -> None:
         self.runtime_active = True
+        self.reduced_motion = False
         self.typewriter_enabled = False
         self._loading_suffix_shown = True
         self._current_story = constants.LOADING_ART
@@ -191,6 +194,7 @@ class DummyChoiceButton:
 class DummyRenderingChoiceHost(RenderingMixin):
     def __init__(self) -> None:
         self.turn_count = 7
+        self.reduced_motion = False
         self._loading_suffix_shown = False
         self.engine = SimpleNamespace(
             state=SimpleNamespace(
@@ -234,6 +238,7 @@ class DummyPersistenceApp:
 class DummyEventsHost(EventsMixin):
     def __init__(self) -> None:
         self.runtime_active = True
+        self.reduced_motion = False
         self._last_stats_snapshot = {"health": 100, "gold": 1, "reputation": 0}
         self.status_display = SimpleNamespace(health=0, gold=0, reputation=0, objectives=[])
         self.loading = MagicMock()
@@ -339,6 +344,7 @@ class SettingsScreenHarness(App[None]):
             model_path="",
             theme="dark_dungeon",
             dark=True,
+            reduced_motion=False,
             typewriter=True,
             typewriter_speed="normal",
             diagnostics_enabled=False,
@@ -422,6 +428,19 @@ def test_stream_narrative_replaces_loading_art_without_typewriter():
     assert host._current_turn_text == "Hello"
     host._current_turn_widget.update.assert_called_once_with("Hello")
     assert host.scroll_calls == [False]
+
+
+def test_stream_narrative_honors_reduced_motion_even_when_typewriter_is_enabled():
+    host = DummyRenderingHost()
+    host.typewriter_enabled = True
+    host.reduced_motion = True
+
+    host._stream_narrative("Hello")
+
+    assert host._current_story == "Hello"
+    assert host._current_turn_text == "Hello"
+    assert host._typewriter_queue.empty() is True
+    host._current_turn_widget.update.assert_called_once_with("Hello")
 
 
 def test_sync_narrative_replaces_finalized_streamed_turn():
@@ -615,6 +634,7 @@ async def test_status_display_watchers_and_spinner_tick() -> None:
 
         assert display.query_one("#health-bar", ProgressBar).progress == 25
         assert "25%" in _render_text(display.query_one("#health-value", Label))
+        assert "Critical" in _render_text(display.query_one("#health-value", Label))
         assert "Gold 9" in _render_text(display.query_one("#stats-text", Label))
         assert "fast" in _render_text(display.query_one("#runtime-text", Label))
         assert "ready" in _render_text(display.query_one("#runtime-text", Label))
@@ -729,6 +749,7 @@ def test_settings_screen_dismisses_saved_payload():
         model_path="",
         theme="dark_dungeon",
         dark=True,
+        reduced_motion=False,
         typewriter=True,
         typewriter_speed="normal",
         diagnostics_enabled=False,
@@ -740,6 +761,7 @@ def test_settings_screen_dismisses_saved_payload():
 
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-provider-llama")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-theme-next")))
+    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-motion-reduced")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-typewriter-off")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-speed-fast")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-diagnostics-on")))
@@ -751,6 +773,7 @@ def test_settings_screen_dismisses_saved_payload():
         "model_path": "/tmp/demo.gguf",
         "theme": "space_explorer",
         "dark": True,
+        "reduced_motion": True,
         "typewriter": False,
         "typewriter_speed": "fast",
         "diagnostics_enabled": True,
@@ -763,6 +786,7 @@ def test_settings_screen_support_actions_dismiss_expected_payloads():
         model_path="",
         theme="dark_dungeon",
         dark=True,
+        reduced_motion=False,
         typewriter=True,
         typewriter_speed="normal",
         diagnostics_enabled=False,

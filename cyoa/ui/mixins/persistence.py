@@ -42,12 +42,26 @@ class PersistenceMixin:
         if not mixin_host.engine:
             return None
 
+        current_node = mixin_host.engine.state.current_node
+        node_title = current_node.title if current_node is not None else None
         story_title = mixin_host.engine.state.story_title
+        turn_count = getattr(mixin_host.engine.state, "turn_count", 0)
+        if (
+            turn_count <= 1
+            and isinstance(node_title, str)
+            and node_title.strip()
+            and (
+                not isinstance(story_title, str)
+                or not story_title.strip()
+                or story_title.strip() != node_title.strip()
+            )
+        ):
+            mixin_host.engine.state.story_title = node_title
+            return node_title
+
         if isinstance(story_title, str) and story_title.strip():
             return story_title
 
-        current_node = mixin_host.engine.state.current_node
-        node_title = current_node.title if current_node is not None else None
         if isinstance(node_title, str) and node_title.strip():
             mixin_host.engine.state.story_title = node_title
             return node_title

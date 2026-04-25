@@ -45,7 +45,7 @@ class RenderingMixin:
                 host._current_turn_text = ""
                 host._reset_story_segments("")
 
-        if not host.typewriter_enabled:
+        if not host.typewriter_enabled or host.reduced_motion:
             host._current_story += partial
             host._current_turn_text += partial
             host._update_current_story_segment(host._current_turn_text)
@@ -92,9 +92,12 @@ class RenderingMixin:
     def _scroll_to_bottom(self, animate: bool = True) -> None:
         """Scroll the story container to the end after the next refresh."""
         app = as_textual_app(self)
+        host = as_mixin_host(self)
         try:
             container = app.query_one("#story-container", VerticalScroll)
-            app.call_after_refresh(lambda: container.scroll_end(animate=animate))
+            app.call_after_refresh(
+                lambda: container.scroll_end(animate=animate and not host.reduced_motion)
+            )
         except Exception as e:
             logger.debug("Failed to scroll to bottom: %s", e)
 
@@ -326,7 +329,7 @@ class RenderingMixin:
             )
         )
         # U2 Fix: Scroll after refresh to ensure layout size is updated
-        app.call_after_refresh(lambda: journal_list.scroll_end(animate=False))
+        app.call_after_refresh(lambda: journal_list.scroll_end(animate=not host.reduced_motion))
 
         # 3. Cancel speculations and let the engine handle the rest
         host._redo_payloads.clear()
