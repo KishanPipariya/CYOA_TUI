@@ -1,6 +1,8 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+pytest.importorskip("neo4j")
 from neo4j.exceptions import AuthError, ServiceUnavailable
 
 from cyoa.db.graph_db import CYOAGraphDB

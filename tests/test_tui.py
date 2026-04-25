@@ -21,6 +21,7 @@ from cyoa.ui.components import (
     ConfirmScreen,
     HelpScreen,
     LoadGameScreen,
+    NotificationHistoryScreen,
     StartupChoiceScreen,
     TextPromptScreen,
 )
@@ -815,6 +816,26 @@ async def test_help_screen(mock_app_dependencies):
         await pilot.press("escape")
         await pilot.pause(0.2)
         assert not isinstance(app.screen, HelpScreen)
+
+
+@pytest.mark.asyncio
+async def test_notification_history_screen_opens_from_action(mock_app_dependencies):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        app._notification_history = []
+        app.notify("A distant bell rings.", severity="information", timeout=2)
+        app.action_show_notification_history()
+        await pilot.pause(0.2)
+
+        assert isinstance(app.screen, NotificationHistoryScreen)
+        entries = [label.render().plain for label in app.screen.query("#notification-history-list Label")]
+        assert entries == ["1. Information: A distant bell rings."]
+
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert not isinstance(app.screen, NotificationHistoryScreen)
 
 
 @pytest.mark.asyncio
@@ -2106,13 +2127,25 @@ async def test_status_notifications_are_batched(mock_app_dependencies) -> None:
 
     async with app.run_test() as pilot:
         await pilot.pause(1.0)
-        notify = MagicMock()
-        with patch.object(app, "notify", notify):
+        dispatched: list[str] = []
+
+        def capture_dispatch(
+            message: str,
+            *,
+            title: str,
+            severity: str,
+            timeout: float | None,
+            markup: bool,
+            update_latest: bool,
+        ) -> None:
+            dispatched.append(message)
+
+        with patch.object(app, "_dispatch_notification", side_effect=capture_dispatch):
             bus.emit(Events.STATUS_MESSAGE, message="⚡ Weaving possible futures...")
             bus.emit(Events.STATUS_MESSAGE, message="📜 Archiving old chapters...")
             await pilot.pause(0.3)
 
-            notify.assert_called_once()
-            message = notify.call_args.args[0]
+            assert dispatched == ["Information: ⚡ Weaving possible futures... | 📜 Archiving old chapters..."]
+            message = dispatched[0]
             assert "⚡ Weaving possible futures..." in message
             assert "📜 Archiving old chapters..." in message

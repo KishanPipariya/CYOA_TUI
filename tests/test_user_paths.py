@@ -38,6 +38,7 @@ def test_save_config_creates_parent_directory(tmp_path, monkeypatch) -> None:
     assert config_path.exists()
     assert utils.load_config() == {
         "dark": True,
+        "high_contrast": False,
         "reduced_motion": False,
         "screen_reader_mode": False,
         "typewriter": False,
@@ -55,6 +56,7 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
             model_path="/models/demo.gguf",
             theme="space_explorer",
             dark=False,
+            high_contrast=True,
             typewriter=False,
             typewriter_speed="fast",
             preset="balanced",
@@ -73,6 +75,7 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
     assert restored.model_path == "/models/demo.gguf"
     assert restored.theme == "space_explorer"
     assert restored.dark is False
+    assert restored.high_contrast is True
     assert restored.typewriter is False
     assert restored.typewriter_speed == "fast"
     assert restored.preset == "balanced"

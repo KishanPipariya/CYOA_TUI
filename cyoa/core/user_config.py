@@ -19,6 +19,7 @@ class UserConfig:
     model_path: str | None = None
     theme: str = "dark_dungeon"
     dark: bool = True
+    high_contrast: bool = False
     reduced_motion: bool = False
     screen_reader_mode: bool = False
     typewriter: bool = True
@@ -40,6 +41,7 @@ class UserConfig:
             "model_path",
             "theme",
             "dark",
+            "high_contrast",
             "reduced_motion",
             "screen_reader_mode",
             "typewriter",
@@ -59,6 +61,7 @@ class UserConfig:
         model_path = payload.get("model_path")
         theme = payload.get("theme")
         dark = payload.get("dark")
+        high_contrast = payload.get("high_contrast")
         reduced_motion = payload.get("reduced_motion")
         screen_reader_mode = payload.get("screen_reader_mode")
         typewriter = payload.get("typewriter")
@@ -74,6 +77,7 @@ class UserConfig:
             model_path=model_path.strip() if isinstance(model_path, str) and model_path.strip() else None,
             theme=theme.strip() if isinstance(theme, str) and theme.strip() else "dark_dungeon",
             dark=dark if isinstance(dark, bool) else True,
+            high_contrast=high_contrast if isinstance(high_contrast, bool) else False,
             reduced_motion=reduced_motion if isinstance(reduced_motion, bool) else False,
             screen_reader_mode=screen_reader_mode if isinstance(screen_reader_mode, bool) else False,
             typewriter=typewriter if isinstance(typewriter, bool) else True,
@@ -109,6 +113,7 @@ class UserConfig:
                 "model_path": self.model_path,
                 "theme": self.theme,
                 "dark": self.dark,
+                "high_contrast": self.high_contrast,
                 "reduced_motion": self.reduced_motion,
                 "screen_reader_mode": self.screen_reader_mode,
                 "typewriter": self.typewriter,
@@ -125,6 +130,7 @@ class UserConfig:
     def to_ui_preferences(self) -> dict[str, Any]:
         return {
             "dark": self.dark,
+            "high_contrast": self.high_contrast,
             "reduced_motion": self.reduced_motion,
             "screen_reader_mode": self.screen_reader_mode,
             "typewriter": self.typewriter,

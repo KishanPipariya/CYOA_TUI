@@ -19,6 +19,7 @@ from cyoa.ui.components import (
     FirstRunSetupScreen,
     LoadGameScreen,
     ModelDownloadScreen,
+    NotificationHistoryScreen,
     SettingsScreen,
     StartupChoiceScreen,
     StatusDisplay,
@@ -68,6 +69,7 @@ class DummyTypewriterHost(TypewriterMixin):
 class DummyThemeHost(ThemeMixin):
     def __init__(self) -> None:
         self.dark = True
+        self.high_contrast_mode = False
         self.reduced_motion = False
         self.theme = "textual-dark"
         self.registered_theme_names: list[str] = []
@@ -747,6 +749,14 @@ def test_startup_choice_screen_dismisses_expected_values():
     help_screen.action_close()
     assert help_screen.dismiss.call_args_list == [call(None), call(None)]
 
+    history_screen = NotificationHistoryScreen(["Information: A path opens."])
+    history_screen.dismiss = MagicMock()
+    history_screen.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-notification-history-close"))
+    )
+    history_screen.action_close()
+    assert history_screen.dismiss.call_args_list == [call(None), call(None)]
+
 
 def test_first_run_setup_screen_dismisses_expected_values():
     first_run = FirstRunSetupScreen()
@@ -770,6 +780,7 @@ def test_settings_screen_dismisses_saved_payload():
         model_path="",
         theme="dark_dungeon",
         dark=True,
+        high_contrast=False,
         reduced_motion=False,
         screen_reader_mode=False,
         typewriter=True,
@@ -783,6 +794,7 @@ def test_settings_screen_dismisses_saved_payload():
 
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-provider-llama")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-theme-next")))
+    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-contrast-high")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-motion-reduced")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-screen-reader-on")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-typewriter-off")))
@@ -796,6 +808,7 @@ def test_settings_screen_dismisses_saved_payload():
         "model_path": "/tmp/demo.gguf",
         "theme": "space_explorer",
         "dark": True,
+        "high_contrast": True,
         "reduced_motion": True,
         "screen_reader_mode": True,
         "typewriter": False,
@@ -810,6 +823,7 @@ def test_settings_screen_support_actions_dismiss_expected_payloads():
         model_path="",
         theme="dark_dungeon",
         dark=True,
+        high_contrast=False,
         reduced_motion=False,
         screen_reader_mode=False,
         typewriter=True,
@@ -904,6 +918,7 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         model_path=None,
         theme="dark_dungeon",
         dark=True,
+        high_contrast=False,
         reduced_motion=False,
         screen_reader_mode=False,
         typewriter=True,
@@ -927,6 +942,7 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
                 "model_path": "/tmp/models/demo.gguf",
                 "theme": "space_explorer",
                 "dark": False,
+                "high_contrast": True,
                 "screen_reader_mode": True,
                 "typewriter": False,
                 "typewriter_speed": "fast",
@@ -935,6 +951,7 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         )
 
         assert app.dark is False
+        assert app.high_contrast_mode is True
         assert app.screen_reader_mode is True
         assert app.typewriter_enabled is False
         assert app.typewriter_speed == "fast"
@@ -942,6 +959,7 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         assert saved["provider"] == "llama_cpp"
         assert saved["model_path"] == "/tmp/models/demo.gguf"
         assert saved["theme"] == "space_explorer"
+        assert saved["high_contrast"] is True
         assert saved["screen_reader_mode"] is True
         assert saved["diagnostics_enabled"] is True
         app.action_skip_typewriter.assert_called_once_with()
@@ -1129,6 +1147,45 @@ def test_theme_watch_mood_updates_container_spinner_and_theme(monkeypatch: pytes
     assert host.theme == "mood-heroic"
 
 
+def test_theme_watch_mood_preserves_high_contrast_preset(monkeypatch: pytest.MonkeyPatch):
+    host = DummyThemeHost()
+    host.high_contrast_mode = True
+    host.theme = "cyoa-custom"
+    host._apply_ui_theme_to_dynamic_content = MagicMock()
+    monkeypatch.setattr(
+        "cyoa.ui.mixins.theme.theme_loader.get_config_for_mood",
+        lambda mood: {"spinner_frames": ["{", "}"], "accent_color": "#abcdef"} if mood == "heroic" else None,
+    )
+
+    host.watch_mood("default", "heroic")
+
+    assert "mood-heroic" not in host.registered_theme_names
+    assert host.theme == "cyoa-custom"
+    host._apply_ui_theme_to_dynamic_content.assert_called_once_with()
+
+
+def test_apply_ui_theme_uses_high_contrast_surfaces_when_enabled() -> None:
+    host = DummyThemeHost()
+    host.high_contrast_mode = True
+    host._ui_theme = {
+        "main_surface": "#101010",
+        "action_dock_surface": "#111111",
+        "status_surface": "#121212",
+        "side_panel_surface": "#131313",
+        "story_card_surface": "#141414",
+        "story_card_muted_surface": "#151515",
+        "player_choice_surface": "#161616",
+        "choice_surface": "#171717",
+        "choice_locked_surface": "#181818",
+    }
+
+    host.apply_ui_theme()
+
+    host.container.set_styles.assert_called_once_with("background: #000000;")
+    host.action_panel.set_styles.assert_called_once_with("background: #050505;")
+    host.status_display.set_styles.assert_called_once_with("background: #050505;")
+
+
 def test_apply_ui_theme_styles_primary_surfaces_and_dynamic_widgets() -> None:
     host = DummyThemeHost()
     host._ui_theme = {
@@ -1252,7 +1309,13 @@ def test_app_notification_and_cache_helpers_cover_ui_shell(monkeypatch: pytest.M
     notified: list[tuple[str, str, float]] = []
     timer = DummyAppTimer()
 
-    monkeypatch.setattr(app, "notify", lambda message, *, severity, timeout: notified.append((message, severity, timeout)))
+    monkeypatch.setattr(
+        app,
+        "_dispatch_notification",
+        lambda message, *, title, severity, timeout, markup, update_latest: notified.append(
+            (message, severity, timeout)
+        ),
+    )
     monkeypatch.setattr(app, "set_timer", lambda *_args, **_kwargs: timer)
 
     app._running = False
@@ -1266,9 +1329,14 @@ def test_app_notification_and_cache_helpers_cover_ui_shell(monkeypatch: pytest.M
     app.queue_notification("beta", severity="warning", timeout=4)
     assert len(app._notification_buffer) == 2
     assert app._notification_timer is timer
+    assert app.get_notification_history_lines() == [
+        "Information: alpha",
+        "Information: alpha",
+        "Warning: beta",
+    ]
 
     app._flush_buffered_notifications()
-    assert notified == [("alpha | beta", "warning", 4)]
+    assert notified == [("Warning: alpha | beta", "warning", 4)]
     assert app._notification_buffer == []
 
     app._notification_buffer = [
@@ -1278,7 +1346,7 @@ def test_app_notification_and_cache_helpers_cover_ui_shell(monkeypatch: pytest.M
         BufferedNotification("four", "information", 1),
     ]
     app._flush_buffered_notifications()
-    assert notified[-1] == ("one | two | three | +1 more", "error", 3)
+    assert notified[-1] == ("Error: one | two | three | +1 more", "error", 3)
 
     app.cache_story_history("a", {"turn": 1})
     app.cache_story_history("b", {"turn": 2})
@@ -1314,8 +1382,36 @@ def test_app_notify_tracks_latest_status_and_repeat_action(monkeypatch: pytest.M
     app.action_repeat_latest_status()
 
     assert app._latest_status_message == "Information: Weaving possible futures..."
+    assert app.get_notification_history_lines() == ["Information: Weaving possible futures..."]
     assert repeated[0] == ("Information: Weaving possible futures...", "Information", "information", False)
     assert repeated[1] == ("Information: Weaving possible futures...", "Latest Status", "information", False)
+
+
+def test_notification_history_screen_renders_entries_in_order() -> None:
+    class NotificationHistoryHarness(App[None]):
+        def compose(self) -> ComposeResult:
+            yield NotificationHistoryScreen(
+                [
+                    "Information: First clue.",
+                    "Warning: Lantern fading.",
+                    "Error: Bridge collapsed.",
+                ]
+            )
+
+    app = NotificationHistoryHarness()
+
+    async def run() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+            screen = cast(NotificationHistoryScreen, app.screen)
+            labels = [label.render().plain for label in screen.query("#notification-history-list Label")]
+            assert labels == [
+                "1. Information: First clue.",
+                "2. Warning: Lantern fading.",
+                "3. Error: Bridge collapsed.",
+            ]
+
+    asyncio.run(run())
 
 
 def test_watch_screen_reader_mode_updates_loading_text_scene_art_and_choices() -> None:

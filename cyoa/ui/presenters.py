@@ -181,7 +181,9 @@ def build_help_text(*, screen_reader_mode: bool) -> str:
 # Accessibility
 
 - Screen Reader Friendly mode removes ASCII art, uses plainer labels, and keeps the latest status message in the status panel.
+- High Contrast mode uses a fixed readable palette for story cards, choices, and side panels.
 - Press [b]N[/b] at any time to repeat the latest status message.
+- Press [b]Shift+N[/b] to open notification history.
 - Reduced Motion disables spinner animation and narrated text animation.
 - Journal and Story Map panels move keyboard focus automatically when opened.
 
@@ -233,7 +235,9 @@ def build_help_text(*, screen_reader_mode: bool) -> str:
 # ♿ Accessibility
 
 - Screen Reader Friendly mode removes ASCII art, uses plainer labels, and keeps the latest status message in the status panel.
+- High Contrast mode uses a fixed readable palette for story cards, choices, and side panels.
 - Press [b]N[/b] at any time to repeat the latest status message.
+- Press [b]Shift+N[/b] to open notification history.
 - Locked choices include a written reason and do not rely on color alone.
 - Reduced Motion is available in Settings and disables spinner animation and narrated text animation.
 - Journal and Story Map panels move keyboard focus automatically when opened.

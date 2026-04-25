@@ -925,3 +925,101 @@ Footer > .footer--highlight {
     max-height: 14;
     padding: 0 1;
 }
+
+/* ── High Contrast Preset ─────────────────────────────────── */
+.high-contrast-mode #story-container,
+.high-contrast-mode StatusDisplay,
+.high-contrast-mode .side-panel-shell,
+.high-contrast-mode #choices-container Button.choice-card-available,
+.high-contrast-mode .story-turn.current-turn,
+.high-contrast-mode .player-choice {
+    color: #FFFFFF;
+}
+
+.high-contrast-mode #story-container {
+    background: #000000;
+    border-left: wide #FFD400;
+}
+
+.high-contrast-mode .story-turn {
+    background: #000000;
+    color: #FFFFFF;
+    border-left: solid #FFD400;
+    border-right: solid #FFFFFF 25%;
+}
+
+.high-contrast-mode .story-turn.archived-turn {
+    background: #111111;
+    color: #D7D7D7;
+    border-left: solid #00C8FF;
+    border-right: solid #888888 25%;
+}
+
+.high-contrast-mode .player-choice {
+    background: #001A33;
+    border-right: wide #00C8FF;
+    border-left: solid #00C8FF;
+}
+
+.high-contrast-mode StatusDisplay,
+.high-contrast-mode .side-panel-shell {
+    background: #050505;
+    border: round #FFFFFF;
+}
+
+.high-contrast-mode #stats-text,
+.high-contrast-mode #runtime-text,
+.high-contrast-mode #inventory-label,
+.high-contrast-mode #objectives-label,
+.high-contrast-mode #directives-label {
+    background: #000000;
+    color: #FFFFFF;
+    border-left: wide #FFD400;
+}
+
+.high-contrast-mode #choices-container Button {
+    background: #000000;
+    color: #FFFFFF;
+    border: round #FFFFFF;
+    border-left: solid #FFFFFF;
+}
+
+.high-contrast-mode #choices-container Button:focus {
+    background: #FFD400;
+    color: #000000;
+    border: round #FFD400;
+    border-left: wide #FFD400;
+    tint: transparent;
+}
+
+.high-contrast-mode #choices-container Button:focus > .textual-button--label {
+    text-style: bold underline;
+}
+
+.high-contrast-mode #choices-container Button:disabled {
+    background: #101010;
+    color: #BFBFBF;
+    border: round #7A7A7A;
+    border-left: solid #00C8FF;
+}
+
+.high-contrast-mode #choices-container Button.choice-card-locked {
+    background: #241A00;
+    color: #FFF1B8;
+    border: round #FFD400;
+    border-left: wide #FFD400;
+}
+
+.high-contrast-mode #choices-container Button.choice-card-error {
+    background: #2B0000;
+    color: #FFFFFF;
+    border: round #FF5A5A;
+    border-left: wide #FF5A5A;
+}
+
+.high-contrast-mode #choices-container Button.choice-card-ending {
+    background: #00210E;
+    color: #FFFFFF;
+    border: round #2EEA8F;
+    border-left: wide #2EEA8F;
+}

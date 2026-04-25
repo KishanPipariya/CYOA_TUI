@@ -88,6 +88,12 @@ class BufferedNotification:
     timeout: float
 
 
+@dataclass(slots=True)
+class NotificationHistoryEntry:
+    message: str
+    severity: Literal["information", "warning", "error"]
+
+
 class CYOAApp(
     ThemeMixin,
     TypewriterMixin,
@@ -113,6 +119,7 @@ class CYOAApp(
         Binding("m", "toggle_story_map", "Map", show=True),
         Binding("h", "show_help", "Help", show=True),
         Binding("n", "repeat_latest_status", "Repeat Status", show=True),
+        Binding("shift+n", "show_notification_history", "Notifications", show=False),
         Binding("o", "show_settings", "Settings", show=True),
         Binding("u", "undo", "Undo", show=True),
         Binding("y", "redo", "Redo", show=True),
@@ -140,6 +147,7 @@ class CYOAApp(
     typewriter_enabled: reactive[bool] = reactive(True)
     typewriter_speed: reactive[str] = reactive("normal")
     reduced_motion: reactive[bool] = reactive(False)
+    high_contrast_mode: reactive[bool] = reactive(False)
     screen_reader_mode: reactive[bool] = reactive(False)
     compact_layout: reactive[bool] = reactive(False)
 
@@ -190,6 +198,8 @@ class CYOAApp(
         self._scene_cache_limit: int = 8
         self._notification_buffer: list[BufferedNotification] = []
         self._notification_timer: Any | None = None
+        self._notification_history: list[NotificationHistoryEntry] = []
+        self._notification_history_limit: int = 200
         self._latest_status_message: str = "Information: Waiting for adventure updates."
         self._redo_payloads: list[dict[str, object]] = []
         self._bookmark_payloads: dict[str, dict[str, object]] = {}
@@ -206,6 +216,7 @@ class CYOAApp(
         # Restore preferences
         config = self._user_config.to_ui_preferences()
         self.dark = config.get("dark", True)
+        self.high_contrast_mode = config.get("high_contrast", False)
         self.reduced_motion = config.get("reduced_motion", False)
         self.screen_reader_mode = config.get("screen_reader_mode", False)
         self.typewriter_enabled = config.get("typewriter", True)
@@ -265,6 +276,17 @@ class CYOAApp(
         if enabled:
             self.action_skip_typewriter()
 
+    def watch_high_contrast_mode(self, enabled: bool) -> None:
+        self.set_class(enabled, "high-contrast-mode")
+        if enabled:
+            self._apply_custom_accent("#FFD400")
+        else:
+            self.watch_mood(self.mood, self.mood)
+        try:
+            self.apply_ui_theme()
+        except Exception:
+            return
+
     def watch_screen_reader_mode(self, enabled: bool) -> None:
         self.set_class(enabled, "screen-reader-mode")
         try:
@@ -317,6 +339,53 @@ class CYOAApp(
         }
         return titles.get(severity, "Notice")
 
+    def _prepare_status_message(self, message: str, severity: SeverityLevel) -> str:
+        prefix = self._notification_title(severity)
+        cleaned = format_status_message(message, screen_reader_mode=self.screen_reader_mode).strip()
+        if cleaned and not cleaned.lower().startswith(f"{prefix.lower()}:"):
+            cleaned = f"{prefix}: {cleaned}"
+        return cleaned
+
+    def _record_notification_history(self, message: str, severity: SeverityLevel) -> None:
+        cleaned = self._prepare_status_message(message, severity)
+        if not cleaned:
+            return
+        self._notification_history.append(NotificationHistoryEntry(message=message, severity=severity))
+        if len(self._notification_history) > self._notification_history_limit:
+            self._notification_history = self._notification_history[-self._notification_history_limit :]
+
+    def get_notification_history_lines(self) -> list[str]:
+        return [
+            self._prepare_status_message(entry.message, entry.severity)
+            for entry in self._notification_history
+        ]
+
+    def _dispatch_notification(
+        self,
+        message: str,
+        *,
+        title: str,
+        severity: SeverityLevel,
+        timeout: float | None,
+        markup: bool,
+        update_latest: bool,
+    ) -> None:
+        if not message:
+            return
+        if update_latest:
+            self._latest_status_message = message
+            try:
+                self.query_one(StatusDisplay).latest_status = message
+            except Exception:
+                pass
+        super().notify(
+            message,
+            title=title,
+            severity=severity,
+            timeout=timeout,
+            markup=markup,
+        )
+
     def notify(
         self,
         message: str,
@@ -327,20 +396,15 @@ class CYOAApp(
         markup: bool = True,
     ) -> None:
         prefix = self._notification_title(severity)
-        cleaned = format_status_message(message, screen_reader_mode=self.screen_reader_mode).strip()
-        if cleaned and not cleaned.lower().startswith(f"{prefix.lower()}:"):
-            cleaned = f"{prefix}: {cleaned}"
-        self._latest_status_message = cleaned
-        try:
-            self.query_one(StatusDisplay).latest_status = cleaned
-        except Exception:
-            pass
-        super().notify(
+        cleaned = self._prepare_status_message(message, severity)
+        self._record_notification_history(message, severity)
+        self._dispatch_notification(
             cleaned,
             title=title or prefix,
             severity=severity,
             timeout=timeout,
             markup=markup and not self.screen_reader_mode,
+            update_latest=True,
         )
 
     def is_runtime_active(self) -> bool:
@@ -357,12 +421,13 @@ class CYOAApp(
         if not self._latest_status_message:
             self.notify("No status messages yet.", severity="warning", timeout=2)
             return
-        super().notify(
+        self._dispatch_notification(
             self._latest_status_message,
             title="Latest Status",
             severity="information",
             timeout=6,
             markup=False,
+            update_latest=False,
         )
 
     def on_unmount(self) -> None:
@@ -494,6 +559,7 @@ class CYOAApp(
             self.notify(message, severity=severity, timeout=timeout)
             return
 
+        self._record_notification_history(message, severity)
         entry = BufferedNotification(message=message, severity=severity, timeout=timeout)
         if self._notification_buffer and self._notification_buffer[-1] == entry:
             return
@@ -516,7 +582,14 @@ class CYOAApp(
         self._notification_buffer = []
         if len(buffered) == 1:
             item = buffered[0]
-            self.notify(item.message, severity=item.severity, timeout=item.timeout)
+            self._dispatch_notification(
+                self._prepare_status_message(item.message, item.severity),
+                title=self._notification_title(item.severity),
+                severity=item.severity,
+                timeout=item.timeout,
+                markup=not self.screen_reader_mode,
+                update_latest=True,
+            )
             return
 
         severity_order = {"error": 3, "warning": 2, "information": 1}
@@ -529,7 +602,14 @@ class CYOAApp(
             summary = " | ".join(messages[:3]) + f" | +{len(messages) - 3} more"
         else:
             summary = " | ".join(messages)
-        self.notify(summary, severity=strongest.severity, timeout=max(item.timeout for item in buffered))
+        self._dispatch_notification(
+            self._prepare_status_message(summary, strongest.severity),
+            title=self._notification_title(strongest.severity),
+            severity=strongest.severity,
+            timeout=max(item.timeout for item in buffered),
+            markup=not self.screen_reader_mode,
+            update_latest=True,
+        )
 
     def _schedule_optional_runtime_warmup(self) -> None:
         self._post_render_warmup_timer = None
@@ -985,6 +1065,7 @@ class CYOAApp(
                 model_path=config.model_path,
                 theme=config.theme,
                 dark=config.dark,
+                high_contrast=getattr(config, "high_contrast", False),
                 reduced_motion=getattr(config, "reduced_motion", False),
                 screen_reader_mode=getattr(config, "screen_reader_mode", False),
                 typewriter=config.typewriter,
@@ -1023,6 +1104,7 @@ class CYOAApp(
         model_path = raw_model_path.strip() if isinstance(raw_model_path, str) and raw_model_path.strip() else None
         theme_name = str(payload.get("theme") or self._user_config.theme).strip() or self._user_config.theme
         dark = bool(payload.get("dark", self._user_config.dark))
+        high_contrast = bool(payload.get("high_contrast", getattr(self._user_config, "high_contrast", False)))
         reduced_motion = bool(payload.get("reduced_motion", getattr(self._user_config, "reduced_motion", False)))
         screen_reader_mode = bool(
             payload.get("screen_reader_mode", getattr(self._user_config, "screen_reader_mode", False))
@@ -1041,6 +1123,7 @@ class CYOAApp(
             os.environ.pop("CYOA_ENABLE_RAG", None)
 
         self.dark = dark
+        self.high_contrast_mode = high_contrast
         self.reduced_motion = reduced_motion
         self.screen_reader_mode = screen_reader_mode
         self.typewriter_enabled = typewriter
@@ -1053,6 +1136,7 @@ class CYOAApp(
             model_path=model_path,
             theme=theme_name,
             dark=dark,
+            high_contrast=high_contrast,
             reduced_motion=reduced_motion,
             screen_reader_mode=screen_reader_mode,
             typewriter=typewriter,
@@ -1079,6 +1163,7 @@ class CYOAApp(
         os.environ.pop("LLM_MODEL_PATH", None)
 
         self.dark = self._user_config.dark
+        self.high_contrast_mode = getattr(self._user_config, "high_contrast", False)
         self.reduced_motion = getattr(self._user_config, "reduced_motion", False)
         self.screen_reader_mode = getattr(self._user_config, "screen_reader_mode", False)
         self.typewriter_enabled = self._user_config.typewriter

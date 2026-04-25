@@ -13,6 +13,18 @@ logger = logging.getLogger(__name__)
 
 _FALLBACK_ACCENT = "#6EA8FF"
 _LOCKED_ACCENT = "#D0A85C"
+_HIGH_CONTRAST_ACCENT = "#FFD400"
+_HIGH_CONTRAST_UI_THEME = {
+    "main_surface": "#000000",
+    "action_dock_surface": "#050505",
+    "side_panel_surface": "#0A0A0A",
+    "status_surface": "#050505",
+    "story_card_surface": "#000000",
+    "story_card_muted_surface": "#111111",
+    "player_choice_surface": "#001A33",
+    "choice_surface": "#000000",
+    "choice_locked_surface": "#1F1700",
+}
 
 
 def _parse_color(value: str | None) -> Color | None:
@@ -52,12 +64,19 @@ def _build_surface_style(
 class ThemeMixin:
     """Mixin for theme and mood management."""
 
+    @staticmethod
+    def _resolved_ui_theme(host: object) -> dict[str, str]:
+        if getattr(host, "high_contrast_mode", False):
+            return dict(_HIGH_CONTRAST_UI_THEME)
+        ui_theme = getattr(host, "_ui_theme", None)
+        return dict(ui_theme) if isinstance(ui_theme, dict) else {}
+
     def apply_ui_theme(self) -> None:
         """Apply optional theme-specific surface styling to mounted widgets."""
         app = as_textual_app(self)
         host = as_mixin_host(self)
-        ui_theme = getattr(host, "_ui_theme", None)
-        if not isinstance(ui_theme, dict) or not ui_theme:
+        ui_theme = self._resolved_ui_theme(host)
+        if not ui_theme:
             return
 
         direct_surfaces = {
@@ -84,11 +103,15 @@ class ThemeMixin:
         """Apply theme-specific styling to story and choice widgets created during play."""
         app = as_textual_app(self)
         host = as_mixin_host(self)
-        ui_theme = getattr(host, "_ui_theme", None)
-        if not isinstance(ui_theme, dict) or not ui_theme:
+        ui_theme = self._resolved_ui_theme(host)
+        if not ui_theme:
             return
 
-        accent_color = getattr(host, "_accent_color", None) or _FALLBACK_ACCENT
+        accent_color = (
+            _HIGH_CONTRAST_ACCENT
+            if getattr(host, "high_contrast_mode", False)
+            else getattr(host, "_accent_color", None) or _FALLBACK_ACCENT
+        )
         widget_styles = {
             ".story-turn.current-turn": _build_surface_style(
                 ui_theme.get("story_card_surface", ""),
@@ -127,6 +150,10 @@ class ThemeMixin:
             container = app.query_one("#main-container", Container)
             container.remove_class(f"mood-{old_mood}")
             container.add_class(f"mood-{new_mood}")
+
+            if getattr(host, "high_contrast_mode", False):
+                self._apply_ui_theme_to_dynamic_content()
+                return
 
             # Look up atmospheric theme in themes.json
             mood_config = theme_loader.get_config_for_mood(new_mood)

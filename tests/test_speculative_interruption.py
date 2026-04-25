@@ -3,8 +3,9 @@ import threading
 import time
 from unittest.mock import patch
 
-import numpy as np
 import pytest
+
+np = pytest.importorskip("numpy")
 
 from cyoa.llm.providers import LlamaCppProvider, _InterruptionLogitsProcessor
 

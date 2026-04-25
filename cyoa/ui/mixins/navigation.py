@@ -7,7 +7,13 @@ from textual.containers import Container, VerticalScroll
 from textual.widgets import Button, Label, ListView, Markdown, Static, Tree
 
 from cyoa.ui.commands import RedoCommand, RestartCommand, UICommandContext, UndoCommand
-from cyoa.ui.components import BranchScreen, ConfirmScreen, HelpScreen, JournalListItem
+from cyoa.ui.components import (
+    BranchScreen,
+    ConfirmScreen,
+    HelpScreen,
+    JournalListItem,
+    NotificationHistoryScreen,
+)
 from cyoa.ui.mixins.contracts import (
     as_command_host,
     as_mixin_host,
@@ -130,6 +136,11 @@ class NavigationMixin:
         as_textual_app(self).push_screen(
             HelpScreen(screen_reader_mode=as_mixin_host(self).screen_reader_mode)
         )
+
+    def action_show_notification_history(self) -> None:
+        """Show a modal list of recent notifications without altering game state."""
+        app = as_textual_app(self)
+        app.push_screen(NotificationHistoryScreen(as_mixin_host(self).get_notification_history_lines()))
 
     def action_undo(self) -> None:
         """Restore the game state to before the last choice was made."""

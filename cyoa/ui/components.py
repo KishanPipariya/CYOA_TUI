@@ -43,6 +43,7 @@ __all__ = [
     "LoadGameScreen",
     "GameWorkspace",
     "ModelDownloadScreen",
+    "NotificationHistoryScreen",
     "OptionListScreen",
     "MainGamePanel",
     "FirstRunSetupScreen",
@@ -887,6 +888,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         typewriter_speed: str,
         diagnostics_enabled: bool,
         available_themes: list[str],
+        high_contrast: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -895,6 +897,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         self._theme_names = available_themes or [theme]
         self._theme_index = self._resolve_theme_index(theme)
         self._dark = dark
+        self._high_contrast = high_contrast
         self._reduced_motion = reduced_motion
         self._screen_reader_mode = screen_reader_mode
         self._typewriter = typewriter
@@ -950,6 +953,15 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             with Horizontal(classes="settings-row settings-section"):
                 yield Button("Dark", id="btn-settings-dark-on")
                 yield Button("Light", id="btn-settings-dark-off")
+
+            yield Label("Contrast", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Standard", id="btn-settings-contrast-standard")
+                yield Button("High Contrast", id="btn-settings-contrast-high")
+            yield Label(
+                "High Contrast uses a fixed accessible palette for story cards, choices, and panel states.",
+                classes="settings-value",
+            )
 
             yield Label("Motion", classes="settings-label")
             with Horizontal(classes="settings-row settings-section"):
@@ -1023,6 +1035,8 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
 
         self._set_selected("btn-settings-dark-on", self._dark)
         self._set_selected("btn-settings-dark-off", not self._dark)
+        self._set_selected("btn-settings-contrast-standard", not self._high_contrast)
+        self._set_selected("btn-settings-contrast-high", self._high_contrast)
         self._set_selected("btn-settings-motion-standard", not self._reduced_motion)
         self._set_selected("btn-settings-motion-reduced", self._reduced_motion)
         self._set_selected("btn-settings-screen-reader-on", self._screen_reader_mode)
@@ -1050,6 +1064,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 "model_path": model_path,
                 "theme": self._current_theme,
                 "dark": self._dark,
+                "high_contrast": self._high_contrast,
                 "reduced_motion": self._reduced_motion,
                 "screen_reader_mode": self._screen_reader_mode,
                 "typewriter": self._typewriter,
@@ -1087,6 +1102,10 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             self._dark = True
         elif button_id == "btn-settings-dark-off":
             self._dark = False
+        elif button_id == "btn-settings-contrast-standard":
+            self._high_contrast = False
+        elif button_id == "btn-settings-contrast-high":
+            self._high_contrast = True
         elif button_id == "btn-settings-motion-standard":
             self._reduced_motion = False
         elif button_id == "btn-settings-motion-reduced":
@@ -1111,6 +1130,47 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         self._dismiss_with_value()
 
     def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class NotificationHistoryScreen(ModalScreen[None]):
+    """Modal screen that exposes recent notifications in chronological order."""
+
+    DEFAULT_CSS = LoadGameScreen.DEFAULT_CSS
+    BINDINGS = [("escape", "close", "Close")]
+
+    def __init__(self, entries: list[str], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._entries = entries
+
+    def compose(self) -> ComposeResult:
+        with DialogFrame(id="notification-history-dialog", classes="dialog-frame dialog-frame-scroll"):
+            yield Label("[b]Notification History[/b]", id="notification-history-title", classes="dialog-title")
+            if self._entries:
+                yield ListView(id="notification-history-list", classes="dialog-list")
+            else:
+                yield Static("No notifications yet.", id="notification-history-empty", classes="dialog-entry")
+            yield Button("Close [b](Esc)[/b]", id="btn-notification-history-close", variant="primary")
+
+    def on_mount(self) -> None:
+        if not self._entries:
+            self.query_one("#btn-notification-history-close", Button).focus()
+            return
+
+        list_view = self.query_one("#notification-history-list", ListView)
+        for index, entry in enumerate(self._entries, start=1):
+            list_view.append(
+                ListItem(Label(escape(f"{index}. {entry}"), classes="dialog-entry"))
+            )
+        list_view.index = len(self._entries) - 1
+        list_view.scroll_end(animate=False)
+        self.call_after_refresh(list_view.focus)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-notification-history-close":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
         self.dismiss(None)
 
 
