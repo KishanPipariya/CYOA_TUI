@@ -4,13 +4,26 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from cyoa.core.constants import CONFIG_FILE
+from cyoa.core.constants import (
+    CONFIG_FILE,
+    LINE_SPACING_OPTIONS,
+    READING_WIDTH_OPTIONS,
+    TEXT_SCALE_OPTIONS,
+)
 from cyoa.core.support import open_private_text_file
 
 logger = logging.getLogger(__name__)
 
 
 USER_CONFIG_VERSION = 1
+
+
+def _coerce_option(value: object, allowed: tuple[str, ...], default: str) -> str:
+    if isinstance(value, str):
+        cleaned = value.strip().lower()
+        if cleaned in allowed:
+            return cleaned
+    return default
 
 
 @dataclass(slots=True)
@@ -22,6 +35,9 @@ class UserConfig:
     high_contrast: bool = False
     reduced_motion: bool = False
     screen_reader_mode: bool = False
+    text_scale: str = "standard"
+    line_width: str = "standard"
+    line_spacing: str = "standard"
     typewriter: bool = True
     typewriter_speed: str = "normal"
     diagnostics_enabled: bool = False
@@ -44,6 +60,9 @@ class UserConfig:
             "high_contrast",
             "reduced_motion",
             "screen_reader_mode",
+            "text_scale",
+            "line_width",
+            "line_spacing",
             "typewriter",
             "typewriter_speed",
             "diagnostics_enabled",
@@ -64,6 +83,9 @@ class UserConfig:
         high_contrast = payload.get("high_contrast")
         reduced_motion = payload.get("reduced_motion")
         screen_reader_mode = payload.get("screen_reader_mode")
+        text_scale = payload.get("text_scale")
+        line_width = payload.get("line_width")
+        line_spacing = payload.get("line_spacing")
         typewriter = payload.get("typewriter")
         typewriter_speed = payload.get("typewriter_speed")
         diagnostics_enabled = payload.get("diagnostics_enabled")
@@ -80,6 +102,9 @@ class UserConfig:
             high_contrast=high_contrast if isinstance(high_contrast, bool) else False,
             reduced_motion=reduced_motion if isinstance(reduced_motion, bool) else False,
             screen_reader_mode=screen_reader_mode if isinstance(screen_reader_mode, bool) else False,
+            text_scale=_coerce_option(text_scale, TEXT_SCALE_OPTIONS, "standard"),
+            line_width=_coerce_option(line_width, READING_WIDTH_OPTIONS, "standard"),
+            line_spacing=_coerce_option(line_spacing, LINE_SPACING_OPTIONS, "standard"),
             typewriter=typewriter if isinstance(typewriter, bool) else True,
             typewriter_speed=(
                 typewriter_speed.strip()
@@ -116,6 +141,9 @@ class UserConfig:
                 "high_contrast": self.high_contrast,
                 "reduced_motion": self.reduced_motion,
                 "screen_reader_mode": self.screen_reader_mode,
+                "text_scale": self.text_scale,
+                "line_width": self.line_width,
+                "line_spacing": self.line_spacing,
                 "typewriter": self.typewriter,
                 "typewriter_speed": self.typewriter_speed,
                 "diagnostics_enabled": self.diagnostics_enabled,
@@ -133,6 +161,9 @@ class UserConfig:
             "high_contrast": self.high_contrast,
             "reduced_motion": self.reduced_motion,
             "screen_reader_mode": self.screen_reader_mode,
+            "text_scale": self.text_scale,
+            "line_width": self.line_width,
+            "line_spacing": self.line_spacing,
             "typewriter": self.typewriter,
             "typewriter_speed": self.typewriter_speed,
         }

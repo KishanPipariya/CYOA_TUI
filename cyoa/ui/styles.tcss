@@ -63,6 +63,7 @@ Screen {
 .dialog-content {
     height: 1fr;
     overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .dialog-list {
@@ -101,6 +102,16 @@ Screen {
     text-align: center;
     padding: 1 2;
     text-style: bold;
+}
+
+#help-dialog,
+#settings-dialog {
+    max-width: 96%;
+}
+
+#help-content,
+#help-text {
+    width: 100%;
 }
 
 .dialog-actions Button:focus {
@@ -503,6 +514,7 @@ StatusDisplay {
 }
 
 #status-meta-row {
+    layout: horizontal;
     height: auto;
     width: 100%;
     margin-top: 1;
@@ -564,17 +576,25 @@ StatusDisplay {
     overflow: hidden;
 }
 
-#inventory-label, #objectives-label, #directives-label {
+#inventory-label, #objectives-label, #directives-label, #latest-status-label {
     width: 100%;
+    height: auto;
     color: $text;
     background: $surface 28%;
     border-left: wide $accent 28%;
     padding: 0 1;
     margin-top: 1;
+    text-wrap: wrap;
+    overflow: hidden;
 }
 
 #inventory-label {
     color: $text-muted;
+}
+
+#latest-status-label {
+    background: $surface 18%;
+    border-left: wide $primary 34%;
 }
 
 .compact-layout StatusDisplay {
@@ -924,6 +944,213 @@ Footer > .footer--highlight {
 .compact-layout #choices-container {
     max-height: 14;
     padding: 0 1;
+}
+
+/* ── Reading Preferences ───────────────────────────────────── */
+.text-scale-large #main-container {
+    padding: 2;
+}
+
+.text-scale-xlarge #main-container {
+    padding: 2 3 1 3;
+}
+
+.compact-layout.text-scale-large #main-container,
+.compact-layout.text-scale-xlarge #main-container {
+    padding: 1 1 0 1;
+}
+
+.text-scale-large .dialog-frame {
+    padding: 1 3;
+}
+
+.text-scale-xlarge .dialog-frame {
+    padding: 2 3;
+}
+
+.compact-layout.text-scale-xlarge .dialog-frame {
+    padding: 1 2;
+}
+
+.text-scale-large #help-dialog {
+    width: 78;
+}
+
+.text-scale-xlarge #help-dialog {
+    width: 86;
+}
+
+.text-scale-large #settings-dialog {
+    width: 90;
+}
+
+.text-scale-xlarge #settings-dialog {
+    width: 94;
+}
+
+.text-scale-large .story-turn,
+.text-scale-large .player-choice {
+    padding: 1 3;
+}
+
+.text-scale-xlarge .story-turn,
+.text-scale-xlarge .player-choice {
+    padding: 2 4;
+}
+
+.text-scale-large StatusDisplay {
+    padding: 1 2;
+}
+
+.text-scale-xlarge StatusDisplay {
+    padding: 2;
+}
+
+.text-scale-large #status-meta-row,
+.text-scale-xlarge #status-meta-row {
+    layout: vertical;
+}
+
+.text-scale-large #stats-text,
+.text-scale-large #runtime-text,
+.text-scale-xlarge #stats-text,
+.text-scale-xlarge #runtime-text {
+    width: 100%;
+    height: auto;
+    min-height: 1;
+    margin-right: 0;
+    margin-top: 1;
+    text-align: left;
+    text-wrap: wrap;
+}
+
+.text-scale-large #choices-container Button {
+    min-height: 5;
+}
+
+.text-scale-xlarge #choices-container Button {
+    min-height: 6;
+}
+
+.text-scale-large #choices-container Button > .textual-button--label {
+    padding: 1 3;
+}
+
+.text-scale-xlarge #choices-container Button > .textual-button--label {
+    padding: 2 3;
+}
+
+.text-scale-large .dialog-actions Button {
+    min-height: 4;
+}
+
+.text-scale-xlarge .dialog-actions Button {
+    min-height: 5;
+}
+
+.text-scale-xlarge #status-bar {
+    min-height: 10;
+}
+
+.text-scale-xlarge #choices-container {
+    max-height: 16;
+}
+
+.line-width-focused #help-dialog {
+    width: 64;
+}
+
+.line-width-focused #settings-dialog {
+    width: 78;
+}
+
+.line-width-focused .story-turn {
+    padding-left: 4;
+    padding-right: 4;
+}
+
+.line-width-focused .player-choice {
+    margin-left: 6;
+    padding-left: 3;
+    padding-right: 4;
+}
+
+.line-width-focused #choices-container Button > .textual-button--label,
+.line-width-focused #inventory-label,
+.line-width-focused #objectives-label,
+.line-width-focused #directives-label,
+.line-width-focused #latest-status-label {
+    padding-left: 2;
+    padding-right: 2;
+}
+
+.line-width-focused #stats-text,
+.line-width-focused #runtime-text {
+    padding-left: 2;
+    padding-right: 2;
+}
+
+.line-width-full #help-dialog {
+    width: 82;
+}
+
+.line-width-full #settings-dialog {
+    width: 92;
+}
+
+.line-width-full .story-turn {
+    padding-left: 1;
+    padding-right: 1;
+}
+
+.line-width-full .player-choice {
+    margin-left: 2;
+    padding-left: 1;
+    padding-right: 1;
+}
+
+.line-width-full #choices-container Button > .textual-button--label,
+.line-width-full #inventory-label,
+.line-width-full #objectives-label,
+.line-width-full #directives-label,
+.line-width-full #latest-status-label,
+.line-width-full #stats-text,
+.line-width-full #runtime-text {
+    padding-left: 1;
+    padding-right: 1;
+}
+
+.line-spacing-compact .story-turn,
+.line-spacing-compact .player-choice {
+    margin-bottom: 0;
+}
+
+.line-spacing-compact #choices-container Button {
+    margin-bottom: 0;
+}
+
+.line-spacing-compact #inventory-label,
+.line-spacing-compact #objectives-label,
+.line-spacing-compact #directives-label,
+.line-spacing-compact #latest-status-label {
+    margin-top: 0;
+}
+
+.line-spacing-relaxed .story-turn,
+.line-spacing-relaxed .player-choice {
+    margin-bottom: 2;
+}
+
+.line-spacing-relaxed #choices-container Button {
+    margin-bottom: 2;
+}
+
+.line-spacing-relaxed #inventory-label,
+.line-spacing-relaxed #objectives-label,
+.line-spacing-relaxed #directives-label,
+.line-spacing-relaxed #latest-status-label {
+    padding-top: 1;
+    padding-bottom: 1;
 }
 
 /* ── High Contrast Preset ─────────────────────────────────── */

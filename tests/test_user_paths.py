@@ -41,6 +41,9 @@ def test_save_config_creates_parent_directory(tmp_path, monkeypatch) -> None:
         "high_contrast": False,
         "reduced_motion": False,
         "screen_reader_mode": False,
+        "text_scale": "standard",
+        "line_width": "standard",
+        "line_spacing": "standard",
         "typewriter": False,
         "typewriter_speed": "normal",
     }
@@ -57,6 +60,9 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
             theme="space_explorer",
             dark=False,
             high_contrast=True,
+            text_scale="xlarge",
+            line_width="focused",
+            line_spacing="relaxed",
             typewriter=False,
             typewriter_speed="fast",
             preset="balanced",
@@ -76,6 +82,9 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
     assert restored.theme == "space_explorer"
     assert restored.dark is False
     assert restored.high_contrast is True
+    assert restored.text_scale == "xlarge"
+    assert restored.line_width == "focused"
+    assert restored.line_spacing == "relaxed"
     assert restored.typewriter is False
     assert restored.typewriter_speed == "fast"
     assert restored.preset == "balanced"

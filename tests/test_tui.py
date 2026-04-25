@@ -1184,6 +1184,49 @@ async def test_main_game_layout_fits_compact_terminal(mock_app_dependencies) -> 
 
 
 @pytest.mark.asyncio
+async def test_large_text_reading_preferences_keep_story_help_and_settings_in_bounds(
+    mock_app_dependencies,
+) -> None:
+    with patch(
+        "cyoa.ui.app.load_user_config",
+        return_value=UserConfig(
+            setup_completed=True,
+            text_scale="xlarge",
+            line_width="focused",
+            line_spacing="relaxed",
+            typewriter=False,
+        ),
+    ):
+        app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(100, 34)) as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+        app.action_skip_typewriter()
+
+        assert app.has_class("text-scale-xlarge")
+        assert app.has_class("line-width-focused")
+        assert app.has_class("line-spacing-relaxed")
+
+        story_container = app.query_one("#story-container", VerticalScroll)
+        _assert_region_within_screen(story_container, app.size)
+
+        await pilot.press("h")
+        await pilot.pause(0.2)
+        help_dialog = app.screen.query_one("#help-dialog")
+        _assert_region_within_screen(help_dialog, app.size)
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+
+        await pilot.press("o")
+        await pilot.pause(0.2)
+        settings_dialog = app.screen.query_one("#settings-dialog")
+        _assert_region_within_screen(settings_dialog, app.size)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("size", [(160, 42), (100, 34)])
 async def test_story_entries_and_player_choice_borders_stay_inside_story_pane(
     size: tuple[int, int], mock_app_dependencies
@@ -1360,6 +1403,22 @@ async def test_save_and_load_game(mock_app_dependencies, tmp_path, monkeypatch):
         await pilot.pause(1.0)
 
         assert app.turn_count == 1
+
+
+@pytest.mark.asyncio
+async def test_initial_scene_does_not_create_autosave(mock_app_dependencies, tmp_path, monkeypatch):
+    from cyoa.core import constants
+
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+    async with app.run_test() as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+        await pilot.pause(0.2)
+        assert not (tmp_path / "autosave_latest.json").exists()
 
 
 @pytest.mark.asyncio

@@ -149,6 +149,9 @@ class CYOAApp(
     reduced_motion: reactive[bool] = reactive(False)
     high_contrast_mode: reactive[bool] = reactive(False)
     screen_reader_mode: reactive[bool] = reactive(False)
+    text_scale: reactive[str] = reactive("standard")
+    line_width: reactive[str] = reactive("standard")
+    line_spacing: reactive[str] = reactive("standard")
     compact_layout: reactive[bool] = reactive(False)
 
     def __init__(
@@ -219,6 +222,9 @@ class CYOAApp(
         self.high_contrast_mode = config.get("high_contrast", False)
         self.reduced_motion = config.get("reduced_motion", False)
         self.screen_reader_mode = config.get("screen_reader_mode", False)
+        self.text_scale = str(config.get("text_scale", "standard"))
+        self.line_width = str(config.get("line_width", "standard"))
+        self.line_spacing = str(config.get("line_spacing", "standard"))
         self.typewriter_enabled = config.get("typewriter", True)
         self.typewriter_speed = config.get("typewriter_speed", "normal")
 
@@ -256,6 +262,7 @@ class CYOAApp(
         self.apply_ui_theme()
         self.set_class(self.reduced_motion, "reduced-motion")
         self.set_class(self.screen_reader_mode, "screen-reader-mode")
+        self._apply_reading_preference_classes()
 
         self._subscribe_engine_events()
         self._typewriter_worker()
@@ -329,6 +336,41 @@ class CYOAApp(
                 choices_container,
                 self.engine.state.current_node.narrative.startswith(constants.ERROR_NARRATIVE_PREFIX),
             )
+
+    def _set_variant_class(self, prefix: str, value: str, allowed: tuple[str, ...], default: str) -> None:
+        resolved = value if value in allowed else default
+        for option in allowed:
+            self.remove_class(f"{prefix}-{option}")
+        self.add_class(f"{prefix}-{resolved}")
+
+    def _apply_reading_preference_classes(self) -> None:
+        self._set_variant_class(
+            "text-scale",
+            self.text_scale,
+            constants.TEXT_SCALE_OPTIONS,
+            "standard",
+        )
+        self._set_variant_class(
+            "line-width",
+            self.line_width,
+            constants.READING_WIDTH_OPTIONS,
+            "standard",
+        )
+        self._set_variant_class(
+            "line-spacing",
+            self.line_spacing,
+            constants.LINE_SPACING_OPTIONS,
+            "standard",
+        )
+
+    def watch_text_scale(self, _value: str) -> None:
+        self._apply_reading_preference_classes()
+
+    def watch_line_width(self, _value: str) -> None:
+        self._apply_reading_preference_classes()
+
+    def watch_line_spacing(self, _value: str) -> None:
+        self._apply_reading_preference_classes()
 
     @staticmethod
     def _notification_title(severity: SeverityLevel) -> str:
@@ -1068,6 +1110,9 @@ class CYOAApp(
                 high_contrast=getattr(config, "high_contrast", False),
                 reduced_motion=getattr(config, "reduced_motion", False),
                 screen_reader_mode=getattr(config, "screen_reader_mode", False),
+                text_scale=getattr(config, "text_scale", "standard"),
+                line_width=getattr(config, "line_width", "standard"),
+                line_spacing=getattr(config, "line_spacing", "standard"),
                 typewriter=config.typewriter,
                 typewriter_speed=config.typewriter_speed,
                 diagnostics_enabled=config.diagnostics_enabled,
@@ -1093,12 +1138,32 @@ class CYOAApp(
         if confirmed is True:
             self._reset_settings_to_safe_defaults()
 
+    @staticmethod
+    def _resolve_provider_setting(payload: dict[str, Any]) -> str:
+        provider = str(payload.get("provider") or "mock").strip().lower()
+        return provider if provider in {"mock", "llama_cpp"} else "mock"
+
+    @staticmethod
+    def _resolve_option_setting(
+        payload: dict[str, Any],
+        key: str,
+        current_value: str,
+        allowed: tuple[str, ...],
+    ) -> str:
+        candidate = str(payload.get(key) or current_value).strip()
+        return candidate if candidate in allowed else current_value
+
+    @staticmethod
+    def _set_diagnostics_env(enabled: bool) -> None:
+        if enabled:
+            os.environ["CYOA_ENABLE_RAG"] = "1"
+            return
+        os.environ.pop("CYOA_ENABLE_RAG", None)
+
     def _apply_settings(self, payload: dict[str, Any]) -> None:
         """Persist settings and apply the runtime-safe subset immediately."""
         previous_config = self._user_config
-        provider = str(payload.get("provider") or "mock").strip().lower()
-        if provider not in {"mock", "llama_cpp"}:
-            provider = "mock"
+        provider = self._resolve_provider_setting(payload)
 
         raw_model_path = payload.get("model_path")
         model_path = raw_model_path.strip() if isinstance(raw_model_path, str) and raw_model_path.strip() else None
@@ -1109,23 +1174,44 @@ class CYOAApp(
         screen_reader_mode = bool(
             payload.get("screen_reader_mode", getattr(self._user_config, "screen_reader_mode", False))
         )
+        text_scale = self._resolve_option_setting(
+            payload,
+            "text_scale",
+            getattr(self._user_config, "text_scale", "standard"),
+            constants.TEXT_SCALE_OPTIONS,
+        )
+        line_width = self._resolve_option_setting(
+            payload,
+            "line_width",
+            getattr(self._user_config, "line_width", "standard"),
+            constants.READING_WIDTH_OPTIONS,
+        )
+        line_spacing = self._resolve_option_setting(
+            payload,
+            "line_spacing",
+            getattr(self._user_config, "line_spacing", "standard"),
+            constants.LINE_SPACING_OPTIONS,
+        )
         typewriter = bool(payload.get("typewriter", self._user_config.typewriter))
-        typewriter_speed = str(payload.get("typewriter_speed") or self._user_config.typewriter_speed).strip()
-        if typewriter_speed not in constants.TYPEWRITER_SPEEDS:
-            typewriter_speed = self._user_config.typewriter_speed
+        typewriter_speed = self._resolve_option_setting(
+            payload,
+            "typewriter_speed",
+            self._user_config.typewriter_speed,
+            tuple(constants.TYPEWRITER_SPEEDS),
+        )
         diagnostics_enabled = bool(
             payload.get("diagnostics_enabled", self._user_config.diagnostics_enabled)
         )
 
-        if diagnostics_enabled:
-            os.environ["CYOA_ENABLE_RAG"] = "1"
-        else:
-            os.environ.pop("CYOA_ENABLE_RAG", None)
+        self._set_diagnostics_env(diagnostics_enabled)
 
         self.dark = dark
         self.high_contrast_mode = high_contrast
         self.reduced_motion = reduced_motion
         self.screen_reader_mode = screen_reader_mode
+        self.text_scale = text_scale
+        self.line_width = line_width
+        self.line_spacing = line_spacing
         self.typewriter_enabled = typewriter
         self.typewriter_speed = typewriter_speed
         if self.reduced_motion or self.screen_reader_mode or not self.typewriter_enabled:
@@ -1139,6 +1225,9 @@ class CYOAApp(
             high_contrast=high_contrast,
             reduced_motion=reduced_motion,
             screen_reader_mode=screen_reader_mode,
+            text_scale=text_scale,
+            line_width=line_width,
+            line_spacing=line_spacing,
             typewriter=typewriter,
             typewriter_speed=typewriter_speed,
             diagnostics_enabled=diagnostics_enabled,
@@ -1166,6 +1255,9 @@ class CYOAApp(
         self.high_contrast_mode = getattr(self._user_config, "high_contrast", False)
         self.reduced_motion = getattr(self._user_config, "reduced_motion", False)
         self.screen_reader_mode = getattr(self._user_config, "screen_reader_mode", False)
+        self.text_scale = getattr(self._user_config, "text_scale", "standard")
+        self.line_width = getattr(self._user_config, "line_width", "standard")
+        self.line_spacing = getattr(self._user_config, "line_spacing", "standard")
         self.typewriter_enabled = self._user_config.typewriter
         self.typewriter_speed = self._user_config.typewriter_speed
         self.notify(

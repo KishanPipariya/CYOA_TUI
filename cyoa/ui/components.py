@@ -884,6 +884,9 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         dark: bool,
         reduced_motion: bool,
         screen_reader_mode: bool,
+        text_scale: str,
+        line_width: str,
+        line_spacing: str,
         typewriter: bool,
         typewriter_speed: str,
         diagnostics_enabled: bool,
@@ -900,6 +903,15 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         self._high_contrast = high_contrast
         self._reduced_motion = reduced_motion
         self._screen_reader_mode = screen_reader_mode
+        self._text_scale = (
+            text_scale if text_scale in constants.TEXT_SCALE_OPTIONS else "standard"
+        )
+        self._line_width = (
+            line_width if line_width in constants.READING_WIDTH_OPTIONS else "standard"
+        )
+        self._line_spacing = (
+            line_spacing if line_spacing in constants.LINE_SPACING_OPTIONS else "standard"
+        )
         self._typewriter = typewriter
         self._typewriter_speed = (
             typewriter_speed if typewriter_speed in constants.TYPEWRITER_SPEEDS else "normal"
@@ -981,6 +993,36 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 classes="settings-value",
             )
 
+            yield Label("Text Scale", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("100%", id="btn-settings-scale-standard")
+                yield Button("150%", id="btn-settings-scale-large")
+                yield Button("200%", id="btn-settings-scale-xlarge")
+            yield Label(
+                "Large and 200% equivalent modes add roomier story cards, taller choices, and stacked status metadata.",
+                classes="settings-value",
+            )
+
+            yield Label("Line Width", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Focused", id="btn-settings-width-focused")
+                yield Button("Standard", id="btn-settings-width-standard")
+                yield Button("Full", id="btn-settings-width-full")
+            yield Label(
+                "Focused keeps a shorter reading line. Full uses more of the available panel width.",
+                classes="settings-value",
+            )
+
+            yield Label("Line Spacing", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Compact", id="btn-settings-spacing-compact")
+                yield Button("Standard", id="btn-settings-spacing-standard")
+                yield Button("Relaxed", id="btn-settings-spacing-relaxed")
+            yield Label(
+                "Relaxed spacing adds breathing room between story cards, status blocks, and choice labels.",
+                classes="settings-value",
+            )
+
             yield Label("Typewriter", classes="settings-label")
             with Horizontal(classes="settings-row settings-section"):
                 yield Button("On", id="btn-settings-typewriter-on")
@@ -1041,6 +1083,15 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         self._set_selected("btn-settings-motion-reduced", self._reduced_motion)
         self._set_selected("btn-settings-screen-reader-on", self._screen_reader_mode)
         self._set_selected("btn-settings-screen-reader-off", not self._screen_reader_mode)
+        for scale in constants.TEXT_SCALE_OPTIONS:
+            self._set_selected(f"btn-settings-scale-{scale}", self._text_scale == scale)
+        for width in constants.READING_WIDTH_OPTIONS:
+            self._set_selected(f"btn-settings-width-{width}", self._line_width == width)
+        for spacing in constants.LINE_SPACING_OPTIONS:
+            self._set_selected(
+                f"btn-settings-spacing-{spacing}",
+                self._line_spacing == spacing,
+            )
         self._set_selected("btn-settings-typewriter-on", self._typewriter)
         self._set_selected("btn-settings-typewriter-off", not self._typewriter)
 
@@ -1067,6 +1118,9 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 "high_contrast": self._high_contrast,
                 "reduced_motion": self._reduced_motion,
                 "screen_reader_mode": self._screen_reader_mode,
+                "text_scale": self._text_scale,
+                "line_width": self._line_width,
+                "line_spacing": self._line_spacing,
                 "typewriter": self._typewriter,
                 "typewriter_speed": self._typewriter_speed,
                 "diagnostics_enabled": self._diagnostics_enabled,
@@ -1114,6 +1168,12 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             self._screen_reader_mode = True
         elif button_id == "btn-settings-screen-reader-off":
             self._screen_reader_mode = False
+        elif button_id and button_id.startswith("btn-settings-scale-"):
+            self._text_scale = button_id.removeprefix("btn-settings-scale-")
+        elif button_id and button_id.startswith("btn-settings-width-"):
+            self._line_width = button_id.removeprefix("btn-settings-width-")
+        elif button_id and button_id.startswith("btn-settings-spacing-"):
+            self._line_spacing = button_id.removeprefix("btn-settings-spacing-")
         elif button_id == "btn-settings-typewriter-on":
             self._typewriter = True
         elif button_id == "btn-settings-typewriter-off":
@@ -1245,7 +1305,7 @@ class StatusDisplay(Static):
             yield Label("Health", id="health-label")
             yield ProgressBar(total=100, show_percentage=False, show_eta=False, id="health-bar")
             yield Label("100% Stable", id="health-value")
-        with Horizontal(id="status-meta-row"):
+        with Container(id="status-meta-row"):
             yield Label("", id="stats-text")
             yield Label("", id="runtime-text")
         yield Label("", id="inventory-label")

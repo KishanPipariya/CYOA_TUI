@@ -351,6 +351,9 @@ class SettingsScreenHarness(App[None]):
             dark=True,
             reduced_motion=False,
             screen_reader_mode=False,
+            text_scale="standard",
+            line_width="standard",
+            line_spacing="standard",
             typewriter=True,
             typewriter_speed="normal",
             diagnostics_enabled=False,
@@ -783,6 +786,9 @@ def test_settings_screen_dismisses_saved_payload():
         high_contrast=False,
         reduced_motion=False,
         screen_reader_mode=False,
+        text_scale="standard",
+        line_width="standard",
+        line_spacing="standard",
         typewriter=True,
         typewriter_speed="normal",
         diagnostics_enabled=False,
@@ -797,6 +803,9 @@ def test_settings_screen_dismisses_saved_payload():
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-contrast-high")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-motion-reduced")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-screen-reader-on")))
+    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-scale-xlarge")))
+    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-width-focused")))
+    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-spacing-relaxed")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-typewriter-off")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-speed-fast")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-diagnostics-on")))
@@ -811,6 +820,9 @@ def test_settings_screen_dismisses_saved_payload():
         "high_contrast": True,
         "reduced_motion": True,
         "screen_reader_mode": True,
+        "text_scale": "xlarge",
+        "line_width": "focused",
+        "line_spacing": "relaxed",
         "typewriter": False,
         "typewriter_speed": "fast",
         "diagnostics_enabled": True,
@@ -826,6 +838,9 @@ def test_settings_screen_support_actions_dismiss_expected_payloads():
         high_contrast=False,
         reduced_motion=False,
         screen_reader_mode=False,
+        text_scale="standard",
+        line_width="standard",
+        line_spacing="standard",
         typewriter=True,
         typewriter_speed="normal",
         diagnostics_enabled=False,
@@ -921,6 +936,9 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         high_contrast=False,
         reduced_motion=False,
         screen_reader_mode=False,
+        text_scale="standard",
+        line_width="standard",
+        line_spacing="standard",
         typewriter=True,
         typewriter_speed="normal",
         diagnostics_enabled=False,
@@ -944,6 +962,9 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
                 "dark": False,
                 "high_contrast": True,
                 "screen_reader_mode": True,
+                "text_scale": "xlarge",
+                "line_width": "focused",
+                "line_spacing": "relaxed",
                 "typewriter": False,
                 "typewriter_speed": "fast",
                 "diagnostics_enabled": True,
@@ -953,6 +974,9 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         assert app.dark is False
         assert app.high_contrast_mode is True
         assert app.screen_reader_mode is True
+        assert app.text_scale == "xlarge"
+        assert app.line_width == "focused"
+        assert app.line_spacing == "relaxed"
         assert app.typewriter_enabled is False
         assert app.typewriter_speed == "fast"
         assert os.environ["CYOA_ENABLE_RAG"] == "1"
@@ -961,6 +985,9 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         assert saved["theme"] == "space_explorer"
         assert saved["high_contrast"] is True
         assert saved["screen_reader_mode"] is True
+        assert saved["text_scale"] == "xlarge"
+        assert saved["line_width"] == "focused"
+        assert saved["line_spacing"] == "relaxed"
         assert saved["diagnostics_enabled"] is True
         app.action_skip_typewriter.assert_called_once_with()
         app.notify.assert_called_once()
@@ -994,6 +1021,9 @@ def test_cyoa_app_reset_settings_restores_safe_defaults(monkeypatch: pytest.Monk
         dark=False,
         reduced_motion=True,
         screen_reader_mode=True,
+        text_scale="xlarge",
+        line_width="focused",
+        line_spacing="relaxed",
         typewriter=False,
         typewriter_speed="fast",
     )
@@ -1005,6 +1035,9 @@ def test_cyoa_app_reset_settings_restores_safe_defaults(monkeypatch: pytest.Monk
             dark=True,
             reduced_motion=False,
             screen_reader_mode=False,
+            text_scale="standard",
+            line_width="standard",
+            line_spacing="standard",
             typewriter=True,
             typewriter_speed="normal",
         ),
@@ -1014,6 +1047,9 @@ def test_cyoa_app_reset_settings_restores_safe_defaults(monkeypatch: pytest.Monk
 
     assert app.dark is True
     assert app.screen_reader_mode is False
+    assert app.text_scale == "standard"
+    assert app.line_width == "standard"
+    assert app.line_spacing == "standard"
     assert app.typewriter_enabled is True
     assert app.typewriter_speed == "normal"
     assert "CYOA_ENABLE_RAG" not in os.environ

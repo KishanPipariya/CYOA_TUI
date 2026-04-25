@@ -442,6 +442,8 @@ class PersistenceMixin:
         mixin_host = as_mixin_host(host)
         if not mixin_host.engine or mixin_host.engine.state.current_node is None:
             return
+        if mixin_host.engine.state.turn_count <= 1:
+            return
         if (
             mixin_host._last_manual_save_turn == mixin_host.engine.state.turn_count
             and (
