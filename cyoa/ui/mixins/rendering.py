@@ -10,7 +10,14 @@ from cyoa.core.models import StoryNode
 from cyoa.ui.ascii_art import SCENE_ART
 from cyoa.ui.components import StatusDisplay
 from cyoa.ui.mixins.contracts import as_mixin_host, as_textual_app
-from cyoa.ui.presenters import build_choice_label
+from cyoa.ui.presenters import (
+    build_choice_label,
+    format_choice_confirmation,
+    format_error_notice,
+    format_new_adventure_label,
+    format_retry_label,
+    loading_story_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +47,7 @@ class RenderingMixin:
             except Exception as exc:
                 logger.debug("Unable to clear loading state styling from story container: %s", exc)
 
-            if host._current_story == constants.LOADING_ART:
+            if host._current_story == loading_story_text(screen_reader_mode=host.screen_reader_mode):
                 host._current_story = ""
                 host._current_turn_text = ""
                 host._reset_story_segments("")
@@ -121,7 +128,7 @@ class RenderingMixin:
 
         # 3. Add error message if necessary
         if is_error and "⚠️" not in node.narrative:
-            error_msg = "\n\n> ⚠️ **An error occurred.** The story engine could not generate a valid response."
+            error_msg = format_error_notice(screen_reader_mode=host.screen_reader_mode)
             host._current_story += error_msg
             host._current_turn_text += error_msg
             host._update_current_story_segment(host._current_turn_text)
@@ -151,6 +158,11 @@ class RenderingMixin:
     def _update_scene_art(self, narrative: str, is_error: bool) -> None:
         """Detect and update the separate ASCII art widget."""
         app = as_textual_app(self)
+        if as_mixin_host(self).screen_reader_mode:
+            art_widget = app.query_one("#scene-art", Static)
+            art_widget.update("")
+            art_widget.add_class("hidden")
+            return
         art = _detect_scene_art(narrative) if not is_error else None
         art_widget = app.query_one("#scene-art", Static)
         if art:
@@ -166,7 +178,7 @@ class RenderingMixin:
         if host._loading_suffix_shown:
             host._loading_suffix_shown = False
 
-            if host._current_story == constants.LOADING_ART:
+            if host._current_story == loading_story_text(screen_reader_mode=host.screen_reader_mode):
                 host._current_story = ""
                 host._current_turn_text = ""
                 host._reset_story_segments("")
@@ -215,18 +227,30 @@ class RenderingMixin:
         # Error UX: show a Retry button alongside the fallback choice
         if is_error:
             choices_container.mount(
-                Button("🔄 Retry Generation", id="btn-retry", variant="warning")
+                Button(
+                    format_retry_label(screen_reader_mode=as_mixin_host(self).screen_reader_mode),
+                    id="btn-retry",
+                    variant="warning",
+                )
             )
             for i, choice in enumerate(node.choices):
                 # Unique ID per mount to avoid collisions if previous buttons haven't fully unmounted
                 btn_id = f"choice-t{as_mixin_host(self).turn_count}-{uuid4().hex[:6]}-{i}"
-                btn = Button(build_choice_label(i, choice.text), id=btn_id, variant="default")
+                btn = Button(
+                    build_choice_label(
+                        i,
+                        choice.text,
+                        screen_reader_mode=as_mixin_host(self).screen_reader_mode,
+                    ),
+                    id=btn_id,
+                    variant="default",
+                )
                 btn.add_class("choice-card")
                 btn.add_class("choice-card-error")
                 choices_container.mount(btn)
         elif node.is_ending:
             end_btn = Button(
-                "✦ Start a New Adventure",
+                format_new_adventure_label(screen_reader_mode=as_mixin_host(self).screen_reader_mode),
                 id="btn-new-adventure",
                 variant="success",
             )
@@ -244,8 +268,13 @@ class RenderingMixin:
                         host.engine.state.inventory,
                         host.engine.state.player_stats,
                         host.engine.state.story_flags,
+                    )
+                label = build_choice_label(
+                    i,
+                    choice.text,
+                    disabled_reason,
+                    screen_reader_mode=host.screen_reader_mode,
                 )
-                label = build_choice_label(i, choice.text, disabled_reason)
                 btn = Button(label, id=btn_id, variant="primary", disabled=disabled_reason is not None)
                 btn.add_class("choice-card")
                 if disabled_reason is None:
@@ -287,16 +316,17 @@ class RenderingMixin:
             return
         choice_text = choice.text
         rendered_turn_index = host._current_story_turn_index()
+        choice_message = format_choice_confirmation(choice_text, screen_reader_mode=host.screen_reader_mode)
 
         # 1. Instant UI feedback
         host.action_skip_typewriter()
-        host._current_story += f"\n\n> **You chose:** {choice_text}"
+        host._current_story += f"\n\n> {choice_message}"
         host._current_story += "\n\n---\n\n"
-        host._append_story_segment("player_choice", f"**You chose:** {choice_text}")
+        host._append_story_segment("player_choice", choice_message)
         host._append_story_segment("story_turn", "")
 
         container = app.query_one("#story-container", VerticalScroll)
-        choice_md = Markdown(f"**You chose:** {choice_text}", classes="player-choice")
+        choice_md = Markdown(choice_message, classes="player-choice")
         container.mount(choice_md, before="#scene-art")
 
         new_turn = Markdown("", classes="story-turn")

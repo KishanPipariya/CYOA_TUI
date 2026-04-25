@@ -10,6 +10,7 @@ from textual.widgets import ListView, Markdown, Static
 
 from cyoa.core import constants
 from cyoa.ui.mixins.contracts import PersistenceCommandOwner, UICommandHost
+from cyoa.ui.presenters import loading_story_text
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +31,15 @@ class RestartCommand:
 
         host.invalidate_scene_caches()
         host._redo_payloads.clear()
-        host._current_story = constants.LOADING_ART
-        host._current_turn_text = constants.LOADING_ART
-        host._reset_story_segments(constants.LOADING_ART)
+        loading_text = loading_story_text(screen_reader_mode=host.screen_reader_mode)
+        host._current_story = loading_text
+        host._current_turn_text = loading_text
+        host._reset_story_segments(loading_text)
 
         container = app.query_one("#story-container", VerticalScroll)
         await container.query(Markdown).remove()
 
-        new_turn = Markdown(constants.LOADING_ART, classes="story-turn", id="initial-turn")
+        new_turn = Markdown(loading_text, classes="story-turn", id="initial-turn")
         await container.mount(new_turn, before="#scene-art")
         host._current_turn_widget = new_turn
         host._refresh_story_timeline_classes()

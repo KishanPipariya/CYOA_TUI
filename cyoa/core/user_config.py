@@ -20,6 +20,7 @@ class UserConfig:
     theme: str = "dark_dungeon"
     dark: bool = True
     reduced_motion: bool = False
+    screen_reader_mode: bool = False
     typewriter: bool = True
     typewriter_speed: str = "normal"
     diagnostics_enabled: bool = False
@@ -40,6 +41,7 @@ class UserConfig:
             "theme",
             "dark",
             "reduced_motion",
+            "screen_reader_mode",
             "typewriter",
             "typewriter_speed",
             "diagnostics_enabled",
@@ -58,6 +60,7 @@ class UserConfig:
         theme = payload.get("theme")
         dark = payload.get("dark")
         reduced_motion = payload.get("reduced_motion")
+        screen_reader_mode = payload.get("screen_reader_mode")
         typewriter = payload.get("typewriter")
         typewriter_speed = payload.get("typewriter_speed")
         diagnostics_enabled = payload.get("diagnostics_enabled")
@@ -72,6 +75,7 @@ class UserConfig:
             theme=theme.strip() if isinstance(theme, str) and theme.strip() else "dark_dungeon",
             dark=dark if isinstance(dark, bool) else True,
             reduced_motion=reduced_motion if isinstance(reduced_motion, bool) else False,
+            screen_reader_mode=screen_reader_mode if isinstance(screen_reader_mode, bool) else False,
             typewriter=typewriter if isinstance(typewriter, bool) else True,
             typewriter_speed=(
                 typewriter_speed.strip()
@@ -106,6 +110,7 @@ class UserConfig:
                 "theme": self.theme,
                 "dark": self.dark,
                 "reduced_motion": self.reduced_motion,
+                "screen_reader_mode": self.screen_reader_mode,
                 "typewriter": self.typewriter,
                 "typewriter_speed": self.typewriter_speed,
                 "diagnostics_enabled": self.diagnostics_enabled,
@@ -121,6 +126,7 @@ class UserConfig:
         return {
             "dark": self.dark,
             "reduced_motion": self.reduced_motion,
+            "screen_reader_mode": self.screen_reader_mode,
             "typewriter": self.typewriter,
             "typewriter_speed": self.typewriter_speed,
         }

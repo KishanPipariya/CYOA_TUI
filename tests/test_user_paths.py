@@ -36,7 +36,13 @@ def test_save_config_creates_parent_directory(tmp_path, monkeypatch) -> None:
     utils.save_config({"dark": True, "typewriter": False})
 
     assert config_path.exists()
-    assert utils.load_config() == {"dark": True, "typewriter": False, "typewriter_speed": "normal"}
+    assert utils.load_config() == {
+        "dark": True,
+        "reduced_motion": False,
+        "screen_reader_mode": False,
+        "typewriter": False,
+        "typewriter_speed": "normal",
+    }
 
 
 def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -> None:

@@ -21,6 +21,7 @@ class CYOAAppMixinContract(Protocol):
     mood: str
     dark: bool
     reduced_motion: bool
+    screen_reader_mode: bool
     compact_layout: bool
     typewriter_enabled: bool
     typewriter_speed: str
@@ -89,6 +90,7 @@ class UICommandHost(Protocol):
     _current_turn_widget: Markdown
     _last_manual_save_turn: int | None
     _last_manual_save_scene_id: str | None
+    screen_reader_mode: bool
 
     def is_runtime_active(self) -> bool: ...
     def invalidate_scene_caches(self, keep_scene_id: str | None = None) -> None: ...

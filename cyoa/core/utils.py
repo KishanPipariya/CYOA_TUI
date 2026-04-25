@@ -17,6 +17,9 @@ def save_config(data: dict[str, Any]) -> None:
     reduced_motion = data.get("reduced_motion")
     if isinstance(reduced_motion, bool):
         config.reduced_motion = reduced_motion
+    screen_reader_mode = data.get("screen_reader_mode")
+    if isinstance(screen_reader_mode, bool):
+        config.screen_reader_mode = screen_reader_mode
     typewriter = data.get("typewriter")
     if isinstance(typewriter, bool):
         config.typewriter = typewriter

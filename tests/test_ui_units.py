@@ -30,6 +30,7 @@ from cyoa.ui.mixins.persistence import PersistenceMixin
 from cyoa.ui.mixins.rendering import RenderingMixin, _detect_scene_art
 from cyoa.ui.mixins.theme import ThemeMixin, _build_surface_style
 from cyoa.ui.mixins.typewriter import TypewriterMixin
+from cyoa.ui.presenters import build_choice_label, format_status_message, loading_story_text
 
 
 class DummyTypewriterHost(TypewriterMixin):
@@ -117,6 +118,7 @@ class DummyRenderingHost(RenderingMixin):
     def __init__(self) -> None:
         self.runtime_active = True
         self.reduced_motion = False
+        self.screen_reader_mode = False
         self.typewriter_enabled = False
         self._loading_suffix_shown = True
         self._current_story = constants.LOADING_ART
@@ -195,6 +197,7 @@ class DummyRenderingChoiceHost(RenderingMixin):
     def __init__(self) -> None:
         self.turn_count = 7
         self.reduced_motion = False
+        self.screen_reader_mode = False
         self._loading_suffix_shown = False
         self.engine = SimpleNamespace(
             state=SimpleNamespace(
@@ -345,6 +348,7 @@ class SettingsScreenHarness(App[None]):
             theme="dark_dungeon",
             dark=True,
             reduced_motion=False,
+            screen_reader_mode=False,
             typewriter=True,
             typewriter_speed="normal",
             diagnostics_enabled=False,
@@ -440,7 +444,17 @@ def test_stream_narrative_honors_reduced_motion_even_when_typewriter_is_enabled(
     assert host._current_story == "Hello"
     assert host._current_turn_text == "Hello"
     assert host._typewriter_queue.empty() is True
-    host._current_turn_widget.update.assert_called_once_with("Hello")
+
+
+def test_presenters_return_plain_text_variants_for_screen_reader_mode():
+    assert loading_story_text(screen_reader_mode=True) == "Loading story..."
+    assert format_status_message("⚡ Weaving possible futures...", screen_reader_mode=True) == "Weaving possible futures..."
+    assert build_choice_label(
+        0,
+        "Open the gate",
+        "🔒 Missing key",
+        screen_reader_mode=True,
+    ) == "1. Open the gate\nUnavailable: Missing key"
 
 
 def test_sync_narrative_replaces_finalized_streamed_turn():
@@ -629,6 +643,8 @@ async def test_status_display_watchers_and_spinner_tick() -> None:
         display.runtime_profile = "balanced-runtime-profile"
         display.provider_label = "provider-with-a-very-long-name"
         display.engine_phase = "ready"
+        display.latest_status = "Information: Quiet winds."
+        display.screen_reader_mode = True
         display._update_stats_text()
         await pilot.pause(0.1)
 
@@ -636,12 +652,17 @@ async def test_status_display_watchers_and_spinner_tick() -> None:
         assert "25%" in _render_text(display.query_one("#health-value", Label))
         assert "Critical" in _render_text(display.query_one("#health-value", Label))
         assert "Gold 9" in _render_text(display.query_one("#stats-text", Label))
-        assert "fast" in _render_text(display.query_one("#runtime-text", Label))
-        assert "ready" in _render_text(display.query_one("#runtime-text", Label))
-        assert "provider-with-a-very-long-name" in _render_text(display.query_one("#runtime-text", Label))
-        assert "Torch, Key" in _render_text(display.query_one("#inventory-label", Label))
-        assert "Escape | Survive" in _render_text(display.query_one("#objectives-label", Label))
-        assert "No combat | Stay hidden" in _render_text(display.query_one("#directives-label", Label))
+        assert "Preset fast" in _render_text(display.query_one("#runtime-text", Label))
+        assert "Phase ready" in _render_text(display.query_one("#runtime-text", Label))
+        assert "Provider provider-with-a-very-long-name" in _render_text(
+            display.query_one("#runtime-text", Label)
+        )
+        assert "Inventory: Torch, Key" in _render_text(display.query_one("#inventory-label", Label))
+        assert "Objectives: Escape | Survive" in _render_text(display.query_one("#objectives-label", Label))
+        assert "Directives: No combat | Stay hidden" in _render_text(
+            display.query_one("#directives-label", Label)
+        )
+        assert "Information: Quiet winds." in _render_text(display.query_one("#latest-status-label", Label))
         assert display.has_class("health-low")
 
     spinner_app = SpinnerHarness()
@@ -750,6 +771,7 @@ def test_settings_screen_dismisses_saved_payload():
         theme="dark_dungeon",
         dark=True,
         reduced_motion=False,
+        screen_reader_mode=False,
         typewriter=True,
         typewriter_speed="normal",
         diagnostics_enabled=False,
@@ -762,6 +784,7 @@ def test_settings_screen_dismisses_saved_payload():
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-provider-llama")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-theme-next")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-motion-reduced")))
+    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-screen-reader-on")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-typewriter-off")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-speed-fast")))
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-diagnostics-on")))
@@ -774,6 +797,7 @@ def test_settings_screen_dismisses_saved_payload():
         "theme": "space_explorer",
         "dark": True,
         "reduced_motion": True,
+        "screen_reader_mode": True,
         "typewriter": False,
         "typewriter_speed": "fast",
         "diagnostics_enabled": True,
@@ -787,6 +811,7 @@ def test_settings_screen_support_actions_dismiss_expected_payloads():
         theme="dark_dungeon",
         dark=True,
         reduced_motion=False,
+        screen_reader_mode=False,
         typewriter=True,
         typewriter_speed="normal",
         diagnostics_enabled=False,
@@ -879,6 +904,8 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         model_path=None,
         theme="dark_dungeon",
         dark=True,
+        reduced_motion=False,
+        screen_reader_mode=False,
         typewriter=True,
         typewriter_speed="normal",
         diagnostics_enabled=False,
@@ -900,6 +927,7 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
                 "model_path": "/tmp/models/demo.gguf",
                 "theme": "space_explorer",
                 "dark": False,
+                "screen_reader_mode": True,
                 "typewriter": False,
                 "typewriter_speed": "fast",
                 "diagnostics_enabled": True,
@@ -907,12 +935,14 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         )
 
         assert app.dark is False
+        assert app.screen_reader_mode is True
         assert app.typewriter_enabled is False
         assert app.typewriter_speed == "fast"
         assert os.environ["CYOA_ENABLE_RAG"] == "1"
         assert saved["provider"] == "llama_cpp"
         assert saved["model_path"] == "/tmp/models/demo.gguf"
         assert saved["theme"] == "space_explorer"
+        assert saved["screen_reader_mode"] is True
         assert saved["diagnostics_enabled"] is True
         app.action_skip_typewriter.assert_called_once_with()
         app.notify.assert_called_once()
@@ -942,13 +972,21 @@ def test_cyoa_app_handle_settings_action_routes_requests() -> None:
 def test_cyoa_app_reset_settings_restores_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     app = CYOAApp(model_path="/tmp/current.gguf")
     app.notify = MagicMock()
-    app._user_config = SimpleNamespace(dark=False, typewriter=False, typewriter_speed="fast")
+    app._user_config = SimpleNamespace(
+        dark=False,
+        reduced_motion=True,
+        screen_reader_mode=True,
+        typewriter=False,
+        typewriter_speed="fast",
+    )
     monkeypatch.setenv("CYOA_ENABLE_RAG", "1")
     monkeypatch.setenv("LLM_MODEL_PATH", "/tmp/current.gguf")
     monkeypatch.setattr(
         "cyoa.ui.app.reset_user_config",
         lambda preserve_setup=True: SimpleNamespace(
             dark=True,
+            reduced_motion=False,
+            screen_reader_mode=False,
             typewriter=True,
             typewriter_speed="normal",
         ),
@@ -957,6 +995,7 @@ def test_cyoa_app_reset_settings_restores_safe_defaults(monkeypatch: pytest.Monk
     app._reset_settings_to_safe_defaults()
 
     assert app.dark is True
+    assert app.screen_reader_mode is False
     assert app.typewriter_enabled is True
     assert app.typewriter_speed == "normal"
     assert "CYOA_ENABLE_RAG" not in os.environ
@@ -1257,6 +1296,68 @@ def test_app_notification_and_cache_helpers_cover_ui_shell(monkeypatch: pytest.M
     app.invalidate_scene_caches()
     assert app._story_history_cache == {}
     assert app._story_map_cache == {}
+
+
+def test_app_notify_tracks_latest_status_and_repeat_action(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = CYOAApp(model_path="dummy.gguf")
+    app.screen_reader_mode = True
+    repeated: list[tuple[str, str, str, bool]] = []
+
+    monkeypatch.setattr(
+        "textual.app.App.notify",
+        lambda _self, message, *, title, severity, timeout, markup: repeated.append(
+            (message, title, severity, markup)
+        ),
+    )
+
+    app.notify("⚡ Weaving possible futures...", severity="information", timeout=3)
+    app.action_repeat_latest_status()
+
+    assert app._latest_status_message == "Information: Weaving possible futures..."
+    assert repeated[0] == ("Information: Weaving possible futures...", "Information", "information", False)
+    assert repeated[1] == ("Information: Weaving possible futures...", "Latest Status", "information", False)
+
+
+def test_watch_screen_reader_mode_updates_loading_text_scene_art_and_choices() -> None:
+    app = CYOAApp(model_path="dummy.gguf")
+    status_display = SimpleNamespace(screen_reader_mode=False)
+    scene_art = MagicMock()
+    choices_container = SimpleNamespace(remove_children=MagicMock())
+    current_node = SimpleNamespace(narrative="A calm corridor.")
+    app.engine = SimpleNamespace(state=SimpleNamespace(current_node=current_node))
+    app._loading_suffix_shown = False
+    app._current_story = constants.LOADING_ART
+    app._current_turn_text = constants.LOADING_ART
+    app._current_turn_widget = MagicMock()
+    app.set_class = MagicMock()
+    app._reset_story_segments = MagicMock()
+    app._mount_choice_buttons = MagicMock()
+    app._update_scene_art = MagicMock()
+    app.query_one = (
+        lambda selector, *_args: (
+            status_display
+            if selector is StatusDisplay
+            else scene_art
+            if selector == "#scene-art"
+            else choices_container
+        )
+    )
+
+    app.watch_screen_reader_mode(True)
+
+    assert status_display.screen_reader_mode is True
+    assert app._current_story == "Loading story..."
+    assert app._current_turn_text == "Loading story..."
+    app._reset_story_segments.assert_called_once_with("Loading story...")
+    app._current_turn_widget.update.assert_called_once_with("Loading story...")
+    scene_art.add_class.assert_called_once_with("hidden")
+    choices_container.remove_children.assert_called_once_with()
+    app._mount_choice_buttons.assert_called_once_with(current_node, choices_container, False)
+
+    app.watch_screen_reader_mode(False)
+
+    assert status_display.screen_reader_mode is False
+    assert app._update_scene_art.call_args_list[-1].args == ("A calm corridor.", False)
 
 
 def test_app_cache_helpers_isolate_mutable_payloads() -> None:

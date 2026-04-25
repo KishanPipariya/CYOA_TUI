@@ -24,9 +24,10 @@ from textual.widgets import (
     Header,
     ListView,
     Markdown,
+    Static,
 )
 
-from cyoa.core import constants, utils
+from cyoa.core import constants
 from cyoa.core.engine import StoryEngine
 from cyoa.core.events import Events, bus
 from cyoa.core.model_download import (
@@ -73,6 +74,7 @@ from cyoa.ui.mixins import (
     ThemeMixin,
     TypewriterMixin,
 )
+from cyoa.ui.presenters import format_status_message, loading_story_text
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +112,7 @@ class CYOAApp(
         Binding("j", "toggle_journal", "Journal", show=True),
         Binding("m", "toggle_story_map", "Map", show=True),
         Binding("h", "show_help", "Help", show=True),
+        Binding("n", "repeat_latest_status", "Repeat Status", show=True),
         Binding("o", "show_settings", "Settings", show=True),
         Binding("u", "undo", "Undo", show=True),
         Binding("y", "redo", "Redo", show=True),
@@ -137,6 +140,7 @@ class CYOAApp(
     typewriter_enabled: reactive[bool] = reactive(True)
     typewriter_speed: reactive[str] = reactive("normal")
     reduced_motion: reactive[bool] = reactive(False)
+    screen_reader_mode: reactive[bool] = reactive(False)
     compact_layout: reactive[bool] = reactive(False)
 
     def __init__(
@@ -164,12 +168,15 @@ class CYOAApp(
         self._allow_headless_startup_recovery = allow_headless_startup_recovery
         self._user_config = load_user_config()
         self._first_run_setup_pending = self._requires_first_run_setup(self._user_config)
+        initial_story_text = loading_story_text(
+            screen_reader_mode=getattr(self._user_config, "screen_reader_mode", False)
+        )
 
         self.generator: ModelBroker | None = None
         self.engine: StoryEngine | None = None
-        self._current_story: str = constants.LOADING_ART
-        self._current_turn_text: str = constants.LOADING_ART
-        self._story_segments: list[dict[str, object]] = [{"kind": "story_turn", "text": constants.LOADING_ART}]
+        self._current_story: str = initial_story_text
+        self._current_turn_text: str = initial_story_text
+        self._story_segments: list[dict[str, object]] = [{"kind": "story_turn", "text": initial_story_text}]
         self._loading_suffix_shown: bool = False
         self._unsubscribers: list[Callable[[], None]] = []
         self._subscriptions_active: bool = False
@@ -183,6 +190,7 @@ class CYOAApp(
         self._scene_cache_limit: int = 8
         self._notification_buffer: list[BufferedNotification] = []
         self._notification_timer: Any | None = None
+        self._latest_status_message: str = "Information: Waiting for adventure updates."
         self._redo_payloads: list[dict[str, object]] = []
         self._bookmark_payloads: dict[str, dict[str, object]] = {}
         self._last_manual_save_turn: int | None = None
@@ -196,9 +204,10 @@ class CYOAApp(
         self._last_stats_snapshot: dict[str, int] | None = None
 
         # Restore preferences
-        config = utils.load_config()
+        config = self._user_config.to_ui_preferences()
         self.dark = config.get("dark", True)
         self.reduced_motion = config.get("reduced_motion", False)
+        self.screen_reader_mode = config.get("screen_reader_mode", False)
         self.typewriter_enabled = config.get("typewriter", True)
         self.typewriter_speed = config.get("typewriter_speed", "normal")
 
@@ -208,7 +217,11 @@ class CYOAApp(
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield GameWorkspace(spinner_frames=self.spinner_frames, id="workspace")
+        yield GameWorkspace(
+            spinner_frames=self.spinner_frames,
+            screen_reader_mode=self.screen_reader_mode,
+            id="workspace",
+        )
         yield Footer()
 
     def watch_turn_count(self, count: int) -> None:
@@ -224,10 +237,14 @@ class CYOAApp(
         self._current_turn_widget = self.query_one("#initial-turn", Markdown)
         self._refresh_story_timeline_classes()
         self._set_compact_layout(self.size.width)
-        self.query_one(StatusDisplay).generation_preset = "balanced"
+        status_display = self.query_one(StatusDisplay)
+        status_display.generation_preset = "balanced"
+        status_display.screen_reader_mode = self.screen_reader_mode
+        status_display.latest_status = self._latest_status_message
         self._sync_runtime_status()
         self.apply_ui_theme()
         self.set_class(self.reduced_motion, "reduced-motion")
+        self.set_class(self.screen_reader_mode, "screen-reader-mode")
 
         self._subscribe_engine_events()
         self._typewriter_worker()
@@ -248,6 +265,49 @@ class CYOAApp(
         if enabled:
             self.action_skip_typewriter()
 
+    def watch_screen_reader_mode(self, enabled: bool) -> None:
+        self.set_class(enabled, "screen-reader-mode")
+        try:
+            status_display = self.query_one(StatusDisplay)
+        except Exception:
+            return
+        status_display.screen_reader_mode = enabled
+        loading_text = loading_story_text(screen_reader_mode=enabled)
+        other_loading_text = loading_story_text(screen_reader_mode=not enabled)
+        if self._current_story == other_loading_text and self._current_turn_text == other_loading_text:
+            self._current_story = loading_text
+            self._current_turn_text = loading_text
+            self._reset_story_segments(loading_text)
+            try:
+                self._current_turn_widget.update(loading_text)
+            except Exception:
+                pass
+        if enabled:
+            try:
+                self.query_one("#scene-art", Static).add_class("hidden")
+            except Exception:
+                return
+        elif self.engine is not None and self.engine.state.current_node is not None:
+            self._update_scene_art(
+                self.engine.state.current_node.narrative,
+                self.engine.state.current_node.narrative.startswith(constants.ERROR_NARRATIVE_PREFIX),
+            )
+        if (
+            self.engine is not None
+            and self.engine.state.current_node is not None
+            and not self._loading_suffix_shown
+        ):
+            try:
+                choices_container = self.query_one("#choices-container", Container)
+            except Exception:
+                return
+            choices_container.remove_children()
+            self._mount_choice_buttons(
+                self.engine.state.current_node,
+                choices_container,
+                self.engine.state.current_node.narrative.startswith(constants.ERROR_NARRATIVE_PREFIX),
+            )
+
     @staticmethod
     def _notification_title(severity: SeverityLevel) -> str:
         titles = {
@@ -267,15 +327,20 @@ class CYOAApp(
         markup: bool = True,
     ) -> None:
         prefix = self._notification_title(severity)
-        cleaned = message.strip()
+        cleaned = format_status_message(message, screen_reader_mode=self.screen_reader_mode).strip()
         if cleaned and not cleaned.lower().startswith(f"{prefix.lower()}:"):
             cleaned = f"{prefix}: {cleaned}"
+        self._latest_status_message = cleaned
+        try:
+            self.query_one(StatusDisplay).latest_status = cleaned
+        except Exception:
+            pass
         super().notify(
             cleaned,
             title=title or prefix,
             severity=severity,
             timeout=timeout,
-            markup=markup,
+            markup=markup and not self.screen_reader_mode,
         )
 
     def is_runtime_active(self) -> bool:
@@ -287,6 +352,18 @@ class CYOAApp(
         is_compact = width < 140
         self.compact_layout = is_compact
         self.set_class(is_compact, "compact-layout")
+
+    def action_repeat_latest_status(self) -> None:
+        if not self._latest_status_message:
+            self.notify("No status messages yet.", severity="warning", timeout=2)
+            return
+        super().notify(
+            self._latest_status_message,
+            title="Latest Status",
+            severity="information",
+            timeout=6,
+            markup=False,
+        )
 
     def on_unmount(self) -> None:
         """Cancel all background work and release resources."""
@@ -909,6 +986,7 @@ class CYOAApp(
                 theme=config.theme,
                 dark=config.dark,
                 reduced_motion=getattr(config, "reduced_motion", False),
+                screen_reader_mode=getattr(config, "screen_reader_mode", False),
                 typewriter=config.typewriter,
                 typewriter_speed=config.typewriter_speed,
                 diagnostics_enabled=config.diagnostics_enabled,
@@ -946,6 +1024,9 @@ class CYOAApp(
         theme_name = str(payload.get("theme") or self._user_config.theme).strip() or self._user_config.theme
         dark = bool(payload.get("dark", self._user_config.dark))
         reduced_motion = bool(payload.get("reduced_motion", getattr(self._user_config, "reduced_motion", False)))
+        screen_reader_mode = bool(
+            payload.get("screen_reader_mode", getattr(self._user_config, "screen_reader_mode", False))
+        )
         typewriter = bool(payload.get("typewriter", self._user_config.typewriter))
         typewriter_speed = str(payload.get("typewriter_speed") or self._user_config.typewriter_speed).strip()
         if typewriter_speed not in constants.TYPEWRITER_SPEEDS:
@@ -961,9 +1042,10 @@ class CYOAApp(
 
         self.dark = dark
         self.reduced_motion = reduced_motion
+        self.screen_reader_mode = screen_reader_mode
         self.typewriter_enabled = typewriter
         self.typewriter_speed = typewriter_speed
-        if self.reduced_motion or not self.typewriter_enabled:
+        if self.reduced_motion or self.screen_reader_mode or not self.typewriter_enabled:
             self.action_skip_typewriter()
 
         self._user_config = update_user_config(
@@ -972,6 +1054,7 @@ class CYOAApp(
             theme=theme_name,
             dark=dark,
             reduced_motion=reduced_motion,
+            screen_reader_mode=screen_reader_mode,
             typewriter=typewriter,
             typewriter_speed=typewriter_speed,
             diagnostics_enabled=diagnostics_enabled,
@@ -997,6 +1080,7 @@ class CYOAApp(
 
         self.dark = self._user_config.dark
         self.reduced_motion = getattr(self._user_config, "reduced_motion", False)
+        self.screen_reader_mode = getattr(self._user_config, "screen_reader_mode", False)
         self.typewriter_enabled = self._user_config.typewriter
         self.typewriter_speed = self._user_config.typewriter_speed
         self.notify(

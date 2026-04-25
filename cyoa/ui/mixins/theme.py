@@ -1,7 +1,7 @@
 import logging
 
-from textual.containers import Container
 from textual.color import Color
+from textual.containers import Container
 from textual.theme import BUILTIN_THEMES, Theme
 from textual.widget import Widget
 

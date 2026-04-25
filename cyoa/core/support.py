@@ -4,7 +4,7 @@ import sys
 import traceback
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, TextIO, cast
 
 from cyoa.core.constants import (
     APP_NAME,
@@ -48,7 +48,7 @@ def open_private_text_file(path: str | Path, mode: str) -> TextIO:
     try:
         if hasattr(os, "fchmod"):
             os.fchmod(fd, 0o600)
-        return os.fdopen(fd, mode, encoding="utf-8")
+        return cast(TextIO, os.fdopen(fd, mode, encoding="utf-8"))
     except Exception:
         os.close(fd)
         raise

@@ -7,13 +7,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from textual.containers import Container, VerticalScroll
 from textual.css.query import NoMatches
-from textual.widgets import Button, Input, Label, ListView, Markdown
+from textual.widgets import Button, Input, Label, ListView, Markdown, Static
 from textual.widgets._toast import Toast
 from textual.worker import WorkerFailed
 
 from cyoa.core.events import EventBus, EventDispatchError, Events, bus
 from cyoa.core.models import Choice, ChoiceRequirement, StoryNode
 from cyoa.core.theme_loader import load_theme
+from cyoa.core.user_config import UserConfig
 from cyoa.ui.app import CYOAApp
 from cyoa.ui.components import (
     BranchScreen,
@@ -276,6 +277,31 @@ async def test_stats_display_reflects_player_stats(mock_app_dependencies):
         rendered_text = health_value.render().plain
         assert "0%" in rendered_text
         assert status_display.has_class("health-low")
+
+
+@pytest.mark.asyncio
+async def test_screen_reader_mode_uses_plain_status_shell_on_startup(mock_app_dependencies):
+    with patch(
+        "cyoa.ui.app.load_user_config",
+        return_value=UserConfig(setup_completed=True, screen_reader_mode=True),
+    ):
+        app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+        app.action_skip_typewriter()
+
+        inventory_label = app.query_one("#inventory-label", Label).render().plain
+        latest_status = app.query_one("#latest-status-label", Label).render().plain
+        scene_art = app.query_one("#scene-art", Static)
+
+        assert app.screen_reader_mode is True
+        assert inventory_label.startswith("Inventory:")
+        assert latest_status.startswith("Information:")
+        assert scene_art.has_class("hidden")
 
 
 @pytest.mark.asyncio

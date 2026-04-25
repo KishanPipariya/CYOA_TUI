@@ -14,6 +14,7 @@ from cyoa.ui.mixins.contracts import (
     as_persistence_owner,
     as_textual_app,
 )
+from cyoa.ui.presenters import format_branch_restore_text
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,9 @@ class NavigationMixin:
 
     def action_show_help(self) -> None:
         """Show the help screen with keybindings and game mechanics."""
-        as_textual_app(self).push_screen(HelpScreen())
+        as_textual_app(self).push_screen(
+            HelpScreen(screen_reader_mode=as_mixin_host(self).screen_reader_mode)
+        )
 
     def action_undo(self) -> None:
         """Restore the game state to before the last choice was made."""
@@ -265,13 +268,17 @@ class NavigationMixin:
         app.query_one("#choices-container", Container).remove_children()
         app.query_one("#loading", Static).remove_class("hidden")
 
-        fracture_msg = f"\n\n***\n\n**[Time fractures... you return to Turn {idx + 1}]**"
+        fracture_label = format_branch_restore_text(
+            idx,
+            screen_reader_mode=host.screen_reader_mode,
+        )
+        fracture_msg = f"\n\n***\n\n{fracture_label}"
         host._current_story += fracture_msg
-        host._append_story_segment("branch_marker", f"**[Time fractures... you return to Turn {idx + 1}]**")
+        host._append_story_segment("branch_marker", fracture_label)
         host._append_story_segment("story_turn", "")
 
         container = app.query_one("#story-container", VerticalScroll)
-        frac_md = Markdown(f"**[Time fractures... you return to Turn {idx + 1}]**", classes="player-choice")
+        frac_md = Markdown(fracture_label, classes="player-choice")
         container.mount(frac_md, before="#scene-art")
 
         new_turn = Markdown("", classes="story-turn")

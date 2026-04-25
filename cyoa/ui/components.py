@@ -21,12 +21,14 @@ from cyoa.core import constants
 from cyoa.core.model_download import DownloadProgress, ModelRecommendation
 from cyoa.ui.presenters import (
     build_branch_preview,
+    build_help_text,
     format_directives_label,
     format_inventory_label,
     format_objectives_label,
     format_runtime_text,
     format_save_display_name,
     format_stats_text,
+    loading_story_text,
 )
 
 __all__ = [
@@ -102,10 +104,18 @@ class JournalListItem(ListItem):
 class StoryPane(Container):
     """Organism for the story stream and contextual ASCII art."""
 
+    def __init__(self, *, screen_reader_mode: bool = False, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._screen_reader_mode = screen_reader_mode
+
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="story-container"):
-            yield Markdown(constants.LOADING_ART, classes="story-turn", id="initial-turn")
-            yield Static("", id="scene-art")
+            yield Markdown(
+                loading_story_text(screen_reader_mode=self._screen_reader_mode),
+                classes="story-turn",
+                id="initial-turn",
+            )
+            yield Static("", id="scene-art", classes="hidden" if self._screen_reader_mode else "")
 
 
 class StatusBar(Container):
@@ -163,24 +173,30 @@ class StoryMapPanel(Container):
 class MainGamePanel(Vertical):
     """Organism for the main play area within the workspace template."""
 
-    def __init__(self, *, spinner_frames: list[str], **kwargs: Any) -> None:
+    def __init__(self, *, spinner_frames: list[str], screen_reader_mode: bool = False, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._spinner_frames = spinner_frames
+        self._screen_reader_mode = screen_reader_mode
 
     def compose(self) -> ComposeResult:
-        yield StoryPane()
+        yield StoryPane(screen_reader_mode=self._screen_reader_mode)
         yield ActionPanel(spinner_frames=self._spinner_frames, id="action-panel")
 
 
 class GameWorkspace(Horizontal):
     """Template for the primary in-game workspace."""
 
-    def __init__(self, *, spinner_frames: list[str], **kwargs: Any) -> None:
+    def __init__(self, *, spinner_frames: list[str], screen_reader_mode: bool = False, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._spinner_frames = spinner_frames
+        self._screen_reader_mode = screen_reader_mode
 
     def compose(self) -> ComposeResult:
-        yield MainGamePanel(spinner_frames=self._spinner_frames, id="main-container")
+        yield MainGamePanel(
+            spinner_frames=self._spinner_frames,
+            screen_reader_mode=self._screen_reader_mode,
+            id="main-container",
+        )
         yield JournalPanel(id="journal-panel", classes="panel-collapsed")
         yield StoryMapPanel(id="story-map-panel", classes="panel-collapsed")
 
@@ -312,7 +328,11 @@ class ThemeSpinner(Static):
         self.set_interval(0.1, self.tick)
 
     def tick(self) -> None:
-        if "hidden" in self.classes or bool(getattr(self.app, "reduced_motion", False)):
+        try:
+            reduced_motion = bool(getattr(self.app, "reduced_motion", False))
+        except Exception:
+            reduced_motion = False
+        if "hidden" in self.classes or reduced_motion:
             return
         self._frame_idx = (self._frame_idx + 1) % len(self.frames)
         self.update(escape(self.frames[self._frame_idx]))
@@ -374,59 +394,6 @@ class ConfirmScreen(ButtonGroupScreen):
         self.dismiss(False)
 
 
-HELP_TEXT = """\
-# ⌨️ Keyboard Shortcuts
-
-| Key | Action |
-|:---:|:-------|
-| [b][reverse] 1 – 4 [/reverse][/b] | Select a choice by number |
-| [b][reverse] ↑ / ↓ [/reverse][/b] | Move between choices |
-| [b][reverse]ENTER[/reverse][/b] | Confirm focused choice |
-| [b][reverse]  D  [/reverse][/b] | Change Theme (Dark/Light) |
-| [b][reverse]  J  [/reverse][/b] | Toggle Journal panel |
-| [b][reverse]  M  [/reverse][/b] | Toggle Story Map panel |
-| [b][reverse]  B  [/reverse][/b] | Branch from past scene |
-| [b][reverse]  U  [/reverse][/b] | Undo last choice |
-| [b][reverse]  Y  [/reverse][/b] | Redo last choice |
-| [b][reverse]  K  [/reverse][/b] | Save a bookmark |
-| [b][reverse]  P  [/reverse][/b] | Restore a bookmark |
-| [b][reverse]  S  [/reverse][/b] | Save Game |
-| [b][reverse]  L  [/reverse][/b] | Load Game |
-| [b][reverse]  E  [/reverse][/b] | Export story to Markdown/JSON |
-| [b][reverse]  R  [/reverse][/b] | Restart Adventure |
-| [b][reverse]  O  [/reverse][/b] | Open settings |
-| [b][reverse]  T  [/reverse][/b] | Toggle Typewriter |
-| [b][reverse]  G  [/reverse][/b] | Cycle generation preset |
-| [b][reverse]  X  [/reverse][/b] | Edit active directives |
-| [b][reverse]  H  [/reverse][/b] | Show this help screen |
-| [b][reverse]SPACE[/reverse][/b] | Skip typewriter narrator |
-| [b][reverse]  Q  [/reverse][/b] | Quit Game |
-
----
-
-# 📊 Player Stats
-
-| Stat | Description |
-|:-----|:------------|
-| ❤️ **Health** | Your vitality. Low health disables risky choices. |
-| 🪙 **Gold** | Currency earned through the adventure. |
-| 🌟 **Reputation** | Your standing — high rep unlocks dialogue. |
-| 🎒 **Inventory** | Items you carry. Some unlock special choices! |
-
----
-
-# ♿ Accessibility
-
-- Locked choices include a written reason and do not rely on color alone.
-- Reduced Motion is available in Settings and disables spinner animation and narrated text animation.
-- Journal and Story Map panels move keyboard focus automatically when opened.
-
----
-
-*Press Escape or click Close to return to the adventure.*
-"""
-
-
 class HelpScreen(ModalScreen[None]):
     """Full-screen help overlay showing keybindings and game mechanics."""
 
@@ -450,10 +417,14 @@ class HelpScreen(ModalScreen[None]):
         ("h", "close", "Close"),
     ]
 
+    def __init__(self, *, screen_reader_mode: bool = False, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._screen_reader_mode = screen_reader_mode
+
     def compose(self) -> ComposeResult:
         with DialogFrame(id="help-dialog", classes="dialog-frame dialog-frame-scroll dialog-frame-accent"):
             with Container(id="help-content", classes="dialog-content"):
-                yield Markdown(HELP_TEXT, id="help-text")
+                yield Markdown(build_help_text(screen_reader_mode=self._screen_reader_mode), id="help-text")
             yield Button("Close [b](Esc)[/b]", id="btn-help-close", variant="primary")
 
     def on_mount(self) -> None:
@@ -911,6 +882,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         theme: str,
         dark: bool,
         reduced_motion: bool,
+        screen_reader_mode: bool,
         typewriter: bool,
         typewriter_speed: str,
         diagnostics_enabled: bool,
@@ -924,6 +896,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         self._theme_index = self._resolve_theme_index(theme)
         self._dark = dark
         self._reduced_motion = reduced_motion
+        self._screen_reader_mode = screen_reader_mode
         self._typewriter = typewriter
         self._typewriter_speed = (
             typewriter_speed if typewriter_speed in constants.TYPEWRITER_SPEEDS else "normal"
@@ -987,6 +960,15 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 classes="settings-value",
             )
 
+            yield Label("Accessibility", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Standard", id="btn-settings-screen-reader-off")
+                yield Button("Screen Reader Friendly", id="btn-settings-screen-reader-on")
+            yield Label(
+                "Screen Reader Friendly mode removes ASCII art, uses plain status labels, and keeps the latest status message visible.",
+                classes="settings-value",
+            )
+
             yield Label("Typewriter", classes="settings-label")
             with Horizontal(classes="settings-row settings-section"):
                 yield Button("On", id="btn-settings-typewriter-on")
@@ -1043,6 +1025,8 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         self._set_selected("btn-settings-dark-off", not self._dark)
         self._set_selected("btn-settings-motion-standard", not self._reduced_motion)
         self._set_selected("btn-settings-motion-reduced", self._reduced_motion)
+        self._set_selected("btn-settings-screen-reader-on", self._screen_reader_mode)
+        self._set_selected("btn-settings-screen-reader-off", not self._screen_reader_mode)
         self._set_selected("btn-settings-typewriter-on", self._typewriter)
         self._set_selected("btn-settings-typewriter-off", not self._typewriter)
 
@@ -1067,6 +1051,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 "theme": self._current_theme,
                 "dark": self._dark,
                 "reduced_motion": self._reduced_motion,
+                "screen_reader_mode": self._screen_reader_mode,
                 "typewriter": self._typewriter,
                 "typewriter_speed": self._typewriter_speed,
                 "diagnostics_enabled": self._diagnostics_enabled,
@@ -1106,6 +1091,10 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             self._reduced_motion = False
         elif button_id == "btn-settings-motion-reduced":
             self._reduced_motion = True
+        elif button_id == "btn-settings-screen-reader-on":
+            self._screen_reader_mode = True
+        elif button_id == "btn-settings-screen-reader-off":
+            self._screen_reader_mode = False
         elif button_id == "btn-settings-typewriter-on":
             self._typewriter = True
         elif button_id == "btn-settings-typewriter-off":
@@ -1188,6 +1177,8 @@ class StatusDisplay(Static):
     runtime_profile = reactive("custom")
     provider_label = reactive("llama_cpp")
     engine_phase = reactive("idle")
+    latest_status = reactive("Status: Waiting for adventure updates.")
+    screen_reader_mode = reactive(False)
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="stats-row"):
@@ -1197,9 +1188,13 @@ class StatusDisplay(Static):
         with Horizontal(id="status-meta-row"):
             yield Label("", id="stats-text")
             yield Label("", id="runtime-text")
-        yield Label("🎒 Inventory: Empty", id="inventory-label")
-        yield Label("🎯 Objectives: None", id="objectives-label")
-        yield Label("🧭 Directives: None", id="directives-label")
+        yield Label("", id="inventory-label")
+        yield Label("", id="objectives-label")
+        yield Label("", id="directives-label")
+        yield Label("", id="latest-status-label")
+
+    def on_mount(self) -> None:
+        self._refresh_accessibility_labels()
 
     def watch_health(self, health: int) -> None:
         self.query_one("#health-bar", ProgressBar).progress = health
@@ -1214,10 +1209,14 @@ class StatusDisplay(Static):
         self._update_stats_text()
 
     def watch_inventory(self, inventory: list[str]) -> None:
-        self.query_one("#inventory-label", Label).update(format_inventory_label(inventory))
+        self.query_one("#inventory-label", Label).update(
+            format_inventory_label(inventory, screen_reader_mode=self.screen_reader_mode)
+        )
 
     def watch_objectives(self, objectives: list[str]) -> None:
-        self.query_one("#objectives-label", Label).update(format_objectives_label(objectives))
+        self.query_one("#objectives-label", Label).update(
+            format_objectives_label(objectives, screen_reader_mode=self.screen_reader_mode)
+        )
 
     def _update_stats_text(self) -> None:
         self.query_one(
@@ -1227,6 +1226,7 @@ class StatusDisplay(Static):
             format_stats_text(
                 gold=self.gold,
                 reputation=self.reputation,
+                screen_reader_mode=self.screen_reader_mode,
             )
         )
         self.query_one(
@@ -1238,11 +1238,20 @@ class StatusDisplay(Static):
                 engine_phase=self.engine_phase,
                 provider_label=self.provider_label,
                 runtime_profile=self.runtime_profile,
+                screen_reader_mode=self.screen_reader_mode,
             )
         )
 
     def watch_directives(self, directives: list[str]) -> None:
-        self.query_one("#directives-label", Label).update(format_directives_label(directives))
+        self.query_one("#directives-label", Label).update(
+            format_directives_label(directives, screen_reader_mode=self.screen_reader_mode)
+        )
+
+    def watch_latest_status(self, latest_status: str) -> None:
+        self.query_one("#latest-status-label", Label).update(latest_status)
+
+    def watch_screen_reader_mode(self, _enabled: bool) -> None:
+        self._refresh_accessibility_labels()
 
     def watch_generation_preset(self, _preset: str) -> None:
         self._update_stats_text()
@@ -1272,3 +1281,10 @@ class StatusDisplay(Static):
         if health < 70:
             return "Watch"
         return "Stable"
+
+    def _refresh_accessibility_labels(self) -> None:
+        self.watch_inventory(self.inventory)
+        self.watch_objectives(self.objectives)
+        self.watch_directives(self.directives)
+        self.watch_latest_status(self.latest_status)
+        self._update_stats_text()
