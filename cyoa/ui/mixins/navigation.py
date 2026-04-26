@@ -154,7 +154,9 @@ class NavigationMixin:
                 app.run_worker(self.action_restart(), exclusive=True)
 
         app.push_screen(
-            ConfirmScreen("[b]Restart the adventure?[/b]\n\nAll progress will be lost."),
+            ConfirmScreen(
+                "[b]Restart the adventure?[/b]\n\nThe current run resets to turn 1. Manual saves and restore points stay available."
+            ),
             on_confirm,
         )
 
@@ -263,14 +265,41 @@ class NavigationMixin:
 
         from cyoa.ui.components import TextPromptScreen
 
+        def persist_restore_point(name: str) -> None:
+            normalized = name.strip()
+            if not normalized:
+                return
+            host._bookmark_payloads[normalized] = persistence._build_save_payload(
+                host,
+                app,
+                include_restore_points=False,
+            )
+            app.notify(f"Saved restore point: {normalized}", severity="information", timeout=2)
+
         def on_saved(value: str | None) -> None:
-            if value:
-                host._bookmark_payloads[value] = persistence._build_save_payload(host, app)
-                app.notify(f"Saved bookmark: {value}", severity="information", timeout=2)
+            if not value:
+                return
+            normalized = value.strip()
+            if not normalized:
+                return
+            if normalized not in host._bookmark_payloads:
+                persist_restore_point(normalized)
+                return
+
+            def on_confirm(confirmed: bool | None) -> None:
+                if confirmed:
+                    persist_restore_point(normalized)
+
+            app.push_screen(
+                ConfirmScreen(
+                    f"[b]Overwrite restore point '{normalized}'?[/b]\n\nThe older checkpoint will be replaced with the current turn."
+                ),
+                on_confirm,
+            )
 
         app.push_screen(
             TextPromptScreen(
-                "[b]Create Bookmark[/b]",
+                "[b]Create Restore Point[/b]",
                 value=f"Turn {host.engine.state.turn_count}",
                 placeholder="Checkpoint name",
             ),
@@ -290,14 +319,18 @@ class NavigationMixin:
         def on_selected(name: str | None) -> None:
             payload = host._bookmark_payloads.get(name or "")
             if name and payload:
-                persistence._restore_from_payload(payload, source_label=f"Restored bookmark {name}")
-                app.notify(f"Restored bookmark: {name}", severity="information", timeout=3)
+                persistence._restore_from_payload(
+                    payload,
+                    source_label=f"Restored restore point {name}",
+                    preserve_restore_points=True,
+                )
+                app.notify(f"Restored restore point: {name}", severity="information", timeout=3)
 
         app.push_screen(
             OptionListScreen(
-                "[b]Restore Bookmark[/b]",
+                "[b]Restore Point[/b]",
                 list(host._bookmark_payloads),
-                empty_message="No bookmarks yet.",
+                empty_message="No restore points yet.",
             ),
             on_selected,
         )

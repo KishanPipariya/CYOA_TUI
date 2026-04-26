@@ -1596,6 +1596,49 @@ async def test_startup_offers_new_game_or_resume_when_autosave_exists(
 
 
 @pytest.mark.asyncio
+async def test_startup_new_game_requires_confirmation_before_discarding_autosave(
+    mock_app_dependencies, tmp_path, monkeypatch
+):
+    from cyoa.core import constants
+
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        await pilot.press("1")
+        await _wait_for_pilot(pilot, lambda: app.turn_count == 2, timeout=5.0)
+        app.action_skip_typewriter()
+        autosave_path = tmp_path / "autosave_latest.json"
+        assert autosave_path.exists()
+
+    restarted = CYOAApp(model_path="dummy_path.gguf", allow_headless_startup_recovery=True)
+    async with restarted.run_test() as pilot2:
+        await _wait_for_pilot(
+            pilot2,
+            lambda: restarted.screen_stack[-1].__class__ is StartupChoiceScreen,
+            timeout=2.0,
+        )
+
+        await pilot2.press("n")
+        await _wait_for_pilot(pilot2, lambda: isinstance(restarted.screen, ConfirmScreen))
+        assert autosave_path.exists()
+
+        await pilot2.press("y")
+        await _wait_for_pilot(
+            pilot2,
+            lambda: (
+                restarted.turn_count == 1
+                and restarted.engine is not None
+                and restarted.engine.state.current_node is not None
+                and restarted.engine.state.current_node.narrative == "You awaken in a test dungeon."
+            ),
+            timeout=5.0,
+        )
+        assert not autosave_path.exists()
+
+
+@pytest.mark.asyncio
 async def test_export_story_writes_markdown_and_timeline_json(
     mock_app_dependencies, tmp_path, monkeypatch
 ):
@@ -1678,6 +1721,112 @@ async def test_save_game_succeeds_before_story_title_is_persisted(
         with open(os.path.join(str(tmp_path), save_files[0]), encoding="utf-8") as f:
             payload = json.load(f)
         assert payload["story_title"] == "Recovered Save Title"
+
+
+@pytest.mark.asyncio
+async def test_save_game_prompts_before_overwriting_existing_file(
+    mock_app_dependencies, tmp_path, monkeypatch
+):
+    from cyoa.core import constants
+
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+
+        await pilot.press("s")
+        await _wait_for_pilot(
+            pilot,
+            lambda: len([f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]) == 1,
+        )
+
+        await pilot.press("s")
+        await _wait_for_pilot(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+
+        message = app.screen.query_one("#confirm-message", Label).render().plain
+        assert "Overwrite existing save?" in message
+        assert "already exists for this turn" in message
+
+
+@pytest.mark.asyncio
+async def test_save_load_preserves_restore_points_and_allows_restoring_them(
+    mock_app_dependencies, tmp_path, monkeypatch
+):
+    from cyoa.core import constants
+
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+    async with app.run_test() as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+        await pilot.pause(1.0)
+        app.action_skip_typewriter()
+        app._bookmark_payloads["Turn 1"] = app._build_save_payload(
+            app,
+            app,
+            include_restore_points=False,
+        )
+
+        await pilot.press("1")
+        await _wait_for_pilot(
+            pilot,
+            lambda: (
+                app.turn_count == 2
+                and app.engine is not None
+                and app.engine.state.current_node is not None
+                and app.engine.state.current_node.narrative == "You went North."
+            ),
+            timeout=5.0,
+        )
+        app.action_skip_typewriter()
+        app._bookmark_payloads["Turn 2"] = app._build_save_payload(
+            app,
+            app,
+            include_restore_points=False,
+        )
+
+        await pilot.press("s")
+        await _wait_for_pilot(
+            pilot,
+            lambda: len([f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]) == 1,
+        )
+
+    save_files = PersistenceMixin._list_manual_save_files()
+    assert len(save_files) == 1
+    save_path = os.path.join(str(tmp_path), save_files[0])
+
+    app2 = CYOAApp(model_path="dummy_path.gguf")
+    async with app2.run_test() as pilot2:
+        await _wait_for_pilot(
+            pilot2,
+            lambda: app2.engine is not None and app2.engine.state.current_node is not None,
+        )
+
+        app2._restore_from_save(save_path)
+        await pilot2.pause(0.2)
+
+        assert sorted(app2._bookmark_payloads) == ["Turn 1", "Turn 2"]
+
+        app2._restore_from_payload(
+            app2._bookmark_payloads["Turn 1"],
+            source_label="Restored restore point Turn 1",
+            preserve_restore_points=True,
+        )
+        await pilot2.pause(0.2)
+
+        assert app2.turn_count == 1
+        assert app2.engine is not None
+        assert app2.engine.state.current_node is not None
+        assert app2.engine.state.current_node.narrative == "You awaken in a test dungeon."
+        assert sorted(app2._bookmark_payloads) == ["Turn 1", "Turn 2"]
 
 
 @pytest.mark.smoke

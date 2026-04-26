@@ -4,15 +4,85 @@ import tomllib
 from pathlib import Path
 from typing import Any, cast
 
+from textual.color import Color
+
 logger = logging.getLogger(__name__)
 
 THEMES_DIR = Path(__file__).parent.parent.parent / "themes"
 
 _themes_cached_config: dict[str, Any] | None = None
+_MIN_MUTED_SURFACE_CONTRAST = 1.05
+_MIN_LOCKED_SURFACE_CONTRAST = 1.20
+_MIN_MUTED_TEXT_CONTRAST = 4.50
 
 
 class ThemeValidationError(ValueError):
     """Raised when a theme file or theme config is structurally invalid."""
+
+
+def _parse_theme_color(value: str, field: str, source: str) -> Color:
+    try:
+        return Color.parse(value)
+    except Exception as exc:
+        raise ThemeValidationError(f"{source}: {field} must be a valid color.") from exc
+
+
+def _relative_luminance(color: Color) -> float:
+    def channel(value: int) -> float:
+        normalized = value / 255
+        if normalized <= 0.03928:
+            return normalized / 12.92
+        return ((normalized + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+
+
+def _contrast_ratio(left: Color, right: Color) -> float:
+    lighter = max(_relative_luminance(left), _relative_luminance(right))
+    darker = min(_relative_luminance(left), _relative_luminance(right))
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def _muted_text_color(background: Color) -> Color:
+    return background.blend(Color.parse(background.get_contrast_text(alpha=1).hex6), 0.62)
+
+
+def _validate_ui_accessibility(ui_theme: dict[str, str], source: str) -> None:
+    """Reject muted and locked surfaces that become visually unsafe."""
+    parsed = {field: _parse_theme_color(value, field, source) for field, value in ui_theme.items()}
+
+    story_surface = parsed["story_card_surface"]
+    muted_surface = parsed["story_card_muted_surface"]
+    choice_surface = parsed["choice_surface"]
+    locked_surface = parsed["choice_locked_surface"]
+
+    story_muted_contrast = _contrast_ratio(story_surface, muted_surface)
+    if story_muted_contrast < _MIN_MUTED_SURFACE_CONTRAST:
+        raise ThemeValidationError(
+            f"{source}: story_card_muted_surface is too close to story_card_surface "
+            f"({story_muted_contrast:.2f} < {_MIN_MUTED_SURFACE_CONTRAST:.2f})."
+        )
+
+    choice_locked_contrast = _contrast_ratio(choice_surface, locked_surface)
+    if choice_locked_contrast < _MIN_LOCKED_SURFACE_CONTRAST:
+        raise ThemeValidationError(
+            f"{source}: choice_locked_surface is too close to choice_surface "
+            f"({choice_locked_contrast:.2f} < {_MIN_LOCKED_SURFACE_CONTRAST:.2f})."
+        )
+
+    muted_text_contrast = _contrast_ratio(muted_surface, _muted_text_color(muted_surface))
+    if muted_text_contrast < _MIN_MUTED_TEXT_CONTRAST:
+        raise ThemeValidationError(
+            f"{source}: story_card_muted_surface reduces muted text contrast too far "
+            f"({muted_text_contrast:.2f} < {_MIN_MUTED_TEXT_CONTRAST:.2f})."
+        )
+
+    locked_text_contrast = _contrast_ratio(locked_surface, _muted_text_color(locked_surface))
+    if locked_text_contrast < _MIN_MUTED_TEXT_CONTRAST:
+        raise ThemeValidationError(
+            f"{source}: choice_locked_surface reduces disabled text contrast too far "
+            f"({locked_text_contrast:.2f} < {_MIN_MUTED_TEXT_CONTRAST:.2f})."
+        )
 
 
 def _require_non_empty_string(value: Any, field: str, source: str) -> str:
@@ -89,9 +159,7 @@ def _validate_opening_objectives(
     normalized_objectives: list[dict[str, str]] = []
     for objective in objectives:
         if not isinstance(objective, dict):
-            raise ThemeValidationError(
-                f"{source}: opening_objectives entries must be objects."
-            )
+            raise ThemeValidationError(f"{source}: opening_objectives entries must be objects.")
         normalized_objectives.append(
             {
                 "id": _require_non_empty_string(objective.get("id"), "id", source),
@@ -129,6 +197,7 @@ def _validate_required_ui_theme(
     normalized: dict[str, str] = {}
     for field in required_fields:
         normalized[field] = _require_non_empty_string(ui_theme.get(field), field, source)
+    _validate_ui_accessibility(normalized, source)
     validated["ui"] = normalized
 
 
@@ -139,7 +208,9 @@ def validate_theme(theme: dict[str, Any], theme_name: str) -> dict[str, Any]:
         "name": _require_non_empty_string(theme.get("name"), "name", source),
         "description": _require_non_empty_string(theme.get("description"), "description", source),
         "prompt": _require_non_empty_string(theme.get("prompt"), "prompt", source),
-        "accent_color": _require_non_empty_string(theme.get("accent_color"), "accent_color", source),
+        "accent_color": _require_non_empty_string(
+            theme.get("accent_color"), "accent_color", source
+        ),
         "spinner_frames": _require_non_empty_string_list(
             theme.get("spinner_frames"), "spinner_frames", source
         ),

@@ -35,6 +35,11 @@ class PersistenceMixin:
     def _exports_dir() -> str:
         return os.path.join(constants.SAVES_DIR, "exports")
 
+    @staticmethod
+    def _clone_payload(payload: dict[str, object]) -> dict[str, object]:
+        """Deep-copy a JSON-compatible payload without sharing nested state."""
+        return cast(dict[str, object], json.loads(json.dumps(payload)))
+
     @classmethod
     def _list_manual_save_files(cls) -> list[str]:
         """Return loadable user saves, excluding the internal autosave slot."""
@@ -242,6 +247,21 @@ class PersistenceMixin:
         return [entry for entry in payload if isinstance(entry, dict)]
 
     @staticmethod
+    def _coerce_restore_points(payload: object) -> dict[str, dict[str, object]]:
+        """Normalize persisted restore points from save files."""
+        if not isinstance(payload, dict):
+            return {}
+
+        normalized: dict[str, dict[str, object]] = {}
+        for raw_name, raw_point in payload.items():
+            if not isinstance(raw_name, str) or not raw_name.strip():
+                continue
+            if not isinstance(raw_point, dict):
+                continue
+            normalized[raw_name.strip()] = cast(dict[str, object], raw_point)
+        return normalized
+
+    @staticmethod
     def _coerce_story_segments(payload: object) -> list[dict[str, str]]:
         """Normalize structured story timeline entries from save payloads."""
         if not isinstance(payload, list):
@@ -347,7 +367,13 @@ class PersistenceMixin:
             return
         self._restore_from_payload(data, source_label="Loaded save")
 
-    def _restore_from_payload(self, data: dict[str, object], *, source_label: str) -> None:
+    def _restore_from_payload(
+        self,
+        data: dict[str, object],
+        *,
+        source_label: str,
+        preserve_restore_points: bool = False,
+    ) -> None:
         """Hydrate the app from an in-memory save payload."""
         app = as_textual_app(self)
         host = as_mixin_host(self)
@@ -362,6 +388,16 @@ class PersistenceMixin:
         host._redo_payloads.clear()
         self._restore_story_state(host, ui_state)
         self._restore_story_widgets(host, app)
+        if preserve_restore_points:
+            host._bookmark_payloads = {
+                name: self._clone_payload(payload)
+                for name, payload in host._bookmark_payloads.items()
+            }
+        else:
+            host._bookmark_payloads = {
+                name: self._clone_payload(payload)
+                for name, payload in self._coerce_restore_points(data.get("restore_points")).items()
+            }
 
         choices_container = app.query_one("#choices-container", Container)
         choices_container.remove_children()
@@ -388,7 +424,13 @@ class PersistenceMixin:
         )
         self._sync_prompt_status(host, app)
 
-    def _build_save_payload(self, host: object, app: object) -> dict[str, object]:
+    def _build_save_payload(
+        self,
+        host: object,
+        app: object,
+        *,
+        include_restore_points: bool = True,
+    ) -> dict[str, object]:
         """Build a unified save payload for manual saves and autosaves."""
         mixin_host = as_mixin_host(host)
         textual_app = as_textual_app(app)
@@ -437,6 +479,11 @@ class PersistenceMixin:
         save_data["saved_at"] = (
             datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
         )
+        if include_restore_points:
+            save_data["restore_points"] = {
+                name: self._clone_payload(payload)
+                for name, payload in mixin_host._bookmark_payloads.items()
+            }
         return save_data
 
     @staticmethod
@@ -520,10 +567,22 @@ class PersistenceMixin:
                 0.1, lambda: self._restore_autosave_session(autosave_path)
             )
         elif selection == "new":
-            self._discard_autosave()
-            host._startup_timer = app.set_timer(
-                0.1,
-                lambda: runtime.initialize_and_start(host.model_path),
+            from cyoa.ui.components import ConfirmScreen
+
+            def on_confirm(confirmed: bool | None) -> None:
+                if confirmed is not True:
+                    return
+                self._discard_autosave()
+                host._startup_timer = app.set_timer(
+                    0.1,
+                    lambda: runtime.initialize_and_start(host.model_path),
+                )
+
+            app.push_screen(
+                ConfirmScreen(
+                    "[b]Start a new game?[/b]\n\nThis discards the recovered autosave and any restore points saved inside it."
+                ),
+                on_confirm,
             )
 
     def _restore_autosave_session(self, autosave_path: str) -> None:

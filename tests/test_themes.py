@@ -94,23 +94,23 @@ def test_validate_all_themes_rejects_invalid_themes_json(tmp_path, monkeypatch):
     themes_dir = tmp_path / "themes"
     themes_dir.mkdir()
     (themes_dir / "demo.toml").write_text(
-        '\n'.join(
+        "\n".join(
             [
                 'name = "Demo"',
                 'description = "Demo theme"',
                 'accent_color = "blue"',
                 'spinner_frames = ["-", "|"]',
                 'prompt = "Start"',
-                '[ui]',
+                "[ui]",
                 'main_surface = "#111111"',
                 'action_dock_surface = "#121212"',
                 'side_panel_surface = "#131313"',
                 'status_surface = "#141414"',
                 'story_card_surface = "#151515"',
-                'story_card_muted_surface = "#161616"',
+                'story_card_muted_surface = "#0e0e0e"',
                 'player_choice_surface = "#171717"',
-                'choice_surface = "#181818"',
-                'choice_locked_surface = "#191919"',
+                'choice_surface = "#24384d"',
+                'choice_locked_surface = "#1a1a1a"',
             ]
         ),
         encoding="utf-8",
@@ -207,6 +207,56 @@ def test_validate_theme_rejects_missing_required_ui_field():
                     "story_card_muted_surface": "#151515",
                     "player_choice_surface": "#161616",
                     "choice_surface": "#171717",
+                },
+            },
+            "broken",
+        )
+
+
+def test_validate_theme_rejects_muted_surface_that_matches_active_story_surface():
+    with pytest.raises(ThemeValidationError, match="story_card_muted_surface is too close"):
+        validate_theme(
+            {
+                "name": "Broken",
+                "description": "Muted surface blends into active story cards",
+                "prompt": "Start",
+                "accent_color": "blue",
+                "spinner_frames": ["-"],
+                "ui": {
+                    "main_surface": "#101010",
+                    "action_dock_surface": "#111111",
+                    "side_panel_surface": "#121212",
+                    "status_surface": "#131313",
+                    "story_card_surface": "#181818",
+                    "story_card_muted_surface": "#181818",
+                    "player_choice_surface": "#161616",
+                    "choice_surface": "#2A2A2A",
+                    "choice_locked_surface": "#1A1A1A",
+                },
+            },
+            "broken",
+        )
+
+
+def test_validate_theme_rejects_locked_choice_surface_that_matches_active_choice_surface():
+    with pytest.raises(ThemeValidationError, match="choice_locked_surface is too close"):
+        validate_theme(
+            {
+                "name": "Broken",
+                "description": "Locked choices should not look active",
+                "prompt": "Start",
+                "accent_color": "blue",
+                "spinner_frames": ["-"],
+                "ui": {
+                    "main_surface": "#101010",
+                    "action_dock_surface": "#111111",
+                    "side_panel_surface": "#121212",
+                    "status_surface": "#131313",
+                    "story_card_surface": "#1A1A1A",
+                    "story_card_muted_surface": "#141414",
+                    "player_choice_surface": "#161616",
+                    "choice_surface": "#2F3F55",
+                    "choice_locked_surface": "#2F3F55",
                 },
             },
             "broken",

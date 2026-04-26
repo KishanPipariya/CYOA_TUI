@@ -110,7 +110,9 @@ class UndoCommand:
         choices_container = app.query_one("#choices-container", Container)
         choices_container.remove_children()
         if host.engine.state.current_node:
-            host._mount_choice_buttons(host.engine.state.current_node, choices_container, is_error=False)
+            host._mount_choice_buttons(
+                host.engine.state.current_node, choices_container, is_error=False
+            )
 
         app.query_one("#loading", Static).add_class("hidden")
         host._scroll_to_bottom()
@@ -153,17 +155,33 @@ class SaveGameCommand:
 
         os.makedirs(constants.SAVES_DIR, exist_ok=True)
         safe_title = "".join(c if c.isalnum() or c in " _-" else "_" for c in save_title)
-        save_path = os.path.join(constants.SAVES_DIR, f"{safe_title}_turn{host.engine.state.turn_count}.json")
+        save_path = os.path.join(
+            constants.SAVES_DIR, f"{safe_title}_turn{host.engine.state.turn_count}.json"
+        )
         save_data = owner._build_save_payload(host, app)
 
-        try:
-            owner._write_json_payload(save_path, save_data)
-            host._last_manual_save_turn = host.engine.state.turn_count
-            host._last_manual_save_scene_id = host.engine.state.current_scene_id
-            owner._discard_autosave()
-            app.notify(f"Game saved to {save_path}", severity="information", timeout=3)
-        except OSError as exc:
-            app.notify(f"Save failed: {exc}", severity="error", timeout=3)
+        def write_save() -> None:
+            try:
+                owner._write_json_payload(save_path, save_data)
+                host._last_manual_save_turn = host.engine.state.turn_count
+                host._last_manual_save_scene_id = host.engine.state.current_scene_id
+                owner._discard_autosave()
+                app.notify(f"Game saved to {save_path}", severity="information", timeout=3)
+            except OSError as exc:
+                app.notify(f"Save failed: {exc}", severity="error", timeout=3)
+
+        if os.path.exists(save_path):
+            from cyoa.ui.components import ConfirmScreen
+
+            app.push_screen(
+                ConfirmScreen(
+                    f"[b]Overwrite existing save?[/b]\n\n{os.path.basename(save_path)} already exists for this turn. Replace it with the current state."
+                ),
+                lambda confirmed: write_save() if confirmed else None,
+            )
+            return
+
+        write_save()
 
 
 class ExportStoryCommand:
@@ -179,4 +197,6 @@ class ExportStoryCommand:
         markdown_path, json_path = owner._write_export_files(
             payload, owner._resolve_save_title(host) or "adventure"
         )
-        app.notify(f"Exported story to {markdown_path} and {json_path}", severity="information", timeout=4)
+        app.notify(
+            f"Exported story to {markdown_path} and {json_path}", severity="information", timeout=4
+        )
