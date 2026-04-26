@@ -20,6 +20,10 @@ from textual.widgets import (
 
 from cyoa.core import constants
 from cyoa.core.model_download import DownloadProgress, ModelRecommendation
+from cyoa.core.user_config import (
+    FIRST_RUN_ACCESSIBILITY_PRESET_OPTIONS,
+    accessibility_preset_overrides,
+)
 from cyoa.ui.keybindings import (
     binding_input_id,
     effective_keybindings,
@@ -671,6 +675,10 @@ class FirstRunSetupScreen(ButtonGroupScreen):
     BINDINGS = [
         ("q", "quick_demo", "Quick Demo"),
         ("d", "download_model", "Download Local Model"),
+        ("1", "select_default_preset", "Default Preset"),
+        ("2", "select_high_contrast_preset", "High Contrast Preset"),
+        ("3", "select_reduced_motion_preset", "Reduced Motion Preset"),
+        ("4", "select_screen_reader_preset", "Screen Reader Preset"),
         ("tab", "focus_next_button", "Next"),
         ("shift+tab", "focus_previous_button", "Previous"),
         ("up", "focus_previous_button", "Previous"),
@@ -681,10 +689,77 @@ class FirstRunSetupScreen(ButtonGroupScreen):
         self,
         *,
         general_notes: tuple[str, ...] = (),
+        selected_accessibility_preset: str = "default",
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._general_notes = general_notes
+        self._accessibility_preset = (
+            selected_accessibility_preset
+            if selected_accessibility_preset in FIRST_RUN_ACCESSIBILITY_PRESET_OPTIONS
+            else "default"
+        )
+
+    @staticmethod
+    def _preset_title(preset: str) -> str:
+        return {
+            "default": "Default",
+            "high_contrast": "High Contrast",
+            "reduced_motion": "Reduced Motion",
+            "screen_reader_friendly": "Screen Reader Friendly",
+        }.get(preset, "Default")
+
+    @staticmethod
+    def _preset_note(preset: str) -> str:
+        if preset == "high_contrast":
+            return "Locks in the high-contrast palette for clearer focus, disabled, warning, and error states."
+        if preset == "reduced_motion":
+            return "Disables motion-heavy effects and makes narrated text appear instantly."
+        if preset == "screen_reader_friendly":
+            return "Removes decorative output, keeps plain status text visible, and also enables reduced motion."
+        return "Keeps the standard visual defaults. You can adjust accessibility settings later."
+
+    def _set_selected(self, button_id: str, selected: bool) -> None:
+        self.query_one(f"#{button_id}", Button).variant = "primary" if selected else "default"
+
+    def _refresh_accessibility_preset_state(self) -> None:
+        for preset in FIRST_RUN_ACCESSIBILITY_PRESET_OPTIONS:
+            self._set_selected(
+                f"btn-first-run-preset-{preset}",
+                self._accessibility_preset == preset,
+            )
+        preset_title = self._preset_title(self._accessibility_preset)
+        preset_note = self._preset_note(self._accessibility_preset)
+        overrides = accessibility_preset_overrides(self._accessibility_preset)
+        enabled = [
+            label
+            for key, label in (
+                ("high_contrast", "High Contrast"),
+                ("reduced_motion", "Reduced Motion"),
+                ("screen_reader_mode", "Screen Reader Friendly"),
+            )
+            if overrides[key]
+        ]
+        summary = (
+            "No accessibility overrides enabled."
+            if not enabled
+            else "Enables: " + ", ".join(enabled) + "."
+        )
+        self.query_one("#first-run-preset-value", Label).update(f"{preset_title}: {preset_note}")
+        self.query_one("#first-run-preset-summary", Label).update(summary)
+
+    def _select_accessibility_preset(self, preset: str) -> None:
+        if preset not in FIRST_RUN_ACCESSIBILITY_PRESET_OPTIONS:
+            return
+        self._accessibility_preset = preset
+        if self.is_mounted:
+            self._refresh_accessibility_preset_state()
+
+    def _build_selection(self, runtime_choice: str) -> dict[str, str]:
+        return {
+            "runtime": runtime_choice,
+            "accessibility_preset": self._accessibility_preset,
+        }
 
     def compose(self) -> ComposeResult:
         with DialogFrame(
@@ -697,6 +772,18 @@ class FirstRunSetupScreen(ButtonGroupScreen):
                 id="first-run-message",
                 classes="dialog-message",
             )
+            yield Label("Accessibility Preset", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Default", id="btn-first-run-preset-default")
+                yield Button("High Contrast", id="btn-first-run-preset-high_contrast")
+            with Horizontal(classes="settings-row"):
+                yield Button("Reduced Motion", id="btn-first-run-preset-reduced_motion")
+                yield Button(
+                    "Screen Reader Friendly",
+                    id="btn-first-run-preset-screen_reader_friendly",
+                )
+            yield Label("", id="first-run-preset-value", classes="settings-value")
+            yield Label("", id="first-run-preset-summary", classes="first-run-note")
             for note in self._general_notes:
                 yield Label(note, classes="first-run-note")
             yield Button(
@@ -721,19 +808,35 @@ class FirstRunSetupScreen(ButtonGroupScreen):
             )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "btn-first-run-mock":
-            self.dismiss("mock")
-        elif event.button.id == "btn-first-run-download":
-            self.dismiss("download")
+        button_id = event.button.id
+        if button_id == "btn-first-run-mock":
+            self.dismiss(self._build_selection("mock"))
+        elif button_id == "btn-first-run-download":
+            self.dismiss(self._build_selection("download"))
+        elif button_id and button_id.startswith("btn-first-run-preset-"):
+            self._select_accessibility_preset(button_id.removeprefix("btn-first-run-preset-"))
 
     def on_mount(self) -> None:
+        self._refresh_accessibility_preset_state()
         self._focus_first_action_button()
 
     def action_quick_demo(self) -> None:
-        self.dismiss("mock")
+        self.dismiss(self._build_selection("mock"))
 
     def action_download_model(self) -> None:
-        self.dismiss("download")
+        self.dismiss(self._build_selection("download"))
+
+    def action_select_default_preset(self) -> None:
+        self._select_accessibility_preset("default")
+
+    def action_select_high_contrast_preset(self) -> None:
+        self._select_accessibility_preset("high_contrast")
+
+    def action_select_reduced_motion_preset(self) -> None:
+        self._select_accessibility_preset("reduced_motion")
+
+    def action_select_screen_reader_preset(self) -> None:
+        self._select_accessibility_preset("screen_reader_friendly")
 
 
 class ModelDownloadScreen(ButtonGroupScreen):

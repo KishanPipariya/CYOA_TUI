@@ -16,6 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 USER_CONFIG_VERSION = 1
+ACCESSIBILITY_PRESET_OPTIONS = (
+    "default",
+    "high_contrast",
+    "reduced_motion",
+    "screen_reader_friendly",
+    "custom",
+)
+FIRST_RUN_ACCESSIBILITY_PRESET_OPTIONS = ACCESSIBILITY_PRESET_OPTIONS[:-1]
 
 
 class UserConfigSaveError(RuntimeError):
@@ -28,6 +36,58 @@ def _coerce_option(value: object, allowed: tuple[str, ...], default: str) -> str
         if cleaned in allowed:
             return cleaned
     return default
+
+
+def _coerce_accessibility_preset(value: object, default: str = "default") -> str:
+    if isinstance(value, str):
+        cleaned = value.strip().lower().replace("-", "_").replace(" ", "_")
+        if cleaned in ACCESSIBILITY_PRESET_OPTIONS:
+            return cleaned
+    return default
+
+
+def accessibility_preset_overrides(preset: str) -> dict[str, bool]:
+    normalized = _coerce_accessibility_preset(preset)
+    if normalized == "high_contrast":
+        return {
+            "high_contrast": True,
+            "reduced_motion": False,
+            "screen_reader_mode": False,
+        }
+    if normalized == "reduced_motion":
+        return {
+            "high_contrast": False,
+            "reduced_motion": True,
+            "screen_reader_mode": False,
+        }
+    if normalized == "screen_reader_friendly":
+        return {
+            "high_contrast": False,
+            "reduced_motion": True,
+            "screen_reader_mode": True,
+        }
+    return {
+        "high_contrast": False,
+        "reduced_motion": False,
+        "screen_reader_mode": False,
+    }
+
+
+def infer_accessibility_preset(
+    *,
+    high_contrast: bool,
+    reduced_motion: bool,
+    screen_reader_mode: bool,
+) -> str:
+    if screen_reader_mode and reduced_motion and not high_contrast:
+        return "screen_reader_friendly"
+    if reduced_motion and not screen_reader_mode and not high_contrast:
+        return "reduced_motion"
+    if high_contrast and not reduced_motion and not screen_reader_mode:
+        return "high_contrast"
+    if not high_contrast and not reduced_motion and not screen_reader_mode:
+        return "default"
+    return "custom"
 
 
 @dataclass(slots=True)
@@ -47,6 +107,7 @@ class UserConfig:
     typewriter: bool = True
     typewriter_speed: str = "normal"
     diagnostics_enabled: bool = False
+    accessibility_preset: str = "default"
     preset: str | None = None
     runtime_preset: str | None = None
     setup_completed: bool = False
@@ -74,6 +135,7 @@ class UserConfig:
             "typewriter",
             "typewriter_speed",
             "diagnostics_enabled",
+            "accessibility_preset",
             "preset",
             "runtime_preset",
             "setup_completed",
@@ -101,6 +163,7 @@ class UserConfig:
         typewriter = payload.get("typewriter")
         typewriter_speed = payload.get("typewriter_speed")
         diagnostics_enabled = payload.get("diagnostics_enabled")
+        accessibility_preset = payload.get("accessibility_preset")
         preset = payload.get("preset")
         runtime_preset = payload.get("runtime_preset")
         setup_completed = payload.get("setup_completed")
@@ -146,6 +209,7 @@ class UserConfig:
             diagnostics_enabled=(
                 diagnostics_enabled if isinstance(diagnostics_enabled, bool) else False
             ),
+            accessibility_preset=_coerce_accessibility_preset(accessibility_preset),
             preset=preset.strip() if isinstance(preset, str) and preset.strip() else None,
             runtime_preset=(
                 runtime_preset.strip()
@@ -181,6 +245,7 @@ class UserConfig:
                 "typewriter": self.typewriter,
                 "typewriter_speed": self.typewriter_speed,
                 "diagnostics_enabled": self.diagnostics_enabled,
+                "accessibility_preset": self.accessibility_preset,
                 "preset": self.preset,
                 "runtime_preset": self.runtime_preset,
                 "setup_completed": self.setup_completed,

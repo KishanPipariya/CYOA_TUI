@@ -46,8 +46,11 @@ from cyoa.core.preflight import (
 from cyoa.core.support import reveal_in_file_manager, support_paths
 from cyoa.core.theme_loader import list_themes
 from cyoa.core.user_config import (
+    FIRST_RUN_ACCESSIBILITY_PRESET_OPTIONS,
     UserConfig,
     UserConfigSaveError,
+    accessibility_preset_overrides,
+    infer_accessibility_preset,
     load_user_config,
     reset_user_config,
     update_user_config,
@@ -160,6 +163,9 @@ class CYOAApp(
         )
         self.set_keymap(self._keybinding_overrides)
         self._first_run_setup_pending = self._requires_first_run_setup(self._user_config)
+        self._pending_accessibility_preset = getattr(
+            self._user_config, "accessibility_preset", "default"
+        )
         initial_story_text = loading_story_text(
             screen_reader_mode=getattr(self._user_config, "screen_reader_mode", False)
         )
@@ -808,13 +814,56 @@ class CYOAApp(
     def _requires_first_run_setup(config: UserConfig) -> bool:
         return not config.setup_completed
 
+    @staticmethod
+    def _resolve_accessibility_preset(value: object, *, fallback: str = "default") -> str:
+        if isinstance(value, str):
+            candidate = value.strip().lower().replace("-", "_").replace(" ", "_")
+            if candidate in FIRST_RUN_ACCESSIBILITY_PRESET_OPTIONS:
+                return candidate
+        return fallback
+
+    def _first_run_accessibility_changes(self, preset: str) -> dict[str, object]:
+        resolved = self._resolve_accessibility_preset(preset)
+        return {
+            "accessibility_preset": resolved,
+            **accessibility_preset_overrides(resolved),
+        }
+
+    def _apply_live_accessibility_settings(
+        self,
+        *,
+        high_contrast: bool,
+        reduced_motion: bool,
+        screen_reader_mode: bool,
+    ) -> None:
+        self.high_contrast_mode = high_contrast
+        self.reduced_motion = reduced_motion
+        self.screen_reader_mode = screen_reader_mode
+        if self.reduced_motion or self.screen_reader_mode:
+            self.action_skip_typewriter()
+
     def _present_first_run_setup(self) -> None:
-        def on_selected(selection: str | None) -> None:
-            if selection == "mock":
-                applied = self._apply_first_run_selection("mock")
+        def on_selected(selection: dict[str, str] | str | None) -> None:
+            runtime_choice = ""
+            accessibility_preset = self._pending_accessibility_preset
+            if isinstance(selection, dict):
+                runtime_choice = str(selection.get("runtime") or "").strip().lower()
+                accessibility_preset = self._resolve_accessibility_preset(
+                    selection.get("accessibility_preset"),
+                    fallback=accessibility_preset,
+                )
+            elif isinstance(selection, str):
+                runtime_choice = selection.strip().lower()
+            self._pending_accessibility_preset = accessibility_preset
+
+            if runtime_choice == "mock":
+                applied = self._apply_first_run_selection(
+                    "mock",
+                    accessibility_preset=accessibility_preset,
+                )
                 if applied:
                     self._resume_startup_flow()
-            elif selection == "download":
+            elif runtime_choice == "download":
                 self._present_model_download_setup()
 
         terminal_report = check_terminal_conditions(
@@ -826,6 +875,7 @@ class CYOAApp(
         self.push_screen(
             FirstRunSetupScreen(
                 general_notes=tuple(terminal_report.render_lines()),
+                selected_accessibility_preset=self._pending_accessibility_preset,
             ),
             on_selected,
         )
@@ -861,10 +911,16 @@ class CYOAApp(
             0.1, lambda: self.initialize_and_start(self.model_path)
         )
 
-    def _apply_first_run_selection(self, selection: Literal["mock"]) -> bool:
+    def _apply_first_run_selection(
+        self,
+        selection: Literal["mock"],
+        *,
+        accessibility_preset: str = "default",
+    ) -> bool:
         runtime_preset = "mock-smoke"
         preset = "precise"
         startup_note = "Quick Demo mode selected during first-run setup."
+        accessibility_changes = self._first_run_accessibility_changes(accessibility_preset)
 
         self.model_path = ""
         os.environ.pop("LLM_MODEL_PATH", None)
@@ -887,6 +943,13 @@ class CYOAApp(
             runtime_preset=runtime_preset,
             setup_completed=True,
             setup_choice=selection,
+            **accessibility_changes,
+        )
+        self._pending_accessibility_preset = str(accessibility_changes["accessibility_preset"])
+        self._apply_live_accessibility_settings(
+            high_contrast=bool(accessibility_changes["high_contrast"]),
+            reduced_motion=bool(accessibility_changes["reduced_motion"]),
+            screen_reader_mode=bool(accessibility_changes["screen_reader_mode"]),
         )
         try:
             self._sync_runtime_status()
@@ -895,6 +958,9 @@ class CYOAApp(
         return True
 
     def _apply_downloaded_model_selection(self, result: DownloadResult) -> None:
+        accessibility_changes = self._first_run_accessibility_changes(
+            self._pending_accessibility_preset
+        )
         os.environ["LLM_PROVIDER"] = "llama_cpp"
         os.environ["LLM_MODEL_PATH"] = result.path
         os.environ["LLM_PRESET"] = "balanced"
@@ -915,6 +981,13 @@ class CYOAApp(
             runtime_preset="local-fast",
             setup_completed=True,
             setup_choice="download",
+            **accessibility_changes,
+        )
+        self._pending_accessibility_preset = str(accessibility_changes["accessibility_preset"])
+        self._apply_live_accessibility_settings(
+            high_contrast=bool(accessibility_changes["high_contrast"]),
+            reduced_motion=bool(accessibility_changes["reduced_motion"]),
+            screen_reader_mode=bool(accessibility_changes["screen_reader_mode"]),
         )
         try:
             self._sync_runtime_status()
@@ -1289,6 +1362,11 @@ class CYOAApp(
         diagnostics_enabled = bool(
             payload.get("diagnostics_enabled", self._user_config.diagnostics_enabled)
         )
+        accessibility_preset = infer_accessibility_preset(
+            high_contrast=high_contrast,
+            reduced_motion=reduced_motion,
+            screen_reader_mode=screen_reader_mode,
+        )
 
         self._user_config = update_user_config(
             raise_on_error=True,
@@ -1307,14 +1385,18 @@ class CYOAApp(
             typewriter=typewriter,
             typewriter_speed=typewriter_speed,
             diagnostics_enabled=diagnostics_enabled,
+            accessibility_preset=accessibility_preset,
         )
 
         self._set_diagnostics_env(diagnostics_enabled)
 
         self.dark = dark
-        self.high_contrast_mode = high_contrast
-        self.reduced_motion = reduced_motion
-        self.screen_reader_mode = screen_reader_mode
+        self._pending_accessibility_preset = accessibility_preset
+        self._apply_live_accessibility_settings(
+            high_contrast=high_contrast,
+            reduced_motion=reduced_motion,
+            screen_reader_mode=screen_reader_mode,
+        )
         self.cognitive_load_reduction_mode = cognitive_load_reduction_mode
         self.text_scale = text_scale
         self.line_width = line_width
@@ -1323,7 +1405,7 @@ class CYOAApp(
         self.typewriter_speed = typewriter_speed
         self._keybinding_overrides = keybinding_overrides
         self.set_keymap(self._keybinding_overrides)
-        if self.reduced_motion or self.screen_reader_mode or not self.typewriter_enabled:
+        if not self.typewriter_enabled and not (self.reduced_motion or self.screen_reader_mode):
             self.action_skip_typewriter()
 
         pending_changes: list[str] = []
@@ -1349,6 +1431,9 @@ class CYOAApp(
         os.environ.pop("LLM_MODEL_PATH", None)
 
         self.dark = self._user_config.dark
+        self._pending_accessibility_preset = getattr(
+            self._user_config, "accessibility_preset", "default"
+        )
         self.high_contrast_mode = getattr(self._user_config, "high_contrast", False)
         self.reduced_motion = getattr(self._user_config, "reduced_motion", False)
         self.screen_reader_mode = getattr(self._user_config, "screen_reader_mode", False)

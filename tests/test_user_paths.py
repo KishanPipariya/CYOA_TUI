@@ -63,6 +63,7 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
             theme="space_explorer",
             dark=False,
             high_contrast=True,
+            accessibility_preset="high_contrast",
             cognitive_load_reduction_mode=True,
             text_scale="xlarge",
             line_width="focused",
@@ -87,6 +88,7 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
     assert restored.theme == "space_explorer"
     assert restored.dark is False
     assert restored.high_contrast is True
+    assert restored.accessibility_preset == "high_contrast"
     assert restored.cognitive_load_reduction_mode is True
     assert restored.text_scale == "xlarge"
     assert restored.line_width == "focused"

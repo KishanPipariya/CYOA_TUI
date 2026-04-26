@@ -648,8 +648,18 @@ async def test_first_run_screen_exposes_mock_and_download_actions() -> None:
 
     async with app.run_test() as pilot:
         await pilot.pause(0.1)
+        default_preset = app.screen.query_one("#btn-first-run-preset-default", Button)
+        high_contrast_preset = app.screen.query_one("#btn-first-run-preset-high_contrast", Button)
+        reduced_motion_preset = app.screen.query_one("#btn-first-run-preset-reduced_motion", Button)
+        screen_reader_preset = app.screen.query_one(
+            "#btn-first-run-preset-screen_reader_friendly", Button
+        )
         mock_button = app.screen.query_one("#btn-first-run-mock", Button)
         download_button = app.screen.query_one("#btn-first-run-download", Button)
+        assert default_preset.variant == "primary"
+        assert high_contrast_preset.disabled is False
+        assert reduced_motion_preset.disabled is False
+        assert screen_reader_preset.disabled is False
         assert mock_button.disabled is False
         assert download_button.disabled is False
 
@@ -662,6 +672,24 @@ async def test_first_run_screen_renders_general_notes() -> None:
         await pilot.pause(0.1)
         labels = [label.render().plain for label in app.screen.query(Label)]
         assert any("Resize the terminal" in text for text in labels)
+        assert any("No accessibility overrides enabled." in text for text in labels)
+
+
+@pytest.mark.asyncio
+async def test_first_run_screen_updates_selected_accessibility_preset_summary() -> None:
+    app = FirstRunScreenHarness()
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.1)
+        await pilot.click("#btn-first-run-preset-screen_reader_friendly")
+        await pilot.pause(0.1)
+
+        selected = app.screen.query_one("#btn-first-run-preset-screen_reader_friendly", Button)
+        summary = _render_text(app.screen.query_one("#first-run-preset-summary", Label))
+
+        assert selected.variant == "primary"
+        assert "Reduced Motion" in summary
+        assert "Screen Reader Friendly" in summary
 
 
 @pytest.mark.asyncio
@@ -804,18 +832,22 @@ def test_startup_choice_screen_dismisses_expected_values():
 def test_first_run_setup_screen_dismisses_expected_values():
     first_run = FirstRunSetupScreen()
     first_run.dismiss = MagicMock()
+    first_run.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-first-run-preset-high_contrast"))
+    )
     first_run.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-first-run-mock")))
     first_run.on_button_pressed(
         SimpleNamespace(button=SimpleNamespace(id="btn-first-run-download"))
     )
+    first_run.action_select_screen_reader_preset()
     first_run.action_quick_demo()
     first_run.action_download_model()
 
     assert first_run.dismiss.call_args_list == [
-        call("mock"),
-        call("download"),
-        call("mock"),
-        call("download"),
+        call({"runtime": "mock", "accessibility_preset": "high_contrast"}),
+        call({"runtime": "download", "accessibility_preset": "high_contrast"}),
+        call({"runtime": "mock", "accessibility_preset": "screen_reader_friendly"}),
+        call({"runtime": "download", "accessibility_preset": "screen_reader_friendly"}),
     ]
 
 
@@ -1071,13 +1103,20 @@ def test_cyoa_app_first_run_selection_updates_runtime_and_config(monkeypatch: py
         lambda **changes: saved.update(changes) or SimpleNamespace(**changes),
     )
 
-    app._apply_first_run_selection("mock")
+    app._apply_first_run_selection("mock", accessibility_preset="high_contrast")
 
     assert os.environ["LLM_PROVIDER"] == "mock"
     assert os.environ["LLM_PRESET"] == "precise"
     assert app._runtime_diagnostics["runtime_preset"] == "mock-smoke"
     assert app._runtime_diagnostics["provider"] == "mock"
     assert app._runtime_diagnostics["model"] == "mock"
+    assert app.high_contrast_mode is True
+    assert app.reduced_motion is False
+    assert app.screen_reader_mode is False
+    assert saved["accessibility_preset"] == "high_contrast"
+    assert saved["high_contrast"] is True
+    assert saved["reduced_motion"] is False
+    assert saved["screen_reader_mode"] is False
     assert saved["setup_completed"] is True
     assert saved["setup_choice"] == "mock"
     assert saved["runtime_preset"] == "mock-smoke"
@@ -1100,12 +1139,20 @@ def test_cyoa_app_downloaded_model_selection_updates_runtime_and_config(
 
     try:
         result = SimpleNamespace(path="/tmp/models/demo.gguf")
+        app._pending_accessibility_preset = "screen_reader_friendly"
         app._apply_downloaded_model_selection(result)
 
         assert os.environ["LLM_PROVIDER"] == "llama_cpp"
         assert os.environ["LLM_MODEL_PATH"] == "/tmp/models/demo.gguf"
         assert os.environ["LLM_PRESET"] == "balanced"
         assert app.model_path == "/tmp/models/demo.gguf"
+        assert app.high_contrast_mode is False
+        assert app.reduced_motion is True
+        assert app.screen_reader_mode is True
+        assert saved["accessibility_preset"] == "screen_reader_friendly"
+        assert saved["high_contrast"] is False
+        assert saved["reduced_motion"] is True
+        assert saved["screen_reader_mode"] is True
         assert saved["setup_completed"] is True
         assert saved["setup_choice"] == "download"
         assert saved["runtime_preset"] == "local-fast"
@@ -1191,11 +1238,13 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         assert saved["high_contrast"] is True
         assert saved["screen_reader_mode"] is True
         assert saved["cognitive_load_reduction_mode"] is True
+        assert saved["accessibility_preset"] == "custom"
         assert saved["text_scale"] == "xlarge"
         assert saved["line_width"] == "focused"
         assert saved["line_spacing"] == "relaxed"
         assert saved["keybindings"] == {"show_settings": "f2", "toggle_journal": "f3"}
         assert saved["diagnostics_enabled"] is True
+        assert app._pending_accessibility_preset == "custom"
         app.set_keymap.assert_called_once_with({"show_settings": "f2", "toggle_journal": "f3"})
         app.action_skip_typewriter.assert_called_once_with()
         app.notify.assert_called_once()
