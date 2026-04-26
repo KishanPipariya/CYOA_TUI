@@ -176,6 +176,9 @@ class NavigationMixin:
         as_textual_app(self).push_screen(
             HelpScreen(
                 screen_reader_mode=as_mixin_host(self).screen_reader_mode,
+                cognitive_load_reduction_mode=getattr(
+                    as_mixin_host(self), "cognitive_load_reduction_mode", False
+                ),
                 current_bindings=cast(Any, self).get_effective_keybindings(),
             )
         )

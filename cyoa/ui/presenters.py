@@ -8,6 +8,10 @@ from cyoa.ui.keybindings import APP_BINDING_SPECS, format_key_for_display
 MARKUP_TAG_RE = re.compile(r"\[/?[a-zA-Z][^\]]*\]")
 
 
+def _use_plain_labels(*, screen_reader_mode: bool, simplified_mode: bool = False) -> bool:
+    return screen_reader_mode or simplified_mode
+
+
 def loading_story_text(*, screen_reader_mode: bool) -> str:
     return "Loading story..." if screen_reader_mode else constants.LOADING_ART
 
@@ -37,9 +41,17 @@ def _strip_leading_decorations(text: str) -> str:
     return text[index:].lstrip(" :-|")
 
 
-def format_status_message(message: str, *, screen_reader_mode: bool) -> str:
+def format_status_message(
+    message: str,
+    *,
+    screen_reader_mode: bool,
+    simplified_mode: bool = False,
+) -> str:
     cleaned = _strip_markup(message.strip())
-    if not screen_reader_mode:
+    if not _use_plain_labels(
+        screen_reader_mode=screen_reader_mode,
+        simplified_mode=simplified_mode,
+    ):
         return cleaned
     plain = _strip_leading_decorations(cleaned)
     return plain or cleaned
@@ -66,17 +78,43 @@ def format_save_display_name(save_file: str) -> str:
     return save_file.replace(".json", "").replace("_", " ")
 
 
-def format_inventory_label(inventory: list[str], *, screen_reader_mode: bool = False) -> str:
-    prefix = "Inventory" if screen_reader_mode else "🎒 Inventory"
+def format_inventory_label(
+    inventory: list[str],
+    *,
+    screen_reader_mode: bool = False,
+    simplified_mode: bool = False,
+) -> str:
+    prefix = (
+        "Inventory"
+        if _use_plain_labels(
+            screen_reader_mode=screen_reader_mode,
+            simplified_mode=simplified_mode,
+        )
+        else "🎒 Inventory"
+    )
     return f"{prefix}: {', '.join(inventory)}" if inventory else f"{prefix}: Empty"
 
 
-def format_objectives_label(objectives: list[str], *, screen_reader_mode: bool = False) -> str:
+def format_objectives_label(
+    objectives: list[str],
+    *,
+    screen_reader_mode: bool = False,
+    simplified_mode: bool = False,
+) -> str:
+    if simplified_mode:
+        return f"Focus: {objectives[0]}" if objectives else "Focus: None"
     prefix = "Objectives" if screen_reader_mode else "🎯 Objectives"
     return f"{prefix}: {' | '.join(objectives[:2])}" if objectives else f"{prefix}: None"
 
 
-def format_directives_label(directives: list[str], *, screen_reader_mode: bool = False) -> str:
+def format_directives_label(
+    directives: list[str],
+    *,
+    screen_reader_mode: bool = False,
+    simplified_mode: bool = False,
+) -> str:
+    if simplified_mode:
+        return f"Guidance: {directives[0]}" if directives else "Guidance: None"
     prefix = "Directives" if screen_reader_mode else "🧭 Directives"
     return f"{prefix}: {' | '.join(directives[:2])}" if directives else f"{prefix}: None"
 
@@ -86,8 +124,9 @@ def format_stats_text(
     gold: int,
     reputation: int,
     screen_reader_mode: bool = False,
+    simplified_mode: bool = False,
 ) -> str:
-    if screen_reader_mode:
+    if _use_plain_labels(screen_reader_mode=screen_reader_mode, simplified_mode=simplified_mode):
         return f"Gold {gold} | Reputation {reputation}"
     return f"🪙 Gold {gold}  •  🌟 Reputation {reputation}"
 
@@ -99,8 +138,9 @@ def format_runtime_text(
     provider_label: str,
     runtime_profile: str,
     screen_reader_mode: bool = False,
+    simplified_mode: bool = False,
 ) -> str:
-    if screen_reader_mode:
+    if _use_plain_labels(screen_reader_mode=screen_reader_mode, simplified_mode=simplified_mode):
         return (
             f"Preset {generation_preset} | Phase {engine_phase} | "
             f"Provider {provider_label} | Profile {runtime_profile}"
@@ -163,6 +203,7 @@ def format_new_adventure_label(*, screen_reader_mode: bool) -> str:
 def build_help_text(
     *,
     screen_reader_mode: bool,
+    cognitive_load_reduction_mode: bool = False,
     current_bindings: dict[str, str] | None = None,
 ) -> str:
     bindings = current_bindings or {}
@@ -185,6 +226,7 @@ def build_help_text(
 # Accessibility
 
 - Screen Reader Friendly mode removes ASCII art, uses plainer labels, and keeps the latest status message in the status panel.
+- Cognitive Load Reduction mode trims side-panel detail and uses simpler wording in status updates.
 - High Contrast mode uses a fixed readable palette for story cards, choices, and side panels.
 - Key bindings can be customized in Settings. Footer hints and this help sheet follow your saved keys.
 - Reduced Motion disables spinner animation and narrated text animation.
@@ -218,6 +260,7 @@ def build_help_text(
 # ♿ Accessibility
 
 - Screen Reader Friendly mode removes ASCII art, uses plainer labels, and keeps the latest status message in the status panel.
+- Cognitive Load Reduction mode trims side-panel detail and uses simpler wording in status updates.
 - High Contrast mode uses a fixed readable palette for story cards, choices, and side panels.
 - Key bindings can be customized in Settings. Footer hints and this help sheet follow your saved keys.
 - Locked choices include a written reason and do not rely on color alone.

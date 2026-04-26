@@ -13,6 +13,7 @@ from textual.widgets import Button, Label, ListView, ProgressBar
 from cyoa.core import constants
 from cyoa.core.models import Choice, ChoiceRequirement, StoryNode
 from cyoa.core.runtime import EnginePhase, EngineTransition
+from cyoa.core.user_config import UserConfigSaveError
 from cyoa.ui.app import BufferedNotification, CYOAApp
 from cyoa.ui.components import (
     BranchScreen,
@@ -358,6 +359,7 @@ class SettingsScreenHarness(App[None]):
             dark=True,
             reduced_motion=False,
             screen_reader_mode=False,
+            cognitive_load_reduction_mode=False,
             text_scale="standard",
             line_width="standard",
             line_spacing="standard",
@@ -465,6 +467,14 @@ def test_presenters_return_plain_text_variants_for_screen_reader_mode():
     assert loading_story_text(screen_reader_mode=True) == "Loading story..."
     assert (
         format_status_message("⚡ Weaving possible futures...", screen_reader_mode=True)
+        == "Weaving possible futures..."
+    )
+    assert (
+        format_status_message(
+            "⚡ Weaving possible futures...",
+            screen_reader_mode=False,
+            simplified_mode=True,
+        )
         == "Weaving possible futures..."
     )
     assert build_choice_label(
@@ -695,6 +705,13 @@ async def test_status_display_watchers_and_spinner_tick() -> None:
         )
         assert display.has_class("health-low")
 
+        display.cognitive_load_reduction_mode = True
+        await pilot.pause(0.1)
+
+        assert display.query_one("#runtime-text", Label).has_class("hidden")
+        assert display.query_one("#directives-label", Label).has_class("hidden")
+        assert "Focus: Escape" in _render_text(display.query_one("#objectives-label", Label))
+
     spinner_app = SpinnerHarness()
     async with spinner_app.run_test() as pilot:
         await pilot.pause(0.1)
@@ -802,7 +819,9 @@ def test_first_run_setup_screen_dismisses_expected_values():
     ]
 
 
-def test_settings_screen_dismisses_saved_payload():
+def test_settings_screen_dismisses_saved_payload(tmp_path) -> None:
+    model_path = tmp_path / "demo.gguf"
+    model_path.write_text("stub", encoding="utf-8")
     settings = SettingsScreen(
         provider="mock",
         model_path="",
@@ -811,6 +830,7 @@ def test_settings_screen_dismisses_saved_payload():
         high_contrast=False,
         reduced_motion=False,
         screen_reader_mode=False,
+        cognitive_load_reduction_mode=False,
         text_scale="standard",
         line_width="standard",
         line_spacing="standard",
@@ -826,8 +846,18 @@ def test_settings_screen_dismisses_saved_payload():
     settings._collect_keybinding_values = MagicMock(
         return_value={"show_settings": "f2", "toggle_journal": "f3"}
     )
+    field_feedback = MagicMock()
+    field_feedback.set_class = MagicMock()
+    settings_feedback = MagicMock()
+    settings_feedback.set_class = MagicMock()
     settings.query_one = lambda selector, *_args: (
-        SimpleNamespace(value="/tmp/demo.gguf") if selector == "#settings-model-path" else None
+        SimpleNamespace(value=str(model_path))
+        if selector == "#settings-model-path"
+        else field_feedback
+        if selector == "#settings-model-path-feedback"
+        else settings_feedback
+        if selector == "#settings-feedback"
+        else None
     )
 
     settings.on_button_pressed(
@@ -844,6 +874,9 @@ def test_settings_screen_dismisses_saved_payload():
     )
     settings.on_button_pressed(
         SimpleNamespace(button=SimpleNamespace(id="btn-settings-screen-reader-on"))
+    )
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-cognitive-reduced"))
     )
     settings.on_button_pressed(
         SimpleNamespace(button=SimpleNamespace(id="btn-settings-scale-xlarge"))
@@ -868,12 +901,13 @@ def test_settings_screen_dismisses_saved_payload():
     saved_payload = settings.dismiss.call_args_list[-1].args[0]
     assert saved_payload == {
         "provider": "llama_cpp",
-        "model_path": "/tmp/demo.gguf",
+        "model_path": str(model_path),
         "theme": "space_explorer",
         "dark": True,
         "high_contrast": True,
         "reduced_motion": True,
         "screen_reader_mode": True,
+        "cognitive_load_reduction_mode": True,
         "text_scale": "xlarge",
         "line_width": "focused",
         "line_spacing": "relaxed",
@@ -893,6 +927,7 @@ def test_settings_screen_support_actions_dismiss_expected_payloads():
         high_contrast=False,
         reduced_motion=False,
         screen_reader_mode=False,
+        cognitive_load_reduction_mode=False,
         text_scale="standard",
         line_width="standard",
         line_spacing="standard",
@@ -903,6 +938,20 @@ def test_settings_screen_support_actions_dismiss_expected_payloads():
         available_themes=["dark_dungeon"],
     )
     settings.dismiss = MagicMock()
+    path_feedback = MagicMock()
+    path_feedback.set_class = MagicMock()
+    settings_feedback = MagicMock()
+    settings_feedback.set_class = MagicMock()
+    settings._collect_keybinding_values = MagicMock(return_value={"show_settings": "f2"})
+    settings.query_one = lambda selector, *_args: (
+        SimpleNamespace(value="")
+        if selector == "#settings-model-path"
+        else path_feedback
+        if selector == "#settings-model-path-feedback"
+        else settings_feedback
+        if selector == "#settings-feedback"
+        else None
+    )
 
     settings.on_button_pressed(
         SimpleNamespace(button=SimpleNamespace(id="btn-settings-test-backend"))
@@ -912,8 +961,11 @@ def test_settings_screen_support_actions_dismiss_expected_payloads():
     )
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-reset")))
 
-    assert settings.dismiss.call_args_list == [
-        call({"action": "test_backend"}),
+    test_backend_payload = settings.dismiss.call_args_list[0].args[0]
+    assert test_backend_payload["action"] == "test_backend"
+    assert test_backend_payload["draft_settings"]["provider"] == "mock"
+    assert test_backend_payload["draft_settings"]["model_path"] is None
+    assert settings.dismiss.call_args_list[1:] == [
         call({"action": "reveal_saves"}),
         call({"action": "reset_settings"}),
     ]
@@ -928,6 +980,7 @@ def test_settings_screen_blocks_save_when_keybindings_conflict() -> None:
         high_contrast=False,
         reduced_motion=False,
         screen_reader_mode=False,
+        cognitive_load_reduction_mode=False,
         text_scale="standard",
         line_width="standard",
         line_spacing="standard",
@@ -956,6 +1009,53 @@ def test_settings_screen_blocks_save_when_keybindings_conflict() -> None:
     settings.dismiss.assert_not_called()
     feedback.update.assert_called_once()
     assert "F2 is assigned to" in feedback.update.call_args.args[0]
+
+
+def test_settings_screen_blocks_save_when_local_model_path_is_invalid() -> None:
+    settings = SettingsScreen(
+        provider="llama_cpp",
+        model_path="",
+        theme="dark_dungeon",
+        dark=True,
+        high_contrast=False,
+        reduced_motion=False,
+        screen_reader_mode=False,
+        cognitive_load_reduction_mode=False,
+        text_scale="standard",
+        line_width="standard",
+        line_spacing="standard",
+        keybindings={},
+        typewriter=True,
+        typewriter_speed="normal",
+        diagnostics_enabled=False,
+        available_themes=["dark_dungeon"],
+    )
+    path_feedback = MagicMock()
+    path_feedback.set_class = MagicMock()
+    settings_feedback = MagicMock()
+    settings_feedback.set_class = MagicMock()
+    keybinding_feedback = MagicMock()
+    keybinding_feedback.set_class = MagicMock()
+    path_input = SimpleNamespace(value="/tmp/not-a-model.txt", focus=MagicMock())
+    settings.dismiss = MagicMock()
+    settings.query_one = lambda selector, *_args: (
+        path_input
+        if selector == "#settings-model-path"
+        else path_feedback
+        if selector == "#settings-model-path-feedback"
+        else keybinding_feedback
+        if selector == "#settings-keybindings-feedback"
+        else settings_feedback
+        if selector == "#settings-feedback"
+        else None
+    )
+    settings._collect_keybinding_values = MagicMock(return_value={"show_settings": "f2"})
+
+    settings.action_save()
+
+    settings.dismiss.assert_not_called()
+    path_feedback.update.assert_called_once_with("Local Model requires a `.gguf` file.")
+    path_input.focus.assert_called_once_with()
 
 
 def test_cyoa_app_first_run_selection_updates_runtime_and_config(monkeypatch: pytest.MonkeyPatch):
@@ -1035,6 +1135,7 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         high_contrast=False,
         reduced_motion=False,
         screen_reader_mode=False,
+        cognitive_load_reduction_mode=False,
         text_scale="standard",
         line_width="standard",
         line_spacing="standard",
@@ -1063,6 +1164,7 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
                 "dark": False,
                 "high_contrast": True,
                 "screen_reader_mode": True,
+                "cognitive_load_reduction_mode": True,
                 "text_scale": "xlarge",
                 "line_width": "focused",
                 "line_spacing": "relaxed",
@@ -1076,6 +1178,7 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         assert app.dark is False
         assert app.high_contrast_mode is True
         assert app.screen_reader_mode is True
+        assert app.cognitive_load_reduction_mode is True
         assert app.text_scale == "xlarge"
         assert app.line_width == "focused"
         assert app.line_spacing == "relaxed"
@@ -1087,6 +1190,7 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         assert saved["theme"] == "space_explorer"
         assert saved["high_contrast"] is True
         assert saved["screen_reader_mode"] is True
+        assert saved["cognitive_load_reduction_mode"] is True
         assert saved["text_scale"] == "xlarge"
         assert saved["line_width"] == "focused"
         assert saved["line_spacing"] == "relaxed"
@@ -1109,7 +1213,7 @@ def test_cyoa_app_handle_settings_action_routes_requests() -> None:
     app._reveal_save_folder = MagicMock()
     app.push_screen = MagicMock()
 
-    app._handle_settings_action("test_backend")
+    app._handle_settings_action("test_backend", {"draft_settings": {"provider": "mock"}})
     app._handle_settings_action("reveal_saves")
     app._handle_settings_action("reset_settings")
 
@@ -1125,6 +1229,7 @@ def test_cyoa_app_reset_settings_restores_safe_defaults(monkeypatch: pytest.Monk
         dark=False,
         reduced_motion=True,
         screen_reader_mode=True,
+        cognitive_load_reduction_mode=True,
         text_scale="xlarge",
         line_width="focused",
         line_spacing="relaxed",
@@ -1141,6 +1246,7 @@ def test_cyoa_app_reset_settings_restores_safe_defaults(monkeypatch: pytest.Monk
             dark=True,
             reduced_motion=False,
             screen_reader_mode=False,
+            cognitive_load_reduction_mode=False,
             text_scale="standard",
             line_width="standard",
             line_spacing="standard",
@@ -1154,6 +1260,7 @@ def test_cyoa_app_reset_settings_restores_safe_defaults(monkeypatch: pytest.Monk
 
     assert app.dark is True
     assert app.screen_reader_mode is False
+    assert app.cognitive_load_reduction_mode is False
     assert app.text_scale == "standard"
     assert app.line_width == "standard"
     assert app.line_spacing == "standard"
@@ -1185,6 +1292,67 @@ async def test_cyoa_app_backend_test_reports_success_for_mock() -> None:
     await app._run_backend_connection_test()
 
     assert app.notify.call_args.args[0] == "Quick Demo backend is ready."
+
+
+def test_cyoa_app_reopens_settings_after_save_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = CYOAApp(model_path="")
+    app._user_config = SimpleNamespace(
+        provider="mock",
+        model_path=None,
+        theme="dark_dungeon",
+        dark=True,
+        high_contrast=False,
+        reduced_motion=False,
+        screen_reader_mode=False,
+        cognitive_load_reduction_mode=False,
+        text_scale="standard",
+        line_width="standard",
+        line_spacing="standard",
+        keybindings={},
+        typewriter=True,
+        typewriter_speed="normal",
+        diagnostics_enabled=False,
+    )
+    screens: list[SettingsScreen] = []
+    callbacks: list[Any] = []
+    app.push_screen = MagicMock(
+        side_effect=lambda screen, callback: (screens.append(screen), callbacks.append(callback))
+    )
+    monkeypatch.setattr("cyoa.ui.app.list_themes", lambda: ["dark_dungeon", "space_explorer"])
+    monkeypatch.setattr(
+        "cyoa.ui.app.update_user_config",
+        lambda **_changes: (_ for _ in ()).throw(UserConfigSaveError("Unable to save settings.")),
+    )
+
+    app.action_show_settings()
+
+    callbacks[0](
+        {
+            "provider": "mock",
+            "model_path": None,
+            "theme": "space_explorer",
+            "dark": False,
+            "high_contrast": True,
+            "reduced_motion": False,
+            "screen_reader_mode": False,
+            "cognitive_load_reduction_mode": True,
+            "text_scale": "large",
+            "line_width": "focused",
+            "line_spacing": "relaxed",
+            "keybindings": {"show_settings": "f2"},
+            "typewriter": True,
+            "typewriter_speed": "fast",
+            "diagnostics_enabled": False,
+        }
+    )
+
+    assert len(screens) == 2
+    assert screens[1]._initial_feedback == "Unable to save settings."
+    assert screens[1]._model_path == ""
+    assert screens[1]._provider == "mock"
+    assert screens[1]._cognitive_load_reduction_mode is True
+    assert screens[1]._theme_names == ["dark_dungeon", "space_explorer"]
+    assert screens[1]._current_theme == "space_explorer"
 
 
 class ModelDownloadHarness(App[None]):

@@ -22,6 +22,7 @@ class CYOAAppMixinContract(Protocol):
     dark: bool
     reduced_motion: bool
     screen_reader_mode: bool
+    cognitive_load_reduction_mode: bool
     compact_layout: bool
     typewriter_enabled: bool
     typewriter_speed: str

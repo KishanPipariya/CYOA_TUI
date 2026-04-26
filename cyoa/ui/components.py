@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any, cast
 
 from textual.app import ComposeResult
@@ -438,11 +439,13 @@ class HelpScreen(ModalScreen[None]):
         self,
         *,
         screen_reader_mode: bool = False,
+        cognitive_load_reduction_mode: bool = False,
         current_bindings: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._screen_reader_mode = screen_reader_mode
+        self._cognitive_load_reduction_mode = cognitive_load_reduction_mode
         self._current_bindings = current_bindings or {}
 
     def compose(self) -> ComposeResult:
@@ -453,6 +456,7 @@ class HelpScreen(ModalScreen[None]):
                 yield Markdown(
                     build_help_text(
                         screen_reader_mode=self._screen_reader_mode,
+                        cognitive_load_reduction_mode=self._cognitive_load_reduction_mode,
                         current_bindings=self._current_bindings,
                     ),
                     id="help-text",
@@ -934,6 +938,9 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
     .settings-validation-error {
         color: $error;
     }
+    .settings-validation-feedback {
+        margin-bottom: 1;
+    }
     #settings-model-path {
         margin: 1 0;
     }
@@ -957,6 +964,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         dark: bool,
         reduced_motion: bool,
         screen_reader_mode: bool,
+        cognitive_load_reduction_mode: bool,
         text_scale: str,
         line_width: str,
         line_spacing: str,
@@ -966,6 +974,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         diagnostics_enabled: bool,
         available_themes: list[str],
         high_contrast: bool = False,
+        initial_feedback: str = "",
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -977,6 +986,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         self._high_contrast = high_contrast
         self._reduced_motion = reduced_motion
         self._screen_reader_mode = screen_reader_mode
+        self._cognitive_load_reduction_mode = cognitive_load_reduction_mode
         self._text_scale = text_scale if text_scale in constants.TEXT_SCALE_OPTIONS else "standard"
         self._line_width = (
             line_width if line_width in constants.READING_WIDTH_OPTIONS else "standard"
@@ -990,6 +1000,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             typewriter_speed if typewriter_speed in constants.TYPEWRITER_SPEEDS else "normal"
         )
         self._diagnostics_enabled = diagnostics_enabled
+        self._initial_feedback = initial_feedback.strip()
 
     def _resolve_theme_index(self, theme: str) -> int:
         try:
@@ -1024,6 +1035,11 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 value=self._model_path,
                 placeholder="/path/to/model.gguf",
                 id="settings-model-path",
+            )
+            yield Label(
+                "",
+                id="settings-model-path-feedback",
+                classes="settings-value settings-validation-feedback",
             )
             yield Label(
                 "Used on next restart when Local Model is selected. Leave blank to keep demo mode safe.",
@@ -1065,6 +1081,15 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 yield Button("Screen Reader Friendly", id="btn-settings-screen-reader-on")
             yield Label(
                 "Screen Reader Friendly mode removes ASCII art, uses plain status labels, and keeps the latest status message visible.",
+                classes="settings-value",
+            )
+
+            yield Label("Cognitive Load", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Standard", id="btn-settings-cognitive-standard")
+                yield Button("Reduced", id="btn-settings-cognitive-reduced")
+            yield Label(
+                "Reduced mode simplifies wording and hides lower-priority status detail so the story stays central.",
                 classes="settings-value",
             )
 
@@ -1148,6 +1173,11 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 "Use these tools to verify your configured backend, open the save folder, or return to safe defaults.",
                 classes="settings-value",
             )
+            yield Label(
+                self._initial_feedback,
+                id="settings-feedback",
+                classes="settings-value settings-validation-feedback",
+            )
 
             with DialogActions(id="settings-actions", classes="dialog-actions"):
                 yield Button("Save", id="btn-settings-save", variant="primary")
@@ -1155,6 +1185,8 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
 
     def on_mount(self) -> None:
         self._refresh_state()
+        self._set_model_path_feedback("")
+        self._set_settings_feedback(self._initial_feedback)
         self.query_one("#settings-model-path", Input).focus()
 
     def _set_selected(self, button_id: str, selected: bool) -> None:
@@ -1178,6 +1210,14 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         self._set_selected("btn-settings-motion-reduced", self._reduced_motion)
         self._set_selected("btn-settings-screen-reader-on", self._screen_reader_mode)
         self._set_selected("btn-settings-screen-reader-off", not self._screen_reader_mode)
+        self._set_selected(
+            "btn-settings-cognitive-standard",
+            not self._cognitive_load_reduction_mode,
+        )
+        self._set_selected(
+            "btn-settings-cognitive-reduced",
+            self._cognitive_load_reduction_mode,
+        )
         for scale in constants.TEXT_SCALE_OPTIONS:
             self._set_selected(f"btn-settings-scale-{scale}", self._text_scale == scale)
         for width in constants.READING_WIDTH_OPTIONS:
@@ -1209,25 +1249,10 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             return
 
         self._set_keybinding_feedback("")
-        model_path = self.query_one("#settings-model-path", Input).value.strip() or None
-        self.dismiss(
-            {
-                "provider": self._provider,
-                "model_path": model_path,
-                "theme": self._current_theme,
-                "dark": self._dark,
-                "high_contrast": self._high_contrast,
-                "reduced_motion": self._reduced_motion,
-                "screen_reader_mode": self._screen_reader_mode,
-                "text_scale": self._text_scale,
-                "line_width": self._line_width,
-                "line_spacing": self._line_spacing,
-                "keybindings": validation.overrides,
-                "typewriter": self._typewriter,
-                "typewriter_speed": self._typewriter_speed,
-                "diagnostics_enabled": self._diagnostics_enabled,
-            }
-        )
+        payload = self._build_settings_payload(validation.overrides, require_model_path=True)
+        if payload is None:
+            return
+        self.dismiss(payload)
 
     def _collect_keybinding_values(self) -> dict[str, str]:
         collected: dict[str, str] = {}
@@ -1241,6 +1266,71 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         feedback.update(message)
         feedback.set_class(bool(message), "settings-validation-error")
 
+    def _set_model_path_feedback(self, message: str) -> None:
+        feedback = self.query_one("#settings-model-path-feedback", Label)
+        feedback.update(message)
+        feedback.set_class(bool(message), "settings-validation-error")
+
+    def _set_settings_feedback(self, message: str) -> None:
+        feedback = self.query_one("#settings-feedback", Label)
+        feedback.update(message)
+        feedback.set_class(bool(message), "settings-validation-error")
+
+    def _resolve_model_path(self, *, require_model_path: bool) -> str | None:
+        raw_value = self.query_one("#settings-model-path", Input).value.strip()
+        if self._provider != "llama_cpp":
+            self._set_model_path_feedback("")
+            return None
+        if not raw_value:
+            if require_model_path:
+                self._set_model_path_feedback(
+                    "Enter a GGUF file path or switch Runtime Provider to Quick Demo."
+                )
+            return None
+
+        candidate = Path(raw_value).expanduser()
+        if candidate.suffix.lower() != ".gguf":
+            self._set_model_path_feedback("Local Model requires a `.gguf` file.")
+            return None
+        if not candidate.exists():
+            self._set_model_path_feedback(f"Model path was not found: {candidate}")
+            return None
+        if not candidate.is_file():
+            self._set_model_path_feedback(f"Model path must point to a file: {candidate}")
+            return None
+
+        self._set_model_path_feedback("")
+        return str(candidate)
+
+    def _build_settings_payload(
+        self,
+        keybinding_overrides: dict[str, str],
+        *,
+        require_model_path: bool,
+    ) -> dict[str, Any] | None:
+        self._set_settings_feedback("")
+        model_path = self._resolve_model_path(require_model_path=require_model_path)
+        if self._provider == "llama_cpp" and require_model_path and model_path is None:
+            self.query_one("#settings-model-path", Input).focus()
+            return None
+        return {
+            "provider": self._provider,
+            "model_path": model_path,
+            "theme": self._current_theme,
+            "dark": self._dark,
+            "high_contrast": self._high_contrast,
+            "reduced_motion": self._reduced_motion,
+            "screen_reader_mode": self._screen_reader_mode,
+            "cognitive_load_reduction_mode": self._cognitive_load_reduction_mode,
+            "text_scale": self._text_scale,
+            "line_width": self._line_width,
+            "line_spacing": self._line_spacing,
+            "keybindings": keybinding_overrides,
+            "typewriter": self._typewriter,
+            "typewriter_speed": self._typewriter_speed,
+            "diagnostics_enabled": self._diagnostics_enabled,
+        }
+
     def on_button_pressed(self, event: Button.Pressed) -> None:  # noqa: C901
         button_id = event.button.id
         if button_id == "btn-settings-save":
@@ -1250,7 +1340,13 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             self.dismiss(None)
             return
         if button_id == "btn-settings-test-backend":
-            self.dismiss({"action": "test_backend"})
+            payload = self._build_settings_payload(
+                validate_keybindings(self._collect_keybinding_values()).overrides,
+                require_model_path=False,
+            )
+            if payload is None:
+                return
+            self.dismiss({"action": "test_backend", "draft_settings": payload})
             return
         if button_id == "btn-settings-reveal-saves":
             self.dismiss({"action": "reveal_saves"})
@@ -1258,6 +1354,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         if button_id == "btn-settings-reset":
             self.dismiss({"action": "reset_settings"})
             return
+        self._set_settings_feedback("")
         if button_id == "btn-settings-provider-mock":
             self._provider = "mock"
         elif button_id == "btn-settings-provider-llama":
@@ -1282,6 +1379,10 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             self._screen_reader_mode = True
         elif button_id == "btn-settings-screen-reader-off":
             self._screen_reader_mode = False
+        elif button_id == "btn-settings-cognitive-standard":
+            self._cognitive_load_reduction_mode = False
+        elif button_id == "btn-settings-cognitive-reduced":
+            self._cognitive_load_reduction_mode = True
         elif button_id and button_id.startswith("btn-settings-scale-"):
             self._text_scale = button_id.removeprefix("btn-settings-scale-")
         elif button_id and button_id.startswith("btn-settings-width-"):
@@ -1303,6 +1404,11 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id and event.input.id.startswith("settings-binding-"):
             self._set_keybinding_feedback("")
+            self._set_settings_feedback("")
+            return
+        if event.input.id == "settings-model-path":
+            self._set_model_path_feedback("")
+            self._set_settings_feedback("")
 
     def action_save(self) -> None:
         self._dismiss_with_value()
@@ -1429,6 +1535,7 @@ class StatusDisplay(Static):
     engine_phase = reactive("idle")
     latest_status = reactive("Status: Waiting for adventure updates.")
     screen_reader_mode = reactive(False)
+    cognitive_load_reduction_mode = reactive(False)
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="stats-row"):
@@ -1462,12 +1569,20 @@ class StatusDisplay(Static):
 
     def watch_inventory(self, inventory: list[str]) -> None:
         self.query_one("#inventory-label", Label).update(
-            format_inventory_label(inventory, screen_reader_mode=self.screen_reader_mode)
+            format_inventory_label(
+                inventory,
+                screen_reader_mode=self.screen_reader_mode,
+                simplified_mode=self.cognitive_load_reduction_mode,
+            )
         )
 
     def watch_objectives(self, objectives: list[str]) -> None:
         self.query_one("#objectives-label", Label).update(
-            format_objectives_label(objectives, screen_reader_mode=self.screen_reader_mode)
+            format_objectives_label(
+                objectives,
+                screen_reader_mode=self.screen_reader_mode,
+                simplified_mode=self.cognitive_load_reduction_mode,
+            )
         )
 
     def _update_stats_text(self) -> None:
@@ -1479,6 +1594,7 @@ class StatusDisplay(Static):
                 gold=self.gold,
                 reputation=self.reputation,
                 screen_reader_mode=self.screen_reader_mode,
+                simplified_mode=self.cognitive_load_reduction_mode,
             )
         )
         self.query_one(
@@ -1491,18 +1607,28 @@ class StatusDisplay(Static):
                 provider_label=self.provider_label,
                 runtime_profile=self.runtime_profile,
                 screen_reader_mode=self.screen_reader_mode,
+                simplified_mode=self.cognitive_load_reduction_mode,
             )
         )
 
     def watch_directives(self, directives: list[str]) -> None:
         self.query_one("#directives-label", Label).update(
-            format_directives_label(directives, screen_reader_mode=self.screen_reader_mode)
+            format_directives_label(
+                directives,
+                screen_reader_mode=self.screen_reader_mode,
+                simplified_mode=self.cognitive_load_reduction_mode,
+            )
         )
 
     def watch_latest_status(self, latest_status: str) -> None:
         self.query_one("#latest-status-label", Label).update(latest_status)
 
     def watch_screen_reader_mode(self, _enabled: bool) -> None:
+        self._refresh_accessibility_labels()
+
+    def watch_cognitive_load_reduction_mode(self, enabled: bool) -> None:
+        self.query_one("#runtime-text", Label).set_class(enabled, "hidden")
+        self.query_one("#directives-label", Label).set_class(enabled, "hidden")
         self._refresh_accessibility_labels()
 
     def watch_generation_preset(self, _preset: str) -> None:

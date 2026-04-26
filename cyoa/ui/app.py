@@ -47,6 +47,7 @@ from cyoa.core.support import reveal_in_file_manager, support_paths
 from cyoa.core.theme_loader import list_themes
 from cyoa.core.user_config import (
     UserConfig,
+    UserConfigSaveError,
     load_user_config,
     reset_user_config,
     update_user_config,
@@ -124,6 +125,7 @@ class CYOAApp(
     reduced_motion: reactive[bool] = reactive(False)
     high_contrast_mode: reactive[bool] = reactive(False)
     screen_reader_mode: reactive[bool] = reactive(False)
+    cognitive_load_reduction_mode: reactive[bool] = reactive(False)
     text_scale: reactive[str] = reactive("standard")
     line_width: reactive[str] = reactive("standard")
     line_spacing: reactive[str] = reactive("standard")
@@ -203,6 +205,7 @@ class CYOAApp(
         self.high_contrast_mode = config.get("high_contrast", False)
         self.reduced_motion = config.get("reduced_motion", False)
         self.screen_reader_mode = config.get("screen_reader_mode", False)
+        self.cognitive_load_reduction_mode = config.get("cognitive_load_reduction_mode", False)
         self.text_scale = str(config.get("text_scale", "standard"))
         self.line_width = str(config.get("line_width", "standard"))
         self.line_spacing = str(config.get("line_spacing", "standard"))
@@ -238,11 +241,13 @@ class CYOAApp(
         status_display = self.query_one(StatusDisplay)
         status_display.generation_preset = "balanced"
         status_display.screen_reader_mode = self.screen_reader_mode
+        status_display.cognitive_load_reduction_mode = self.cognitive_load_reduction_mode
         status_display.latest_status = self._latest_status_message
         self._sync_runtime_status()
         self.apply_ui_theme()
         self.set_class(self.reduced_motion, "reduced-motion")
         self.set_class(self.screen_reader_mode, "screen-reader-mode")
+        self.set_class(self.cognitive_load_reduction_mode, "cognitive-load-mode")
         self._apply_reading_preference_classes()
 
         self._subscribe_engine_events()
@@ -325,6 +330,14 @@ class CYOAApp(
                 ),
             )
 
+    def watch_cognitive_load_reduction_mode(self, enabled: bool) -> None:
+        self.set_class(enabled, "cognitive-load-mode")
+        try:
+            status_display = self.query_one(StatusDisplay)
+        except Exception:
+            return
+        status_display.cognitive_load_reduction_mode = enabled
+
     def _set_variant_class(
         self, prefix: str, value: str, allowed: tuple[str, ...], default: str
     ) -> None:
@@ -373,7 +386,17 @@ class CYOAApp(
 
     def _prepare_status_message(self, message: str, severity: SeverityLevel) -> str:
         prefix = self._notification_title(severity)
-        cleaned = format_status_message(message, screen_reader_mode=self.screen_reader_mode).strip()
+        if self.cognitive_load_reduction_mode:
+            prefix = {
+                "information": "Update",
+                "warning": "Attention",
+                "error": "Problem",
+            }.get(severity, "Update")
+        cleaned = format_status_message(
+            message,
+            screen_reader_mode=self.screen_reader_mode,
+            simplified_mode=self.cognitive_load_reduction_mode,
+        ).strip()
         if cleaned and not cleaned.lower().startswith(f"{prefix.lower()}:"):
             cleaned = f"{prefix}: {cleaned}"
         return cleaned
@@ -1096,40 +1119,77 @@ class CYOAApp(
 
     def action_show_settings(self) -> None:
         """Open the persisted settings modal."""
+        self._show_settings_screen()
+
+    def _show_settings_screen(
+        self,
+        draft_settings: dict[str, Any] | None = None,
+        *,
+        feedback_message: str = "",
+    ) -> None:
         config = self._user_config
+        draft = draft_settings or {}
+
+        def pick(key: str, fallback: Any) -> Any:
+            return draft.get(key, fallback)
 
         def on_saved(payload: dict[str, Any] | None) -> None:
             if not payload:
                 return
             if "action" in payload:
-                self._handle_settings_action(str(payload["action"]))
+                self._handle_settings_action(str(payload["action"]), payload)
                 return
-            self._apply_settings(payload)
+            try:
+                self._apply_settings(payload)
+            except UserConfigSaveError as exc:
+                self._show_settings_screen(payload, feedback_message=str(exc))
 
         self.push_screen(
             SettingsScreen(
-                provider=config.provider,
-                model_path=config.model_path,
-                theme=config.theme,
-                dark=config.dark,
-                high_contrast=getattr(config, "high_contrast", False),
-                reduced_motion=getattr(config, "reduced_motion", False),
-                screen_reader_mode=getattr(config, "screen_reader_mode", False),
-                text_scale=getattr(config, "text_scale", "standard"),
-                line_width=getattr(config, "line_width", "standard"),
-                line_spacing=getattr(config, "line_spacing", "standard"),
-                keybindings=getattr(config, "keybindings", {}),
-                typewriter=config.typewriter,
-                typewriter_speed=config.typewriter_speed,
-                diagnostics_enabled=config.diagnostics_enabled,
+                provider=pick("provider", config.provider),
+                model_path=pick("model_path", config.model_path),
+                theme=pick("theme", config.theme),
+                dark=bool(pick("dark", config.dark)),
+                high_contrast=bool(pick("high_contrast", getattr(config, "high_contrast", False))),
+                reduced_motion=bool(
+                    pick("reduced_motion", getattr(config, "reduced_motion", False))
+                ),
+                screen_reader_mode=bool(
+                    pick("screen_reader_mode", getattr(config, "screen_reader_mode", False))
+                ),
+                cognitive_load_reduction_mode=bool(
+                    pick(
+                        "cognitive_load_reduction_mode",
+                        getattr(config, "cognitive_load_reduction_mode", False),
+                    )
+                ),
+                text_scale=str(pick("text_scale", getattr(config, "text_scale", "standard"))),
+                line_width=str(pick("line_width", getattr(config, "line_width", "standard"))),
+                line_spacing=str(pick("line_spacing", getattr(config, "line_spacing", "standard"))),
+                keybindings=cast(
+                    dict[str, str], pick("keybindings", getattr(config, "keybindings", {}))
+                ),
+                typewriter=bool(pick("typewriter", config.typewriter)),
+                typewriter_speed=str(pick("typewriter_speed", config.typewriter_speed)),
+                diagnostics_enabled=bool(pick("diagnostics_enabled", config.diagnostics_enabled)),
                 available_themes=list_themes(),
+                initial_feedback=feedback_message,
             ),
             on_saved,
         )
 
-    def _handle_settings_action(self, action: str) -> None:
+    def _handle_settings_action(
+        self,
+        action: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
         if action == "test_backend":
-            self.run_worker(self._run_backend_connection_test(), exclusive=False, group="settings")
+            draft_settings = payload.get("draft_settings") if payload else None
+            self.run_worker(
+                self._run_backend_connection_test(cast(dict[str, Any] | None, draft_settings)),
+                exclusive=False,
+                group="settings",
+            )
             return
         if action == "reveal_saves":
             self._reveal_save_folder()
@@ -1195,6 +1255,12 @@ class CYOAApp(
                 "screen_reader_mode", getattr(self._user_config, "screen_reader_mode", False)
             )
         )
+        cognitive_load_reduction_mode = bool(
+            payload.get(
+                "cognitive_load_reduction_mode",
+                getattr(self._user_config, "cognitive_load_reduction_mode", False),
+            )
+        )
         text_scale = self._resolve_option_setting(
             payload,
             "text_scale",
@@ -1224,12 +1290,32 @@ class CYOAApp(
             payload.get("diagnostics_enabled", self._user_config.diagnostics_enabled)
         )
 
+        self._user_config = update_user_config(
+            raise_on_error=True,
+            provider=provider,
+            model_path=model_path,
+            theme=theme_name,
+            dark=dark,
+            high_contrast=high_contrast,
+            reduced_motion=reduced_motion,
+            screen_reader_mode=screen_reader_mode,
+            cognitive_load_reduction_mode=cognitive_load_reduction_mode,
+            text_scale=text_scale,
+            line_width=line_width,
+            line_spacing=line_spacing,
+            keybindings=keybinding_overrides,
+            typewriter=typewriter,
+            typewriter_speed=typewriter_speed,
+            diagnostics_enabled=diagnostics_enabled,
+        )
+
         self._set_diagnostics_env(diagnostics_enabled)
 
         self.dark = dark
         self.high_contrast_mode = high_contrast
         self.reduced_motion = reduced_motion
         self.screen_reader_mode = screen_reader_mode
+        self.cognitive_load_reduction_mode = cognitive_load_reduction_mode
         self.text_scale = text_scale
         self.line_width = line_width
         self.line_spacing = line_spacing
@@ -1239,23 +1325,6 @@ class CYOAApp(
         self.set_keymap(self._keybinding_overrides)
         if self.reduced_motion or self.screen_reader_mode or not self.typewriter_enabled:
             self.action_skip_typewriter()
-
-        self._user_config = update_user_config(
-            provider=provider,
-            model_path=model_path,
-            theme=theme_name,
-            dark=dark,
-            high_contrast=high_contrast,
-            reduced_motion=reduced_motion,
-            screen_reader_mode=screen_reader_mode,
-            text_scale=text_scale,
-            line_width=line_width,
-            line_spacing=line_spacing,
-            keybindings=keybinding_overrides,
-            typewriter=typewriter,
-            typewriter_speed=typewriter_speed,
-            diagnostics_enabled=diagnostics_enabled,
-        )
 
         pending_changes: list[str] = []
         if theme_name != previous_config.theme:
@@ -1283,6 +1352,9 @@ class CYOAApp(
         self.high_contrast_mode = getattr(self._user_config, "high_contrast", False)
         self.reduced_motion = getattr(self._user_config, "reduced_motion", False)
         self.screen_reader_mode = getattr(self._user_config, "screen_reader_mode", False)
+        self.cognitive_load_reduction_mode = getattr(
+            self._user_config, "cognitive_load_reduction_mode", False
+        )
         self.text_scale = getattr(self._user_config, "text_scale", "standard")
         self.line_width = getattr(self._user_config, "line_width", "standard")
         self.line_spacing = getattr(self._user_config, "line_spacing", "standard")
@@ -1305,9 +1377,17 @@ class CYOAApp(
             timeout=5,
         )
 
-    async def _run_backend_connection_test(self) -> None:
+    async def _run_backend_connection_test(
+        self,
+        draft_settings: dict[str, Any] | None = None,
+    ) -> None:
         config = self._user_config
-        provider = (config.provider or "mock").strip().lower()
+        draft = draft_settings or {}
+        provider = (
+            self._resolve_provider_setting(draft_settings)
+            if draft_settings is not None
+            else (config.provider or "mock").strip().lower()
+        )
 
         if provider == "mock":
             self.notify("Quick Demo backend is ready.", severity="information", timeout=4)
@@ -1321,7 +1401,12 @@ class CYOAApp(
             )
             return
 
-        model_path = config.model_path
+        raw_model_path = draft.get("model_path", config.model_path)
+        model_path = (
+            raw_model_path.strip()
+            if isinstance(raw_model_path, str) and raw_model_path.strip()
+            else None
+        )
         if not model_path:
             self.notify(
                 "Local Model is selected, but no GGUF path is saved.",

@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 USER_CONFIG_VERSION = 1
 
 
+class UserConfigSaveError(RuntimeError):
+    """Raised when the durable user config cannot be persisted."""
+
+
 def _coerce_option(value: object, allowed: tuple[str, ...], default: str) -> str:
     if isinstance(value, str):
         cleaned = value.strip().lower()
@@ -35,6 +39,7 @@ class UserConfig:
     high_contrast: bool = False
     reduced_motion: bool = False
     screen_reader_mode: bool = False
+    cognitive_load_reduction_mode: bool = False
     text_scale: str = "standard"
     line_width: str = "standard"
     line_spacing: str = "standard"
@@ -61,6 +66,7 @@ class UserConfig:
             "high_contrast",
             "reduced_motion",
             "screen_reader_mode",
+            "cognitive_load_reduction_mode",
             "text_scale",
             "line_width",
             "line_spacing",
@@ -87,6 +93,7 @@ class UserConfig:
         high_contrast = payload.get("high_contrast")
         reduced_motion = payload.get("reduced_motion")
         screen_reader_mode = payload.get("screen_reader_mode")
+        cognitive_load_reduction_mode = payload.get("cognitive_load_reduction_mode")
         text_scale = payload.get("text_scale")
         line_width = payload.get("line_width")
         line_spacing = payload.get("line_spacing")
@@ -121,6 +128,11 @@ class UserConfig:
             screen_reader_mode=screen_reader_mode
             if isinstance(screen_reader_mode, bool)
             else False,
+            cognitive_load_reduction_mode=(
+                cognitive_load_reduction_mode
+                if isinstance(cognitive_load_reduction_mode, bool)
+                else False
+            ),
             text_scale=_coerce_option(text_scale, TEXT_SCALE_OPTIONS, "standard"),
             line_width=_coerce_option(line_width, READING_WIDTH_OPTIONS, "standard"),
             line_spacing=_coerce_option(line_spacing, LINE_SPACING_OPTIONS, "standard"),
@@ -161,6 +173,7 @@ class UserConfig:
                 "high_contrast": self.high_contrast,
                 "reduced_motion": self.reduced_motion,
                 "screen_reader_mode": self.screen_reader_mode,
+                "cognitive_load_reduction_mode": self.cognitive_load_reduction_mode,
                 "text_scale": self.text_scale,
                 "line_width": self.line_width,
                 "line_spacing": self.line_spacing,
@@ -182,6 +195,7 @@ class UserConfig:
             "high_contrast": self.high_contrast,
             "reduced_motion": self.reduced_motion,
             "screen_reader_mode": self.screen_reader_mode,
+            "cognitive_load_reduction_mode": self.cognitive_load_reduction_mode,
             "text_scale": self.text_scale,
             "line_width": self.line_width,
             "line_spacing": self.line_spacing,
@@ -199,23 +213,25 @@ def load_user_config() -> UserConfig:
         return UserConfig()
 
 
-def save_user_config(config: UserConfig) -> None:
+def save_user_config(config: UserConfig, *, raise_on_error: bool = False) -> None:
     try:
         Path(CONFIG_FILE).parent.mkdir(parents=True, exist_ok=True)
         with open_private_text_file(CONFIG_FILE, "w") as f:
             json.dump(config.to_dict(), f, indent=2, ensure_ascii=False)
     except OSError as exc:
         logger.warning("Unable to persist user config to %s: %s", CONFIG_FILE, exc)
+        if raise_on_error:
+            raise UserConfigSaveError(f"Unable to save settings to {CONFIG_FILE}: {exc}") from exc
 
 
-def update_user_config(**changes: Any) -> UserConfig:
+def update_user_config(*, raise_on_error: bool = False, **changes: Any) -> UserConfig:
     config = load_user_config()
     for key, value in changes.items():
         if hasattr(config, key):
             setattr(config, key, value)
         else:
             config.extras[key] = value
-    save_user_config(config)
+    save_user_config(config, raise_on_error=raise_on_error)
     return config
 
 
