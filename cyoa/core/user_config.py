@@ -38,6 +38,7 @@ class UserConfig:
     text_scale: str = "standard"
     line_width: str = "standard"
     line_spacing: str = "standard"
+    keybindings: dict[str, str] = field(default_factory=dict)
     typewriter: bool = True
     typewriter_speed: str = "normal"
     diagnostics_enabled: bool = False
@@ -63,6 +64,7 @@ class UserConfig:
             "text_scale",
             "line_width",
             "line_spacing",
+            "keybindings",
             "typewriter",
             "typewriter_speed",
             "diagnostics_enabled",
@@ -73,7 +75,9 @@ class UserConfig:
             "version",
         }
         extras = {
-            key: value for key, value in payload.items() if isinstance(key, str) and key not in known_keys
+            key: value
+            for key, value in payload.items()
+            if isinstance(key, str) and key not in known_keys
         }
 
         provider = payload.get("provider")
@@ -86,6 +90,7 @@ class UserConfig:
         text_scale = payload.get("text_scale")
         line_width = payload.get("line_width")
         line_spacing = payload.get("line_spacing")
+        keybindings = payload.get("keybindings")
         typewriter = payload.get("typewriter")
         typewriter_speed = payload.get("typewriter_speed")
         diagnostics_enabled = payload.get("diagnostics_enabled")
@@ -94,17 +99,32 @@ class UserConfig:
         setup_completed = payload.get("setup_completed")
         setup_choice = payload.get("setup_choice")
 
+        parsed_keybindings = (
+            {
+                key.strip(): value.strip()
+                for key, value in keybindings.items()
+                if isinstance(key, str) and key.strip() and isinstance(value, str) and value.strip()
+            }
+            if isinstance(keybindings, dict)
+            else {}
+        )
+
         return cls(
             provider=provider.strip() if isinstance(provider, str) and provider.strip() else None,
-            model_path=model_path.strip() if isinstance(model_path, str) and model_path.strip() else None,
+            model_path=model_path.strip()
+            if isinstance(model_path, str) and model_path.strip()
+            else None,
             theme=theme.strip() if isinstance(theme, str) and theme.strip() else "dark_dungeon",
             dark=dark if isinstance(dark, bool) else True,
             high_contrast=high_contrast if isinstance(high_contrast, bool) else False,
             reduced_motion=reduced_motion if isinstance(reduced_motion, bool) else False,
-            screen_reader_mode=screen_reader_mode if isinstance(screen_reader_mode, bool) else False,
+            screen_reader_mode=screen_reader_mode
+            if isinstance(screen_reader_mode, bool)
+            else False,
             text_scale=_coerce_option(text_scale, TEXT_SCALE_OPTIONS, "standard"),
             line_width=_coerce_option(line_width, READING_WIDTH_OPTIONS, "standard"),
             line_spacing=_coerce_option(line_spacing, LINE_SPACING_OPTIONS, "standard"),
+            keybindings=parsed_keybindings,
             typewriter=typewriter if isinstance(typewriter, bool) else True,
             typewriter_speed=(
                 typewriter_speed.strip()
@@ -144,6 +164,7 @@ class UserConfig:
                 "text_scale": self.text_scale,
                 "line_width": self.line_width,
                 "line_spacing": self.line_spacing,
+                "keybindings": self.keybindings,
                 "typewriter": self.typewriter,
                 "typewriter_speed": self.typewriter_speed,
                 "diagnostics_enabled": self.diagnostics_enabled,

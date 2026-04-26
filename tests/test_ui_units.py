@@ -25,6 +25,7 @@ from cyoa.ui.components import (
     StatusDisplay,
     ThemeSpinner,
 )
+from cyoa.ui.keybindings import effective_keybindings
 from cyoa.ui.mixins.events import EventsMixin
 from cyoa.ui.mixins.navigation import NavigationMixin
 from cyoa.ui.mixins.persistence import PersistenceMixin
@@ -300,7 +301,13 @@ class BranchScreenHarness(App[None]):
     def __init__(self) -> None:
         super().__init__()
         self.screen_ref = BranchScreen(
-            scenes=[{"narrative": "A very long scene " * 20, "available_choices": ["A"], "inventory": ["Torch"]}],
+            scenes=[
+                {
+                    "narrative": "A very long scene " * 20,
+                    "available_choices": ["A"],
+                    "inventory": ["Torch"],
+                }
+            ],
             choices=["Take torch"],
         )
 
@@ -354,6 +361,7 @@ class SettingsScreenHarness(App[None]):
             text_scale="standard",
             line_width="standard",
             line_spacing="standard",
+            keybindings={"show_settings": "f2"},
             typewriter=True,
             typewriter_speed="normal",
             diagnostics_enabled=False,
@@ -415,7 +423,9 @@ def test_theme_toggle_dark_and_apply_custom_accent(monkeypatch: pytest.MonkeyPat
     config: dict[str, object] = {}
 
     monkeypatch.setattr("cyoa.ui.mixins.theme.utils.load_config", lambda: config)
-    monkeypatch.setattr("cyoa.ui.mixins.theme.utils.save_config", lambda payload: config.update(payload))
+    monkeypatch.setattr(
+        "cyoa.ui.mixins.theme.utils.save_config", lambda payload: config.update(payload)
+    )
 
     host.action_toggle_dark()
     host._apply_custom_accent("#123456")
@@ -453,13 +463,24 @@ def test_stream_narrative_honors_reduced_motion_even_when_typewriter_is_enabled(
 
 def test_presenters_return_plain_text_variants_for_screen_reader_mode():
     assert loading_story_text(screen_reader_mode=True) == "Loading story..."
-    assert format_status_message("⚡ Weaving possible futures...", screen_reader_mode=True) == "Weaving possible futures..."
+    assert (
+        format_status_message("⚡ Weaving possible futures...", screen_reader_mode=True)
+        == "Weaving possible futures..."
+    )
     assert build_choice_label(
         0,
         "Open the gate",
-        "🔒 Missing key",
+        "🔒 Missing item: key | Need reputation 3+ (current: 1)",
         screen_reader_mode=True,
-    ) == "1. Open the gate\nUnavailable: Missing key"
+    ) == ("1. Open the gate\nUnavailable:\n- Missing item: key\n- Need reputation 3+ (current: 1)")
+
+
+def test_app_effective_keybindings_merge_defaults_and_overrides() -> None:
+    merged = effective_keybindings({"show_settings": "f2", "repeat_latest_status": "f3"})
+
+    assert merged["show_settings"] == "f2"
+    assert merged["repeat_latest_status"] == "f3"
+    assert merged["toggle_journal"] == "j"
 
 
 def test_sync_narrative_replaces_finalized_streamed_turn():
@@ -663,11 +684,15 @@ async def test_status_display_watchers_and_spinner_tick() -> None:
             display.query_one("#runtime-text", Label)
         )
         assert "Inventory: Torch, Key" in _render_text(display.query_one("#inventory-label", Label))
-        assert "Objectives: Escape | Survive" in _render_text(display.query_one("#objectives-label", Label))
+        assert "Objectives: Escape | Survive" in _render_text(
+            display.query_one("#objectives-label", Label)
+        )
         assert "Directives: No combat | Stay hidden" in _render_text(
             display.query_one("#directives-label", Label)
         )
-        assert "Information: Quiet winds." in _render_text(display.query_one("#latest-status-label", Label))
+        assert "Information: Quiet winds." in _render_text(
+            display.query_one("#latest-status-label", Label)
+        )
         assert display.has_class("health-low")
 
     spinner_app = SpinnerHarness()
@@ -696,9 +721,7 @@ def test_branch_and_load_screens_handle_selection_events():
 
     from cyoa.ui.components import SaveListItem, SceneListItem
 
-    branch.on_list_view_selected(
-        SimpleNamespace(item=SceneListItem(Label("x"), scene_index=2))
-    )
+    branch.on_list_view_selected(SimpleNamespace(item=SceneListItem(Label("x"), scene_index=2)))
     branch.dismiss.assert_called_once_with(2)
 
     load = LoadGameScreen(["save_one.json"])
@@ -765,7 +788,9 @@ def test_first_run_setup_screen_dismisses_expected_values():
     first_run = FirstRunSetupScreen()
     first_run.dismiss = MagicMock()
     first_run.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-first-run-mock")))
-    first_run.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-first-run-download")))
+    first_run.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-first-run-download"))
+    )
     first_run.action_quick_demo()
     first_run.action_download_model()
 
@@ -789,6 +814,7 @@ def test_settings_screen_dismisses_saved_payload():
         text_scale="standard",
         line_width="standard",
         line_spacing="standard",
+        keybindings={},
         typewriter=True,
         typewriter_speed="normal",
         diagnostics_enabled=False,
@@ -796,19 +822,47 @@ def test_settings_screen_dismisses_saved_payload():
     )
     settings.dismiss = MagicMock()
     settings._refresh_state = MagicMock()
-    settings.query_one = lambda selector, *_args: SimpleNamespace(value="/tmp/demo.gguf") if selector == "#settings-model-path" else None
+    settings._set_keybinding_feedback = MagicMock()
+    settings._collect_keybinding_values = MagicMock(
+        return_value={"show_settings": "f2", "toggle_journal": "f3"}
+    )
+    settings.query_one = lambda selector, *_args: (
+        SimpleNamespace(value="/tmp/demo.gguf") if selector == "#settings-model-path" else None
+    )
 
-    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-provider-llama")))
-    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-theme-next")))
-    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-contrast-high")))
-    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-motion-reduced")))
-    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-screen-reader-on")))
-    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-scale-xlarge")))
-    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-width-focused")))
-    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-spacing-relaxed")))
-    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-typewriter-off")))
-    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-speed-fast")))
-    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-diagnostics-on")))
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-provider-llama"))
+    )
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-theme-next"))
+    )
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-contrast-high"))
+    )
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-motion-reduced"))
+    )
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-screen-reader-on"))
+    )
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-scale-xlarge"))
+    )
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-width-focused"))
+    )
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-spacing-relaxed"))
+    )
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-typewriter-off"))
+    )
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-speed-fast"))
+    )
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-diagnostics-on"))
+    )
     settings.action_save()
 
     saved_payload = settings.dismiss.call_args_list[-1].args[0]
@@ -823,6 +877,7 @@ def test_settings_screen_dismisses_saved_payload():
         "text_scale": "xlarge",
         "line_width": "focused",
         "line_spacing": "relaxed",
+        "keybindings": {"show_settings": "f2", "toggle_journal": "f3"},
         "typewriter": False,
         "typewriter_speed": "fast",
         "diagnostics_enabled": True,
@@ -841,6 +896,7 @@ def test_settings_screen_support_actions_dismiss_expected_payloads():
         text_scale="standard",
         line_width="standard",
         line_spacing="standard",
+        keybindings={},
         typewriter=True,
         typewriter_speed="normal",
         diagnostics_enabled=False,
@@ -848,8 +904,12 @@ def test_settings_screen_support_actions_dismiss_expected_payloads():
     )
     settings.dismiss = MagicMock()
 
-    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-test-backend")))
-    settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-reveal-saves")))
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-test-backend"))
+    )
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-reveal-saves"))
+    )
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-reset")))
 
     assert settings.dismiss.call_args_list == [
@@ -857,6 +917,45 @@ def test_settings_screen_support_actions_dismiss_expected_payloads():
         call({"action": "reveal_saves"}),
         call({"action": "reset_settings"}),
     ]
+
+
+def test_settings_screen_blocks_save_when_keybindings_conflict() -> None:
+    settings = SettingsScreen(
+        provider="mock",
+        model_path="",
+        theme="dark_dungeon",
+        dark=True,
+        high_contrast=False,
+        reduced_motion=False,
+        screen_reader_mode=False,
+        text_scale="standard",
+        line_width="standard",
+        line_spacing="standard",
+        keybindings={},
+        typewriter=True,
+        typewriter_speed="normal",
+        diagnostics_enabled=False,
+        available_themes=["dark_dungeon"],
+    )
+    feedback = MagicMock()
+    feedback.set_class = MagicMock()
+    settings.dismiss = MagicMock()
+    settings.query_one = lambda selector, *_args: (
+        SimpleNamespace(value="")
+        if selector == "#settings-model-path"
+        else feedback
+        if selector == "#settings-keybindings-feedback"
+        else None
+    )
+    settings._collect_keybinding_values = MagicMock(
+        return_value={"show_settings": "f2", "repeat_latest_status": "f2"}
+    )
+
+    settings.action_save()
+
+    settings.dismiss.assert_not_called()
+    feedback.update.assert_called_once()
+    assert "F2 is assigned to" in feedback.update.call_args.args[0]
 
 
 def test_cyoa_app_first_run_selection_updates_runtime_and_config(monkeypatch: pytest.MonkeyPatch):
@@ -939,6 +1038,7 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         text_scale="standard",
         line_width="standard",
         line_spacing="standard",
+        keybindings={},
         typewriter=True,
         typewriter_speed="normal",
         diagnostics_enabled=False,
@@ -946,6 +1046,7 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
     app._runtime_diagnostics["provider"] = "mock"
     app.notify = MagicMock()
     app.action_skip_typewriter = MagicMock()
+    app.set_keymap = MagicMock()
     saved: dict[str, object] = {}
     previous_env = os.environ.get("CYOA_ENABLE_RAG")
     monkeypatch.setattr(
@@ -965,6 +1066,7 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
                 "text_scale": "xlarge",
                 "line_width": "focused",
                 "line_spacing": "relaxed",
+                "keybindings": {"show_settings": "f2", "toggle_journal": "f3"},
                 "typewriter": False,
                 "typewriter_speed": "fast",
                 "diagnostics_enabled": True,
@@ -988,7 +1090,9 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         assert saved["text_scale"] == "xlarge"
         assert saved["line_width"] == "focused"
         assert saved["line_spacing"] == "relaxed"
+        assert saved["keybindings"] == {"show_settings": "f2", "toggle_journal": "f3"}
         assert saved["diagnostics_enabled"] is True
+        app.set_keymap.assert_called_once_with({"show_settings": "f2", "toggle_journal": "f3"})
         app.action_skip_typewriter.assert_called_once_with()
         app.notify.assert_called_once()
         assert "Restart to apply: theme, provider, model path." in app.notify.call_args.args[0]
@@ -1024,9 +1128,11 @@ def test_cyoa_app_reset_settings_restores_safe_defaults(monkeypatch: pytest.Monk
         text_scale="xlarge",
         line_width="focused",
         line_spacing="relaxed",
+        keybindings={"show_help": "f1"},
         typewriter=False,
         typewriter_speed="fast",
     )
+    app.set_keymap = MagicMock()
     monkeypatch.setenv("CYOA_ENABLE_RAG", "1")
     monkeypatch.setenv("LLM_MODEL_PATH", "/tmp/current.gguf")
     monkeypatch.setattr(
@@ -1038,6 +1144,7 @@ def test_cyoa_app_reset_settings_restores_safe_defaults(monkeypatch: pytest.Monk
             text_scale="standard",
             line_width="standard",
             line_spacing="standard",
+            keybindings={},
             typewriter=True,
             typewriter_speed="normal",
         ),
@@ -1052,6 +1159,7 @@ def test_cyoa_app_reset_settings_restores_safe_defaults(monkeypatch: pytest.Monk
     assert app.line_spacing == "standard"
     assert app.typewriter_enabled is True
     assert app.typewriter_speed == "normal"
+    app.set_keymap.assert_called_once_with({})
     assert "CYOA_ENABLE_RAG" not in os.environ
     assert "LLM_MODEL_PATH" not in os.environ
     app.notify.assert_called_once()
@@ -1147,12 +1255,24 @@ async def test_settings_screen_cycles_and_saves_choices() -> None:
 
     async with app.run_test() as pilot:
         await pilot.pause(0.1)
-        app.screen_ref.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-provider-llama")))
-        app.screen_ref.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-theme-next")))
-        app.screen_ref.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-dark-off")))
-        app.screen_ref.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-typewriter-off")))
-        app.screen_ref.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-speed-instant")))
-        app.screen_ref.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-diagnostics-on")))
+        app.screen_ref.on_button_pressed(
+            SimpleNamespace(button=SimpleNamespace(id="btn-settings-provider-llama"))
+        )
+        app.screen_ref.on_button_pressed(
+            SimpleNamespace(button=SimpleNamespace(id="btn-settings-theme-next"))
+        )
+        app.screen_ref.on_button_pressed(
+            SimpleNamespace(button=SimpleNamespace(id="btn-settings-dark-off"))
+        )
+        app.screen_ref.on_button_pressed(
+            SimpleNamespace(button=SimpleNamespace(id="btn-settings-typewriter-off"))
+        )
+        app.screen_ref.on_button_pressed(
+            SimpleNamespace(button=SimpleNamespace(id="btn-settings-speed-instant"))
+        )
+        app.screen_ref.on_button_pressed(
+            SimpleNamespace(button=SimpleNamespace(id="btn-settings-diagnostics-on"))
+        )
         await pilot.pause(0.1)
 
         provider_label = app.screen.query_one("#settings-provider-value", Label)
@@ -1170,7 +1290,9 @@ def test_theme_watch_mood_updates_container_spinner_and_theme(monkeypatch: pytes
     host = DummyThemeHost()
     monkeypatch.setattr(
         "cyoa.ui.mixins.theme.theme_loader.get_config_for_mood",
-        lambda mood: {"spinner_frames": ["{", "}"], "accent_color": "#abcdef"} if mood == "heroic" else None,
+        lambda mood: (
+            {"spinner_frames": ["{", "}"], "accent_color": "#abcdef"} if mood == "heroic" else None
+        ),
     )
 
     host.watch_mood("default", "heroic")
@@ -1190,7 +1312,9 @@ def test_theme_watch_mood_preserves_high_contrast_preset(monkeypatch: pytest.Mon
     host._apply_ui_theme_to_dynamic_content = MagicMock()
     monkeypatch.setattr(
         "cyoa.ui.mixins.theme.theme_loader.get_config_for_mood",
-        lambda mood: {"spinner_frames": ["{", "}"], "accent_color": "#abcdef"} if mood == "heroic" else None,
+        lambda mood: (
+            {"spinner_frames": ["{", "}"], "accent_color": "#abcdef"} if mood == "heroic" else None
+        ),
     )
 
     host.watch_mood("default", "heroic")
@@ -1266,14 +1390,12 @@ def test_rendering_show_loading_and_mount_choice_buttons_cover_states():
     keep = DummyChoiceButton("choice-keep")
     drop = DummyChoiceButton("choice-drop")
     loading_widget = MagicMock()
-    host.query_one = (
-        lambda selector, *_args: (
-            choices_container
-            if selector == "#choices-container"
-            else story_container
-            if selector == "#story-container"
-            else loading_widget
-        )
+    host.query_one = lambda selector, *_args: (
+        choices_container
+        if selector == "#choices-container"
+        else story_container
+        if selector == "#story-container"
+        else loading_widget
     )
     host.is_runtime_active = lambda: True
 
@@ -1302,7 +1424,9 @@ def test_rendering_show_loading_and_mount_choice_buttons_cover_states():
         ending_container,
         is_error=False,
     )
-    assert [getattr(widget, "id", None) for widget in ending_container.mounted] == ["btn-new-adventure"]
+    assert [getattr(widget, "id", None) for widget in ending_container.mounted] == [
+        "btn-new-adventure"
+    ]
 
     locked_container = DummyChoiceContainer()
     locked_choice = Choice(
@@ -1321,13 +1445,16 @@ def test_rendering_show_loading_and_mount_choice_buttons_cover_states():
     mounted_button = locked_container.mounted[0]
     assert mounted_button.disabled is True
     assert "Unavailable:" in str(mounted_button.label)
+    assert "Missing item: key" in str(mounted_button.label)
 
 
 def test_typewriter_settings_actions_persist_preferences(monkeypatch: pytest.MonkeyPatch):
     host = DummyTypewriterSettingsHost()
     config: dict[str, object] = {}
     monkeypatch.setattr("cyoa.ui.mixins.typewriter.utils.load_config", lambda: config)
-    monkeypatch.setattr("cyoa.ui.mixins.typewriter.utils.save_config", lambda payload: config.update(payload))
+    monkeypatch.setattr(
+        "cyoa.ui.mixins.typewriter.utils.save_config", lambda payload: config.update(payload)
+    )
 
     host._typewriter_active_chunk = list("Hi")
     host.action_toggle_typewriter()
@@ -1419,8 +1546,18 @@ def test_app_notify_tracks_latest_status_and_repeat_action(monkeypatch: pytest.M
 
     assert app._latest_status_message == "Information: Weaving possible futures..."
     assert app.get_notification_history_lines() == ["Information: Weaving possible futures..."]
-    assert repeated[0] == ("Information: Weaving possible futures...", "Information", "information", False)
-    assert repeated[1] == ("Information: Weaving possible futures...", "Latest Status", "information", False)
+    assert repeated[0] == (
+        "Information: Weaving possible futures...",
+        "Information",
+        "information",
+        False,
+    )
+    assert repeated[1] == (
+        "Information: Weaving possible futures...",
+        "Latest Status",
+        "information",
+        False,
+    )
 
 
 def test_notification_history_screen_renders_entries_in_order() -> None:
@@ -1440,7 +1577,9 @@ def test_notification_history_screen_renders_entries_in_order() -> None:
         async with app.run_test() as pilot:
             await pilot.pause(0.1)
             screen = cast(NotificationHistoryScreen, app.screen)
-            labels = [label.render().plain for label in screen.query("#notification-history-list Label")]
+            labels = [
+                label.render().plain for label in screen.query("#notification-history-list Label")
+            ]
             assert labels == [
                 "1. Information: First clue.",
                 "2. Warning: Lantern fading.",
@@ -1465,14 +1604,12 @@ def test_watch_screen_reader_mode_updates_loading_text_scene_art_and_choices() -
     app._reset_story_segments = MagicMock()
     app._mount_choice_buttons = MagicMock()
     app._update_scene_art = MagicMock()
-    app.query_one = (
-        lambda selector, *_args: (
-            status_display
-            if selector is StatusDisplay
-            else scene_art
-            if selector == "#scene-art"
-            else choices_container
-        )
+    app.query_one = lambda selector, *_args: (
+        status_display
+        if selector is StatusDisplay
+        else scene_art
+        if selector == "#scene-art"
+        else choices_container
     )
 
     app.watch_screen_reader_mode(True)
@@ -1514,7 +1651,10 @@ def test_app_cache_helpers_isolate_mutable_payloads() -> None:
     cached_history["scenes"][0]["id"] = "mutated-copy"
     cached_map["nodes"][0]["children"].append("mutated-copy")
 
-    assert app.get_cached_story_history("scene-1") == {"scenes": [{"id": "scene-1"}], "choices": ["Wait"]}
+    assert app.get_cached_story_history("scene-1") == {
+        "scenes": [{"id": "scene-1"}],
+        "choices": ["Wait"],
+    }
     assert app.get_cached_story_map("scene-1") == {"nodes": [{"id": "scene-1", "children": []}]}
 
 

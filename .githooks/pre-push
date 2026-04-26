@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v uv >/dev/null 2>&1; then
+    echo "pre-push: uv is required but was not found in PATH." >&2
+    exit 1
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/cyoa-tui-uv-cache}"
+
+echo "pre-push: running smoke suite"
+bash scripts/run_smoke.sh
+
+echo "pre-push: running Ruff across the repository"
+uv run ruff check .
+
+echo "pre-push: running mypy on cyoa"
+uv run mypy cyoa

@@ -6,10 +6,12 @@ from unittest.mock import patch
 import pytest
 
 np = pytest.importorskip("numpy")
-
-from cyoa.llm.providers import LlamaCppProvider, _InterruptionLogitsProcessor
+providers = pytest.importorskip("cyoa.llm.providers")
+LlamaCppProvider = providers.LlamaCppProvider
+_InterruptionLogitsProcessor = providers._InterruptionLogitsProcessor
 
 # ── Logits Processor Tests ───────────────────────────────────────────────────
+
 
 def test_interruption_logits_processor():
     """Verify that the logits processor correctly forces EOS when signaled."""
@@ -21,20 +23,25 @@ def test_interruption_logits_processor():
     scores = np.array([10.0, 5.0, 1.0, 8.0], dtype=np.float32)
     original_scores = scores.copy()
     result = processor(None, scores)
-    assert np.array_equal(result, original_scores), "Scores should be unchanged when event is not set."
+    assert np.array_equal(result, original_scores), (
+        "Scores should be unchanged when event is not set."
+    )
 
     # Case 2: Interrupted
     cancel_event.set()
     scores = np.array([10.0, 5.0, 1.0, 8.0], dtype=np.float32)
     result = processor(None, scores)
 
-    assert result[eos_token_id] == 0.0, "EOS token should have maximum relative probability (0.0 logit)."
+    assert result[eos_token_id] == 0.0, (
+        "EOS token should have maximum relative probability (0.0 logit)."
+    )
     assert result[0] == -np.inf, "Other tokens should be suppressed to -inf."
     assert result[1] == -np.inf
     assert result[3] == -np.inf
 
 
 # ── Integration Tests ────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def mock_llama():
@@ -49,6 +56,7 @@ def mock_llama():
         ]
         yield instance
 
+
 @pytest.mark.asyncio
 async def test_llama_cpp_interruption_signal_flow(mock_llama):
     """Verify that canceling a stream task correctly triggers the interruption flag."""
@@ -61,7 +69,8 @@ async def test_llama_cpp_interruption_signal_flow(mock_llama):
         # In a real scenario, this is where the C++ thread would be stuck
         # before checking the logits processor for the next token.
         import time
-        for _ in range(50): # Wait up to 5 seconds
+
+        for _ in range(50):  # Wait up to 5 seconds
             time.sleep(0.1)
             yield {"choices": [{"delta": {"content": "..."}}]}
 
@@ -94,7 +103,9 @@ async def test_llama_cpp_interruption_signal_flow(mock_llama):
 
     # 2. The cancellation event shared with the processor MUST be set
     # because the async generator's 'finally' block ran.
-    assert processor.cancel_event.is_set(), "The cancellation event should be signaled to the C++ thread."
+    assert processor.cancel_event.is_set(), (
+        "The cancellation event should be signaled to the C++ thread."
+    )
 
 
 @pytest.mark.asyncio

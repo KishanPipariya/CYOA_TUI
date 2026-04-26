@@ -88,26 +88,49 @@ def test_choice_availability_reason_handles_items_stats_and_flags():
         ),
     )
 
-    assert choice.availability_reason([], {"reputation": 0}, set()) == "Requires item: Vault Key"
+    assert choice.availability_reason([], {"reputation": 0}, set()) == (
+        "Missing item: Vault Key | Need reputation 3+ (current: 0) | Missing event: met_archivist"
+    )
     assert (
         choice.availability_reason(["Vault Key"], {"reputation": 1}, {"met_archivist"})
-        == "Requires reputation 3+"
+        == "Need reputation 3+ (current: 1)"
     )
     assert (
         choice.availability_reason(["Vault Key"], {"reputation": 3}, set())
-        == "Requires event: met_archivist"
+        == "Missing event: met_archivist"
     )
-    assert (
-        choice.availability_reason(["Vault Key"], {"reputation": 3}, {"met_archivist"})
-        is None
+    assert choice.availability_reason(["Vault Key"], {"reputation": 3}, {"met_archivist"}) is None
+
+
+def test_choice_unmet_requirements_lists_all_missing_gates() -> None:
+    choice = Choice(
+        text="Open the warded archive",
+        requirements=ChoiceRequirement(
+            items=["Silver Key", "Cipher Lens"],
+            stats={"reputation": 5, "health": 40},
+            flags=["met_archivist", "vault_sigil"],
+        ),
     )
+
+    assert choice.unmet_requirements(
+        inventory=["Silver Key"],
+        stats={"reputation": 2, "health": 35},
+        flags={"met_archivist"},
+    ) == [
+        "Missing item: Cipher Lens",
+        "Need reputation 5+ (current: 2)",
+        "Need health 40+ (current: 35)",
+        "Missing event: vault_sigil",
+    ]
 
 
 def test_story_node_accepts_extended_gameplay_updates():
     node = StoryNode(
         narrative="The guild grants you passage.",
         choices=[Choice(text="Enter the archive"), Choice(text="Question the steward")],
-        objectives_updated=[Objective(id="enter_archive", text="Enter the archive", status="active")],
+        objectives_updated=[
+            Objective(id="enter_archive", text="Enter the archive", status="active")
+        ],
         faction_updates={"Guild": 2},
         npc_affinity_updates={"Steward Hale": 1},
         story_flags_set=["guild_trusted"],

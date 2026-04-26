@@ -24,6 +24,17 @@ Full contributor setup:
 uv sync --extra all --group dev
 ```
 
+Enable the repo-managed Git hooks for your clone:
+
+```bash
+bash scripts/install_git_hooks.sh
+```
+
+Hook behavior:
+
+- `pre-commit`: Ruff lint and format checks for staged Python files, plus theme validation when theme files change.
+- `pre-push`: smoke suite, repo-wide Ruff, and `mypy cyoa`.
+
 ## Runtime Overrides
 
 Environment variables are available as advanced overrides:

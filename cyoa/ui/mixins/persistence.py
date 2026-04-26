@@ -35,6 +35,23 @@ class PersistenceMixin:
     def _exports_dir() -> str:
         return os.path.join(constants.SAVES_DIR, "exports")
 
+    @classmethod
+    def _list_manual_save_files(cls) -> list[str]:
+        """Return loadable user saves, excluding the internal autosave slot."""
+        if not os.path.isdir(constants.SAVES_DIR):
+            return []
+
+        autosave_name = os.path.basename(cls._autosave_file_path())
+        return sorted(
+            [
+                filename
+                for filename in os.listdir(constants.SAVES_DIR)
+                if filename.endswith(".json") and filename != autosave_name
+            ],
+            key=lambda filename: os.path.getmtime(os.path.join(constants.SAVES_DIR, filename)),
+            reverse=True,
+        )
+
     @staticmethod
     def _resolve_save_title(host: object) -> str | None:
         """Return a stable title for save payloads even if startup title generation lags."""
@@ -101,10 +118,11 @@ class PersistenceMixin:
         story_segments = self._coerce_story_segments(ui_state.get("story_segments"))
         if story_segments:
             mixin_host._story_segments = [
-                {"kind": segment["kind"], "text": segment["text"]}
-                for segment in story_segments
+                {"kind": segment["kind"], "text": segment["text"]} for segment in story_segments
             ]
-            mixin_host._current_story = self._render_story_segments(story_segments) or constants.LOADING_ART
+            mixin_host._current_story = (
+                self._render_story_segments(story_segments) or constants.LOADING_ART
+            )
             current_turn_from_segments = next(
                 (
                     segment["text"]
@@ -235,7 +253,9 @@ class PersistenceMixin:
                 continue
             kind = entry.get("kind")
             text = entry.get("text")
-            if kind not in {"story_turn", "player_choice", "branch_marker"} or not isinstance(text, str):
+            if kind not in {"story_turn", "player_choice", "branch_marker"} or not isinstance(
+                text, str
+            ):
                 continue
             normalized.append({"kind": kind, "text": text})
         return normalized
@@ -303,15 +323,7 @@ class PersistenceMixin:
     def action_load_game(self) -> None:
         """Show available save files and load a selected one."""
         app = as_textual_app(self)
-        if not os.path.isdir(constants.SAVES_DIR):
-            app.notify("No saves found.", severity="warning", timeout=2)
-            return
-
-        save_files = sorted(
-            [f for f in os.listdir(constants.SAVES_DIR) if f.endswith(".json")],
-            key=lambda f: os.path.getmtime(os.path.join(constants.SAVES_DIR, f)),
-            reverse=True,
-        )
+        save_files = self._list_manual_save_files()
         if not save_files:
             app.notify("No saves found.", severity="warning", timeout=2)
             return
@@ -369,7 +381,11 @@ class PersistenceMixin:
         if story_map_panel is not None and not story_map_panel.has_class("panel-collapsed"):
             host.update_story_map()
 
-        app.notify(f"{source_label} from Turn {host.engine.state.turn_count}.", severity="information", timeout=3)
+        app.notify(
+            f"{source_label} from Turn {host.engine.state.turn_count}.",
+            severity="information",
+            timeout=3,
+        )
         self._sync_prompt_status(host, app)
 
     def _build_save_payload(self, host: object, app: object) -> dict[str, object]:
@@ -392,7 +408,11 @@ class PersistenceMixin:
                 if segment["kind"] == "story_turn":
                     segment["text"] = current_turn_text
                     break
-        current_story_text = self._render_story_segments(story_segments) if story_segments else mixin_host._current_story
+        current_story_text = (
+            self._render_story_segments(story_segments)
+            if story_segments
+            else mixin_host._current_story
+        )
         save_data["ui_state"] = {
             "current_story_text": current_story_text,
             "story_segments": story_segments,
@@ -410,11 +430,13 @@ class PersistenceMixin:
             "journal_panel_collapsed": textual_app.query_one("#journal-panel", Container).has_class(
                 "panel-collapsed"
             ),
-            "story_map_panel_collapsed": textual_app.query_one("#story-map-panel", Container).has_class(
-                "panel-collapsed"
-            ),
+            "story_map_panel_collapsed": textual_app.query_one(
+                "#story-map-panel", Container
+            ).has_class("panel-collapsed"),
         }
-        save_data["saved_at"] = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+        save_data["saved_at"] = (
+            datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+        )
         return save_data
 
     @staticmethod
@@ -435,7 +457,9 @@ class PersistenceMixin:
         from cyoa.ui.components import StatusDisplay
 
         textual_app = as_textual_app(app)
-        textual_app.query_one(StatusDisplay).directives = list(mixin_host.engine.story_context.directives)
+        textual_app.query_one(StatusDisplay).directives = list(
+            mixin_host.engine.story_context.directives
+        )
 
     def _create_autosave(self, host: object, app: object) -> None:
         """Persist the latest playable state as an autosave."""
@@ -444,12 +468,9 @@ class PersistenceMixin:
             return
         if mixin_host.engine.state.turn_count <= 1:
             return
-        if (
-            mixin_host._last_manual_save_turn == mixin_host.engine.state.turn_count
-            and (
-                mixin_host._last_manual_save_scene_id is None
-                or mixin_host._last_manual_save_scene_id == mixin_host.engine.state.current_scene_id
-            )
+        if mixin_host._last_manual_save_turn == mixin_host.engine.state.turn_count and (
+            mixin_host._last_manual_save_scene_id is None
+            or mixin_host._last_manual_save_scene_id == mixin_host.engine.state.current_scene_id
         ):
             return
 
@@ -475,6 +496,7 @@ class PersistenceMixin:
     def _prompt_autosave_recovery(self, autosave_path: str) -> None:
         """Offer startup choices when an autosave is available."""
         app = as_textual_app(self)
+
         def on_selected(selection: str | None) -> None:
             self._handle_startup_recovery_choice(selection, autosave_path)
 
@@ -494,7 +516,9 @@ class PersistenceMixin:
         runtime = cast(Any, self)
 
         if selection == "resume":
-            host._startup_timer = app.set_timer(0.1, lambda: self._restore_autosave_session(autosave_path))
+            host._startup_timer = app.set_timer(
+                0.1, lambda: self._restore_autosave_session(autosave_path)
+            )
         elif selection == "new":
             self._discard_autosave()
             host._startup_timer = app.set_timer(
@@ -537,7 +561,9 @@ class PersistenceMixin:
     def _write_export_files(self, payload: dict[str, object], title: str) -> tuple[str, str]:
         """Write paired Markdown and JSON exports for a story payload."""
         os.makedirs(self._exports_dir(), exist_ok=True)
-        safe_title = "".join(c if c.isalnum() or c in " _-" else "_" for c in title).strip() or "adventure"
+        safe_title = (
+            "".join(c if c.isalnum() or c in " _-" else "_" for c in title).strip() or "adventure"
+        )
         stem = os.path.join(self._exports_dir(), safe_title)
         markdown_path = f"{stem}.md"
         json_path = f"{stem}.timeline.json"

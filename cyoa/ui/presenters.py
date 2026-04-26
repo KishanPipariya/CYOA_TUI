@@ -3,6 +3,7 @@ import unicodedata
 from typing import Any
 
 from cyoa.core import constants
+from cyoa.ui.keybindings import APP_BINDING_SPECS, format_key_for_display
 
 MARKUP_TAG_RE = re.compile(r"\[/?[a-zA-Z][^\]]*\]")
 
@@ -104,7 +105,9 @@ def format_runtime_text(
             f"Preset {generation_preset} | Phase {engine_phase} | "
             f"Provider {provider_label} | Profile {runtime_profile}"
         )
-    return f"⚙️ {generation_preset}  •  ⏱ {engine_phase}  •  🖧 {provider_label}  •  ⛭ {runtime_profile}"
+    return (
+        f"⚙️ {generation_preset}  •  ⏱ {engine_phase}  •  🖧 {provider_label}  •  ⛭ {runtime_profile}"
+    )
 
 
 def build_choice_label(
@@ -114,10 +117,17 @@ def build_choice_label(
     *,
     screen_reader_mode: bool = False,
 ) -> str:
-    label = f"{index + 1}. {choice_text}" if screen_reader_mode else f"[b]{index + 1}.[/b] {choice_text}"
+    label = (
+        f"{index + 1}. {choice_text}"
+        if screen_reader_mode
+        else f"[b]{index + 1}.[/b] {choice_text}"
+    )
     if disabled_reason:
         reason = format_status_message(disabled_reason, screen_reader_mode=screen_reader_mode)
-        return f"{label}\nUnavailable: {reason}" if screen_reader_mode else f"{label}\n[dim]Unavailable: {reason}[/dim]"
+        detail_lines = "\n".join(f"- {part.strip()}" for part in reason.split("|"))
+        if screen_reader_mode:
+            return f"{label}\nUnavailable:\n{detail_lines}"
+        return f"{label}\n[dim]Unavailable:[/dim]\n[dim]{detail_lines}[/dim]"
     return label
 
 
@@ -127,7 +137,11 @@ def format_choice_confirmation(choice_text: str, *, screen_reader_mode: bool) ->
 
 def format_branch_restore_text(turn_index: int, *, screen_reader_mode: bool) -> str:
     message = f"Time fractures. You return to Turn {turn_index + 1}."
-    return message if screen_reader_mode else f"**[Time fractures... you return to Turn {turn_index + 1}]**"
+    return (
+        message
+        if screen_reader_mode
+        else f"**[Time fractures... you return to Turn {turn_index + 1}]**"
+    )
 
 
 def format_error_notice(*, screen_reader_mode: bool) -> str:
@@ -146,41 +160,25 @@ def format_new_adventure_label(*, screen_reader_mode: bool) -> str:
     return "Start a new adventure" if screen_reader_mode else "✦ Start a New Adventure"
 
 
-def build_help_text(*, screen_reader_mode: bool) -> str:
+def build_help_text(
+    *,
+    screen_reader_mode: bool,
+    current_bindings: dict[str, str] | None = None,
+) -> str:
+    bindings = current_bindings or {}
+    key_rows = "\n".join(
+        f"| [b][reverse]{_help_key_cell(bindings.get(spec.id, spec.key))}[/reverse][/b] | {spec.settings_label} |"
+        for spec in APP_BINDING_SPECS
+    )
+
     if screen_reader_mode:
-        return """\
+        return f"""\
 # Keyboard Shortcuts
 
 | Key | Action |
 |:---:|:-------|
-| [b][reverse] 1 – 4 [/reverse][/b] | Select a choice by number |
-| [b][reverse] ↑ / ↓ [/reverse][/b] | Move between choices |
+{key_rows}
 | [b][reverse]ENTER[/reverse][/b] | Confirm focused choice |
-| [b][reverse]Shift+S[/reverse][/b] | Jump to Story |
-| [b][reverse]Shift+C[/reverse][/b] | Jump to Choices |
-| [b][reverse]Shift+I[/reverse][/b] | Jump to Status |
-| [b][reverse]Shift+J[/reverse][/b] | Jump to Journal |
-| [b][reverse]Shift+M[/reverse][/b] | Jump to Story Map |
-| [b][reverse]Shift+N[/reverse][/b] | Open Notifications |
-| [b][reverse]  N  [/reverse][/b] | Repeat latest status message |
-| [b][reverse]  D  [/reverse][/b] | Change Theme (Dark/Light) |
-| [b][reverse]  J  [/reverse][/b] | Toggle Journal panel |
-| [b][reverse]  M  [/reverse][/b] | Toggle Story Map panel |
-| [b][reverse]  B  [/reverse][/b] | Branch from past scene |
-| [b][reverse]  U  [/reverse][/b] | Undo last choice |
-| [b][reverse]  Y  [/reverse][/b] | Redo last choice |
-| [b][reverse]  K  [/reverse][/b] | Save a bookmark |
-| [b][reverse]  P  [/reverse][/b] | Restore a bookmark |
-| [b][reverse]  S  [/reverse][/b] | Save Game |
-| [b][reverse]  L  [/reverse][/b] | Load Game |
-| [b][reverse]  E  [/reverse][/b] | Export story to Markdown/JSON |
-| [b][reverse]  R  [/reverse][/b] | Restart Adventure |
-| [b][reverse]  O  [/reverse][/b] | Open settings |
-| [b][reverse]  T  [/reverse][/b] | Toggle Typewriter |
-| [b][reverse]  G  [/reverse][/b] | Cycle generation preset |
-| [b][reverse]  X  [/reverse][/b] | Edit active directives |
-| [b][reverse]SPACE[/reverse][/b] | Skip typewriter narrator |
-| [b][reverse]  Q  [/reverse][/b] | Quit Game |
 
 ---
 
@@ -188,8 +186,7 @@ def build_help_text(*, screen_reader_mode: bool) -> str:
 
 - Screen Reader Friendly mode removes ASCII art, uses plainer labels, and keeps the latest status message in the status panel.
 - High Contrast mode uses a fixed readable palette for story cards, choices, and side panels.
-- Press [b]N[/b] at any time to repeat the latest status message.
-- Use [b]Shift+S / Shift+C / Shift+I / Shift+J / Shift+M / Shift+N[/b] to jump directly between major regions.
+- Key bindings can be customized in Settings. Footer hints and this help sheet follow your saved keys.
 - Reduced Motion disables spinner animation and narrated text animation.
 - Journal and Story Map panels move keyboard focus automatically when opened.
 
@@ -197,39 +194,13 @@ def build_help_text(*, screen_reader_mode: bool) -> str:
 
 *Press Escape or click Close to return to the adventure.*
 """
-    return """\
+    return f"""\
 # ⌨️ Keyboard Shortcuts
 
 | Key | Action |
 |:---:|:-------|
-| [b][reverse] 1 – 4 [/reverse][/b] | Select a choice by number |
-| [b][reverse] ↑ / ↓ [/reverse][/b] | Move between choices |
+{key_rows}
 | [b][reverse]ENTER[/reverse][/b] | Confirm focused choice |
-| [b][reverse]Shift+S[/reverse][/b] | Jump to Story |
-| [b][reverse]Shift+C[/reverse][/b] | Jump to Choices |
-| [b][reverse]Shift+I[/reverse][/b] | Jump to Status |
-| [b][reverse]Shift+J[/reverse][/b] | Jump to Journal |
-| [b][reverse]Shift+M[/reverse][/b] | Jump to Story Map |
-| [b][reverse]Shift+N[/reverse][/b] | Open Notifications |
-| [b][reverse]  N  [/reverse][/b] | Repeat latest status message |
-| [b][reverse]  D  [/reverse][/b] | Change Theme (Dark/Light) |
-| [b][reverse]  J  [/reverse][/b] | Toggle Journal panel |
-| [b][reverse]  M  [/reverse][/b] | Toggle Story Map panel |
-| [b][reverse]  B  [/reverse][/b] | Branch from past scene |
-| [b][reverse]  U  [/reverse][/b] | Undo last choice |
-| [b][reverse]  Y  [/reverse][/b] | Redo last choice |
-| [b][reverse]  K  [/reverse][/b] | Save a bookmark |
-| [b][reverse]  P  [/reverse][/b] | Restore a bookmark |
-| [b][reverse]  S  [/reverse][/b] | Save Game |
-| [b][reverse]  L  [/reverse][/b] | Load Game |
-| [b][reverse]  E  [/reverse][/b] | Export story to Markdown/JSON |
-| [b][reverse]  R  [/reverse][/b] | Restart Adventure |
-| [b][reverse]  O  [/reverse][/b] | Open settings |
-| [b][reverse]  T  [/reverse][/b] | Toggle Typewriter |
-| [b][reverse]  G  [/reverse][/b] | Cycle generation preset |
-| [b][reverse]  X  [/reverse][/b] | Edit active directives |
-| [b][reverse]SPACE[/reverse][/b] | Skip typewriter narrator |
-| [b][reverse]  Q  [/reverse][/b] | Quit Game |
 
 ---
 
@@ -248,8 +219,7 @@ def build_help_text(*, screen_reader_mode: bool) -> str:
 
 - Screen Reader Friendly mode removes ASCII art, uses plainer labels, and keeps the latest status message in the status panel.
 - High Contrast mode uses a fixed readable palette for story cards, choices, and side panels.
-- Press [b]N[/b] at any time to repeat the latest status message.
-- Use [b]Shift+S / Shift+C / Shift+I / Shift+J / Shift+M / Shift+N[/b] to jump directly between major regions.
+- Key bindings can be customized in Settings. Footer hints and this help sheet follow your saved keys.
 - Locked choices include a written reason and do not rely on color alone.
 - Reduced Motion is available in Settings and disables spinner animation and narrated text animation.
 - Journal and Story Map panels move keyboard focus automatically when opened.
@@ -258,3 +228,8 @@ def build_help_text(*, screen_reader_mode: bool) -> str:
 
 *Press Escape or click Close to return to the adventure.*
 """
+
+
+def _help_key_cell(key: str) -> str:
+    display = format_key_for_display(key)
+    return f" {display} "

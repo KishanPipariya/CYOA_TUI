@@ -11,7 +11,6 @@ from typing import Any, ClassVar, Literal, cast
 
 from textual import work
 from textual.app import App, ComposeResult
-from textual.binding import Binding
 from textual.containers import Container, VerticalScroll
 from textual.css.query import NoMatches
 from textual.events import Click, Resize
@@ -66,6 +65,11 @@ from cyoa.ui.components import (
     StatusDisplay,
     ThemeSpinner,
 )
+from cyoa.ui.keybindings import (
+    build_app_bindings,
+    effective_keybindings,
+    resolve_keybinding_overrides,
+)
 from cyoa.ui.mixins import (
     EventsMixin,
     NavigationMixin,
@@ -110,41 +114,7 @@ class CYOAApp(
     theme = "textual-dark"
     dark = True
 
-    BINDINGS: ClassVar[list[Any]] = [
-        Binding("up", "focus_previous_choice", "Prev Choice", show=False),
-        Binding("down", "focus_next_choice", "Next Choice", show=False),
-        Binding("shift+s", "focus_story_region", "Story", show=False),
-        Binding("shift+c", "focus_choices_region", "Choices", show=False),
-        Binding("shift+i", "focus_status_region", "Status", show=False),
-        Binding("shift+j", "focus_journal_region", "Journal", show=False),
-        Binding("shift+m", "focus_story_map_region", "Map", show=False),
-        Binding("d", "toggle_dark", "Theme", show=True),
-        Binding("b", "branch_past", "Branch", show=True),
-        Binding("j", "toggle_journal", "Journal", show=True),
-        Binding("m", "toggle_story_map", "Map", show=True),
-        Binding("h", "show_help", "Help", show=True),
-        Binding("n", "repeat_latest_status", "Repeat Status", show=True),
-        Binding("shift+n", "focus_notifications_region", "Notifications", show=False),
-        Binding("o", "show_settings", "Settings", show=True),
-        Binding("u", "undo", "Undo", show=True),
-        Binding("y", "redo", "Redo", show=True),
-        Binding("k", "create_bookmark", "Bookmark", show=True),
-        Binding("p", "restore_bookmark", "Restore Mark", show=True),
-        Binding("s", "save_game", "Save", show=True),
-        Binding("l", "load_game", "Load", show=True),
-        Binding("e", "export_story", "Export", show=True),
-        Binding("q", "request_quit", "Quit", show=True),
-        Binding("r", "request_restart", "Restart", show=True),
-        Binding("t", "toggle_typewriter", "Typewriter", show=True),
-        Binding("v", "cycle_typewriter_speed", "Speed", show=True),
-        Binding("g", "cycle_generation_preset", "Preset", show=True),
-        Binding("x", "edit_directives", "Directives", show=True),
-        Binding("space", "skip_typewriter", "Skip", show=True),
-        Binding("1", "choose('1')", "Choice 1", show=False),
-        Binding("2", "choose('2')", "Choice 2", show=False),
-        Binding("3", "choose('3')", "Choice 3", show=False),
-        Binding("4", "choose('4')", "Choice 4", show=False),
-    ]
+    BINDINGS: ClassVar[list[Any]] = build_app_bindings()
 
     # Fix #4: Reactive turn counter displayed in footer
     turn_count: reactive[int] = reactive(1)
@@ -183,6 +153,10 @@ class CYOAApp(
         self._runtime_diagnostics = runtime_diagnostics or {}
         self._allow_headless_startup_recovery = allow_headless_startup_recovery
         self._user_config = load_user_config()
+        self._keybinding_overrides = resolve_keybinding_overrides(
+            getattr(self._user_config, "keybindings", {})
+        )
+        self.set_keymap(self._keybinding_overrides)
         self._first_run_setup_pending = self._requires_first_run_setup(self._user_config)
         initial_story_text = loading_story_text(
             screen_reader_mode=getattr(self._user_config, "screen_reader_mode", False)
@@ -192,7 +166,9 @@ class CYOAApp(
         self.engine: StoryEngine | None = None
         self._current_story: str = initial_story_text
         self._current_turn_text: str = initial_story_text
-        self._story_segments: list[dict[str, object]] = [{"kind": "story_turn", "text": initial_story_text}]
+        self._story_segments: list[dict[str, object]] = [
+            {"kind": "story_turn", "text": initial_story_text}
+        ]
         self._loading_suffix_shown: bool = False
         self._unsubscribers: list[Callable[[], None]] = []
         self._subscriptions_active: bool = False
@@ -308,7 +284,10 @@ class CYOAApp(
         status_display.screen_reader_mode = enabled
         loading_text = loading_story_text(screen_reader_mode=enabled)
         other_loading_text = loading_story_text(screen_reader_mode=not enabled)
-        if self._current_story == other_loading_text and self._current_turn_text == other_loading_text:
+        if (
+            self._current_story == other_loading_text
+            and self._current_turn_text == other_loading_text
+        ):
             self._current_story = loading_text
             self._current_turn_text = loading_text
             self._reset_story_segments(loading_text)
@@ -324,7 +303,9 @@ class CYOAApp(
         elif self.engine is not None and self.engine.state.current_node is not None:
             self._update_scene_art(
                 self.engine.state.current_node.narrative,
-                self.engine.state.current_node.narrative.startswith(constants.ERROR_NARRATIVE_PREFIX),
+                self.engine.state.current_node.narrative.startswith(
+                    constants.ERROR_NARRATIVE_PREFIX
+                ),
             )
         if (
             self.engine is not None
@@ -339,10 +320,14 @@ class CYOAApp(
             self._mount_choice_buttons(
                 self.engine.state.current_node,
                 choices_container,
-                self.engine.state.current_node.narrative.startswith(constants.ERROR_NARRATIVE_PREFIX),
+                self.engine.state.current_node.narrative.startswith(
+                    constants.ERROR_NARRATIVE_PREFIX
+                ),
             )
 
-    def _set_variant_class(self, prefix: str, value: str, allowed: tuple[str, ...], default: str) -> None:
+    def _set_variant_class(
+        self, prefix: str, value: str, allowed: tuple[str, ...], default: str
+    ) -> None:
         resolved = value if value in allowed else default
         for option in allowed:
             self.remove_class(f"{prefix}-{option}")
@@ -397,9 +382,13 @@ class CYOAApp(
         cleaned = self._prepare_status_message(message, severity)
         if not cleaned:
             return
-        self._notification_history.append(NotificationHistoryEntry(message=message, severity=severity))
+        self._notification_history.append(
+            NotificationHistoryEntry(message=message, severity=severity)
+        )
         if len(self._notification_history) > self._notification_history_limit:
-            self._notification_history = self._notification_history[-self._notification_history_limit :]
+            self._notification_history = self._notification_history[
+                -self._notification_history_limit :
+            ]
 
     def get_notification_history_lines(self) -> list[str]:
         return [
@@ -589,7 +578,9 @@ class CYOAApp(
         if self._has_rendered_first_scene or not self.is_runtime_active():
             return
         self._has_rendered_first_scene = True
-        self._post_render_warmup_timer = self.set_timer(0.05, self._schedule_optional_runtime_warmup)
+        self._post_render_warmup_timer = self.set_timer(
+            0.05, self._schedule_optional_runtime_warmup
+        )
 
     def queue_notification(
         self,
@@ -661,7 +652,9 @@ class CYOAApp(
     def _schedule_optional_runtime_warmup(self) -> None:
         self._post_render_warmup_timer = None
         if self.is_runtime_active():
-            self.run_worker(self._warm_optional_runtime_services(), exclusive=False, group="runtime-warmup")
+            self.run_worker(
+                self._warm_optional_runtime_services(), exclusive=False, group="runtime-warmup"
+            )
 
     async def _warm_optional_runtime_services(self) -> None:
         """Run optional startup checks only after the first scene is visible."""
@@ -771,7 +764,9 @@ class CYOAApp(
         """Keep the latest narrative turn and latest player action visually distinct."""
         story_container = self.query_one("#story-container")
         story_turns = list(story_container.query(".story-turn"))
-        current_turn = self._current_turn_widget if self._current_turn_widget in story_turns else None
+        current_turn = (
+            self._current_turn_widget if self._current_turn_widget in story_turns else None
+        )
         if current_turn is None and story_turns:
             current_turn = cast(Markdown, story_turns[-1])
             self._current_turn_widget = current_turn
@@ -834,10 +829,14 @@ class CYOAApp(
     def _resume_startup_flow(self) -> None:
         self.show_loading()
         autosave_path = self._autosave_path()
-        if autosave_path is not None and (not self.is_headless or self._allow_headless_startup_recovery):
+        if autosave_path is not None and (
+            not self.is_headless or self._allow_headless_startup_recovery
+        ):
             self._prompt_autosave_recovery(autosave_path)
             return
-        self._startup_timer = self.set_timer(0.1, lambda: self.initialize_and_start(self.model_path))
+        self._startup_timer = self.set_timer(
+            0.1, lambda: self.initialize_and_start(self.model_path)
+        )
 
     def _apply_first_run_selection(self, selection: Literal["mock"]) -> bool:
         runtime_preset = "mock-smoke"
@@ -992,7 +991,9 @@ class CYOAApp(
                 self._close_runtime_resources()
                 return
             self._sync_runtime_status()
-            self.queue_notification(self._runtime_summary(), severity="information", timeout=4, batch=False)
+            self.queue_notification(
+                self._runtime_summary(), severity="information", timeout=4, batch=False
+            )
             startup_note = self._runtime_diagnostics.get("startup_note", "").strip()
             if startup_note:
                 self.queue_notification(startup_note, severity="warning", timeout=5, batch=False)
@@ -1060,25 +1061,24 @@ class CYOAApp(
             return
 
         choice = node.choices[0]
-        if self.engine.speculation_cache.get_node(self.engine.state.current_scene_id or "", choice.text):
+        if self.engine.speculation_cache.get_node(
+            self.engine.state.current_scene_id or "", choice.text
+        ):
             return
 
         # Clone context to speculate without polluting the main one
         spec_context = self.engine.story_context.clone()
         spec_context.add_turn(
-            node.narrative,
-            choice.text,
-            self.engine.state.inventory,
-            self.engine.state.player_stats
+            node.narrative, choice.text, self.engine.state.inventory, self.engine.state.player_stats
         )
 
         try:
             # Low-priority generation (no streaming)
-            spec_node = await self.generator.generate_next_node_async(spec_context, low_priority=True)
+            spec_node = await self.generator.generate_next_node_async(
+                spec_context, low_priority=True
+            )
             self.engine.speculation_cache.set_node(
-                self.engine.state.current_scene_id or "",
-                choice.text,
-                spec_node
+                self.engine.state.current_scene_id or "", choice.text, spec_node
             )
         except Exception as e:
             logger.debug("Speculative generation failed: %s", e)
@@ -1118,6 +1118,7 @@ class CYOAApp(
                 text_scale=getattr(config, "text_scale", "standard"),
                 line_width=getattr(config, "line_width", "standard"),
                 line_spacing=getattr(config, "line_spacing", "standard"),
+                keybindings=getattr(config, "keybindings", {}),
                 typewriter=config.typewriter,
                 typewriter_speed=config.typewriter_speed,
                 diagnostics_enabled=config.diagnostics_enabled,
@@ -1169,15 +1170,30 @@ class CYOAApp(
         """Persist settings and apply the runtime-safe subset immediately."""
         previous_config = self._user_config
         provider = self._resolve_provider_setting(payload)
+        keybinding_overrides = resolve_keybinding_overrides(
+            payload.get("keybindings", getattr(self._user_config, "keybindings", {}))
+        )
 
         raw_model_path = payload.get("model_path")
-        model_path = raw_model_path.strip() if isinstance(raw_model_path, str) and raw_model_path.strip() else None
-        theme_name = str(payload.get("theme") or self._user_config.theme).strip() or self._user_config.theme
+        model_path = (
+            raw_model_path.strip()
+            if isinstance(raw_model_path, str) and raw_model_path.strip()
+            else None
+        )
+        theme_name = (
+            str(payload.get("theme") or self._user_config.theme).strip() or self._user_config.theme
+        )
         dark = bool(payload.get("dark", self._user_config.dark))
-        high_contrast = bool(payload.get("high_contrast", getattr(self._user_config, "high_contrast", False)))
-        reduced_motion = bool(payload.get("reduced_motion", getattr(self._user_config, "reduced_motion", False)))
+        high_contrast = bool(
+            payload.get("high_contrast", getattr(self._user_config, "high_contrast", False))
+        )
+        reduced_motion = bool(
+            payload.get("reduced_motion", getattr(self._user_config, "reduced_motion", False))
+        )
         screen_reader_mode = bool(
-            payload.get("screen_reader_mode", getattr(self._user_config, "screen_reader_mode", False))
+            payload.get(
+                "screen_reader_mode", getattr(self._user_config, "screen_reader_mode", False)
+            )
         )
         text_scale = self._resolve_option_setting(
             payload,
@@ -1219,6 +1235,8 @@ class CYOAApp(
         self.line_spacing = line_spacing
         self.typewriter_enabled = typewriter
         self.typewriter_speed = typewriter_speed
+        self._keybinding_overrides = keybinding_overrides
+        self.set_keymap(self._keybinding_overrides)
         if self.reduced_motion or self.screen_reader_mode or not self.typewriter_enabled:
             self.action_skip_typewriter()
 
@@ -1233,6 +1251,7 @@ class CYOAApp(
             text_scale=text_scale,
             line_width=line_width,
             line_spacing=line_spacing,
+            keybindings=keybinding_overrides,
             typewriter=typewriter,
             typewriter_speed=typewriter_speed,
             diagnostics_enabled=diagnostics_enabled,
@@ -1253,6 +1272,10 @@ class CYOAApp(
 
     def _reset_settings_to_safe_defaults(self) -> None:
         self._user_config = reset_user_config(preserve_setup=True)
+        self._keybinding_overrides = resolve_keybinding_overrides(
+            getattr(self._user_config, "keybindings", {})
+        )
+        self.set_keymap(self._keybinding_overrides)
         os.environ.pop("CYOA_ENABLE_RAG", None)
         os.environ.pop("LLM_MODEL_PATH", None)
 
@@ -1360,6 +1383,9 @@ class CYOAApp(
             ),
             on_saved,
         )
+
+    def get_effective_keybindings(self) -> dict[str, str]:
+        return effective_keybindings(self._keybinding_overrides)
 
     def on_click(self, event: Click) -> None:
         """Typewriter skip shortcut on clicking the story area."""

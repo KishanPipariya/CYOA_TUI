@@ -24,7 +24,9 @@ def test_linux_user_paths_follow_xdg(monkeypatch) -> None:
         assert Path(constants_module.CONFIG_FILE) == Path("/tmp/test-config/cyoa-tui/config.json")
         assert Path(constants_module.SAVES_DIR) == Path("/tmp/test-data/cyoa-tui/saves")
         assert Path(constants_module.STORY_LOG_FILE) == Path("/tmp/test-state/cyoa-tui/story.md")
-        assert Path(constants_module.CRASH_LOG_FILE) == Path("/tmp/test-state/cyoa-tui/last_crash.log")
+        assert Path(constants_module.CRASH_LOG_FILE) == Path(
+            "/tmp/test-state/cyoa-tui/last_crash.log"
+        )
 
     importlib.reload(constants_module)
 
@@ -63,6 +65,7 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
             text_scale="xlarge",
             line_width="focused",
             line_spacing="relaxed",
+            keybindings={"show_settings": "f2"},
             typewriter=False,
             typewriter_speed="fast",
             preset="balanced",
@@ -85,6 +88,7 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
     assert restored.text_scale == "xlarge"
     assert restored.line_width == "focused"
     assert restored.line_spacing == "relaxed"
+    assert restored.keybindings == {"show_settings": "f2"}
     assert restored.typewriter is False
     assert restored.typewriter_speed == "fast"
     assert restored.preset == "balanced"

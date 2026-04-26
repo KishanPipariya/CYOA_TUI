@@ -38,23 +38,37 @@ class Choice(BaseModel):
         stats: dict[str, int],
         flags: set[str],
     ) -> str | None:
-        missing_items = [
-            item for item in self.requirements.items if item not in inventory
-        ]
+        missing_requirements = self.unmet_requirements(inventory, stats, flags)
+        if not missing_requirements:
+            return None
+        return " | ".join(missing_requirements)
+
+    def unmet_requirements(
+        self,
+        inventory: list[str],
+        stats: dict[str, int],
+        flags: set[str],
+    ) -> list[str]:
+        missing_requirements: list[str] = []
+
+        missing_items = [item for item in self.requirements.items if item not in inventory]
         if missing_items:
-            return f"Requires item: {missing_items[0]}"
+            item_label = "item" if len(missing_items) == 1 else "items"
+            missing_requirements.append(f"Missing {item_label}: {', '.join(missing_items)}")
 
         for stat, minimum in self.requirements.stats.items():
-            if stats.get(stat, 0) < minimum:
-                return f"Requires {stat} {minimum}+"
+            current = stats.get(stat, 0)
+            if current < minimum:
+                missing_requirements.append(
+                    f"Need {stat.replace('_', ' ')} {minimum}+ (current: {current})"
+                )
 
-        missing_flags = [
-            flag for flag in self.requirements.flags if flag not in flags
-        ]
+        missing_flags = [flag for flag in self.requirements.flags if flag not in flags]
         if missing_flags:
-            return f"Requires event: {missing_flags[0]}"
+            flag_label = "event" if len(missing_flags) == 1 else "events"
+            missing_requirements.append(f"Missing {flag_label}: {', '.join(missing_flags)}")
 
-        return None
+        return missing_requirements
 
 
 class StoryNode(BaseModel):

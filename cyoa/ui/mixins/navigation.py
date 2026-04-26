@@ -4,6 +4,7 @@ from typing import Any, cast
 
 from textual import work
 from textual.containers import Container, VerticalScroll
+from textual.widget import Widget
 from textual.widgets import Button, Label, ListView, Markdown, Static, Tree
 
 from cyoa.ui.commands import RedoCommand, RestartCommand, UICommandContext, UndoCommand
@@ -24,6 +25,7 @@ from cyoa.ui.presenters import format_branch_restore_text
 
 logger = logging.getLogger(__name__)
 
+
 class NavigationMixin:
     """Mixin for app navigation and branching."""
 
@@ -38,7 +40,7 @@ class NavigationMixin:
             as_textual_app(app).call_after_refresh(buttons[0].focus)
 
     @staticmethod
-    def _highlight_region(app: object, widget: object) -> None:
+    def _highlight_region(app: object, widget: Widget) -> None:
         try:
             widget.add_class("region-jump-highlight")
         except Exception:
@@ -127,7 +129,10 @@ class NavigationMixin:
         while host._story_segments and host._story_segments[-1].get("kind") == "story_turn":
             host._story_segments.pop()
             break
-        if host._story_segments and host._story_segments[-1].get("kind") in {"player_choice", "branch_marker"}:
+        if host._story_segments and host._story_segments[-1].get("kind") in {
+            "player_choice",
+            "branch_marker",
+        }:
             host._story_segments.pop()
 
     async def action_restart(self) -> None:
@@ -169,13 +174,18 @@ class NavigationMixin:
     def action_show_help(self) -> None:
         """Show the help screen with keybindings and game mechanics."""
         as_textual_app(self).push_screen(
-            HelpScreen(screen_reader_mode=as_mixin_host(self).screen_reader_mode)
+            HelpScreen(
+                screen_reader_mode=as_mixin_host(self).screen_reader_mode,
+                current_bindings=cast(Any, self).get_effective_keybindings(),
+            )
         )
 
     def action_show_notification_history(self) -> None:
         """Show a modal list of recent notifications without altering game state."""
         app = as_textual_app(self)
-        app.push_screen(NotificationHistoryScreen(as_mixin_host(self).get_notification_history_lines()))
+        app.push_screen(
+            NotificationHistoryScreen(as_mixin_host(self).get_notification_history_lines())
+        )
 
     def action_focus_story_region(self) -> None:
         """Jump focus to the story viewport."""
@@ -297,7 +307,9 @@ class NavigationMixin:
             # In compact mode, keep only one side panel open at a time.
             app.query_one("#story-map-panel", Container).add_class("panel-collapsed")
         if panel.has_class("panel-collapsed"):
-            journal_list = self._show_journal_panel(app, compact_layout=as_mixin_host(self).compact_layout)
+            journal_list = self._show_journal_panel(
+                app, compact_layout=as_mixin_host(self).compact_layout
+            )
             app.call_after_refresh(journal_list.focus)
             return
         panel.add_class("panel-collapsed")
@@ -311,7 +323,9 @@ class NavigationMixin:
             # In compact mode, keep only one side panel open at a time.
             app.query_one("#journal-panel", Container).add_class("panel-collapsed")
         if panel.has_class("panel-collapsed"):
-            tree = self._show_story_map_panel(app, compact_layout=as_mixin_host(self).compact_layout)
+            tree = self._show_story_map_panel(
+                app, compact_layout=as_mixin_host(self).compact_layout
+            )
             as_mixin_host(self).update_story_map()
             app.call_after_refresh(tree.focus)
             return
@@ -468,11 +482,7 @@ class NavigationMixin:
 
             for edge in edges.get(scene_id, []):
                 choice_text = edge["choice"]
-                choice_preview = (
-                    choice_text[: 15] + "..."
-                    if len(choice_text) > 15
-                    else choice_text
-                )
+                choice_preview = choice_text[:15] + "..." if len(choice_text) > 15 else choice_text
                 choice_label = f"[dim]↳ {choice_preview}[/dim]"
                 choice_node = tree_node.add(choice_label, expand=True)
                 add_children(choice_node, edge["target_id"], depth + 1, turn + 1)

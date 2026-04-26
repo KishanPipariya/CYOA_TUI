@@ -19,6 +19,12 @@ from textual.widgets import (
 
 from cyoa.core import constants
 from cyoa.core.model_download import DownloadProgress, ModelRecommendation
+from cyoa.ui.keybindings import (
+    binding_input_id,
+    effective_keybindings,
+    iter_binding_sections,
+    validate_keybindings,
+)
 from cyoa.ui.presenters import (
     build_branch_preview,
     build_help_text,
@@ -180,7 +186,9 @@ class StoryMapPanel(Container):
 class MainGamePanel(Vertical):
     """Organism for the main play area within the workspace template."""
 
-    def __init__(self, *, spinner_frames: list[str], screen_reader_mode: bool = False, **kwargs: Any) -> None:
+    def __init__(
+        self, *, spinner_frames: list[str], screen_reader_mode: bool = False, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self._spinner_frames = spinner_frames
         self._screen_reader_mode = screen_reader_mode
@@ -193,7 +201,9 @@ class MainGamePanel(Vertical):
 class GameWorkspace(Horizontal):
     """Template for the primary in-game workspace."""
 
-    def __init__(self, *, spinner_frames: list[str], screen_reader_mode: bool = False, **kwargs: Any) -> None:
+    def __init__(
+        self, *, spinner_frames: list[str], screen_reader_mode: bool = False, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self._spinner_frames = spinner_frames
         self._screen_reader_mode = screen_reader_mode
@@ -424,14 +434,29 @@ class HelpScreen(ModalScreen[None]):
         ("h", "close", "Close"),
     ]
 
-    def __init__(self, *, screen_reader_mode: bool = False, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *,
+        screen_reader_mode: bool = False,
+        current_bindings: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self._screen_reader_mode = screen_reader_mode
+        self._current_bindings = current_bindings or {}
 
     def compose(self) -> ComposeResult:
-        with DialogFrame(id="help-dialog", classes="dialog-frame dialog-frame-scroll dialog-frame-accent"):
+        with DialogFrame(
+            id="help-dialog", classes="dialog-frame dialog-frame-scroll dialog-frame-accent"
+        ):
             with Container(id="help-content", classes="dialog-content"):
-                yield Markdown(build_help_text(screen_reader_mode=self._screen_reader_mode), id="help-text")
+                yield Markdown(
+                    build_help_text(
+                        screen_reader_mode=self._screen_reader_mode,
+                        current_bindings=self._current_bindings,
+                    ),
+                    id="help-text",
+                )
             yield Button("Close [b](Esc)[/b]", id="btn-help-close", variant="primary")
 
     def on_mount(self) -> None:
@@ -469,7 +494,11 @@ class LoadGameScreen(ModalScreen[str]):
 
     def compose(self) -> ComposeResult:
         with DialogFrame(id="load-dialog", classes="dialog-frame dialog-frame-scroll"):
-            yield Label("[b]Load Game[/b] \u2014 Select a save file", id="load-title", classes="dialog-title")
+            yield Label(
+                "[b]Load Game[/b] \u2014 Select a save file",
+                id="load-title",
+                classes="dialog-title",
+            )
             yield ListView(id="load-list", classes="dialog-list")
             yield Button("Cancel [b](Esc)[/b]", id="btn-load-cancel", variant="error")
 
@@ -481,7 +510,11 @@ class LoadGameScreen(ModalScreen[str]):
                 Label(display_name, classes="dialog-entry"), save_filename=save_file
             )
             list_view.append(item)
-        self.call_after_refresh(list_view.focus if self._save_files else self.query_one("#btn-load-cancel", Button).focus)
+        self.call_after_refresh(
+            list_view.focus
+            if self._save_files
+            else self.query_one("#btn-load-cancel", Button).focus
+        )
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, SaveListItem):
@@ -501,7 +534,9 @@ class OptionListScreen(ModalScreen[str]):
     DEFAULT_CSS = LoadGameScreen.DEFAULT_CSS
     BINDINGS = [("escape", "cancel", "Cancel")]
 
-    def __init__(self, title: str, options: list[str], *, empty_message: str, **kwargs: Any) -> None:
+    def __init__(
+        self, title: str, options: list[str], *, empty_message: str, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self._title = title
         self._options = options
@@ -516,11 +551,17 @@ class OptionListScreen(ModalScreen[str]):
     def on_mount(self) -> None:
         list_view = self.query_one("#load-list", ListView)
         if not self._options:
-            list_view.append(OptionListItem(Label(self._empty_message, classes="dialog-entry"), option_value=""))
+            list_view.append(
+                OptionListItem(Label(self._empty_message, classes="dialog-entry"), option_value="")
+            )
         else:
             for option in self._options:
-                list_view.append(OptionListItem(Label(option, classes="dialog-entry"), option_value=option))
-        self.call_after_refresh(list_view.focus if self._options else self.query_one("#btn-load-cancel", Button).focus)
+                list_view.append(
+                    OptionListItem(Label(option, classes="dialog-entry"), option_value=option)
+                )
+        self.call_after_refresh(
+            list_view.focus if self._options else self.query_one("#btn-load-cancel", Button).focus
+        )
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, OptionListItem) and event.item.option_value:
@@ -581,7 +622,9 @@ class StartupChoiceScreen(ButtonGroupScreen):
                 id="startup-hint",
             )
             with DialogActions(id="startup-buttons", classes="dialog-actions"):
-                yield Button("[b]R[/b]esume Previous Save", id="btn-startup-resume", variant="primary")
+                yield Button(
+                    "[b]R[/b]esume Previous Save", id="btn-startup-resume", variant="primary"
+                )
                 yield Button("[b]N[/b]ew Game", id="btn-startup-new", variant="success")
 
     def on_mount(self) -> None:
@@ -640,7 +683,9 @@ class FirstRunSetupScreen(ButtonGroupScreen):
         self._general_notes = general_notes
 
     def compose(self) -> ComposeResult:
-        with DialogFrame(id="first-run-dialog", classes="dialog-frame dialog-frame-accent dialog-frame-scroll"):
+        with DialogFrame(
+            id="first-run-dialog", classes="dialog-frame dialog-frame-accent dialog-frame-scroll"
+        ):
             yield Static("FIRST RUN SETUP", id="first-run-kicker")
             yield Label("[b]Choose How To Start[/b]", id="first-run-title", classes="dialog-title")
             yield Static(
@@ -766,7 +811,9 @@ class ModelDownloadScreen(ButtonGroupScreen):
             )
             for note in self._preflight_notes:
                 yield Label(note, classes="model-download-note")
-            yield ProgressBar(total=100, show_percentage=True, show_eta=False, id="model-download-progress")
+            yield ProgressBar(
+                total=100, show_percentage=True, show_eta=False, id="model-download-progress"
+            )
             yield Label(
                 "Local download unavailable." if self._blocked_reason else "Ready to download.",
                 id="model-download-stage",
@@ -867,6 +914,26 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         width: 1fr;
         min-width: 12;
     }
+    .settings-subsection {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    .settings-keybinding-row {
+        width: 100%;
+        height: auto;
+        align: left middle;
+        margin-bottom: 1;
+    }
+    .settings-keybinding-label {
+        width: 1fr;
+        padding-right: 1;
+    }
+    .settings-keybinding-input {
+        width: 24;
+    }
+    .settings-validation-error {
+        color: $error;
+    }
     #settings-model-path {
         margin: 1 0;
     }
@@ -893,6 +960,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         text_scale: str,
         line_width: str,
         line_spacing: str,
+        keybindings: dict[str, str] | None = None,
         typewriter: bool,
         typewriter_speed: str,
         diagnostics_enabled: bool,
@@ -909,15 +977,14 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         self._high_contrast = high_contrast
         self._reduced_motion = reduced_motion
         self._screen_reader_mode = screen_reader_mode
-        self._text_scale = (
-            text_scale if text_scale in constants.TEXT_SCALE_OPTIONS else "standard"
-        )
+        self._text_scale = text_scale if text_scale in constants.TEXT_SCALE_OPTIONS else "standard"
         self._line_width = (
             line_width if line_width in constants.READING_WIDTH_OPTIONS else "standard"
         )
         self._line_spacing = (
             line_spacing if line_spacing in constants.LINE_SPACING_OPTIONS else "standard"
         )
+        self._effective_keybindings = effective_keybindings(keybindings)
         self._typewriter = typewriter
         self._typewriter_speed = (
             typewriter_speed if typewriter_speed in constants.TYPEWRITER_SPEEDS else "normal"
@@ -936,7 +1003,9 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         return self._theme_names[self._theme_index]
 
     def compose(self) -> ComposeResult:
-        with DialogFrame(id="settings-dialog", classes="dialog-frame dialog-frame-scroll dialog-frame-accent"):
+        with DialogFrame(
+            id="settings-dialog", classes="dialog-frame dialog-frame-scroll dialog-frame-accent"
+        ):
             yield Static("SETTINGS", id="settings-kicker")
             yield Label("[b]Adventure Settings[/b]", classes="dialog-title")
             yield Static(
@@ -1029,6 +1098,24 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 classes="settings-value",
             )
 
+            yield Label("Key Bindings", classes="settings-label")
+            yield Label(
+                "Edit the keys for major actions here. Leave a field blank to restore its default key. Conflicts block saving.",
+                classes="settings-value",
+            )
+            for section_title, specs in iter_binding_sections():
+                yield Label(section_title, classes="settings-label settings-subsection")
+                for spec in specs:
+                    with Horizontal(classes="settings-keybinding-row"):
+                        yield Label(spec.settings_label, classes="settings-keybinding-label")
+                        yield Input(
+                            value=self._effective_keybindings.get(spec.id, spec.key),
+                            placeholder=spec.key,
+                            id=binding_input_id(spec.id),
+                            classes="settings-keybinding-input",
+                        )
+            yield Label("", id="settings-keybindings-feedback", classes="settings-value")
+
             yield Label("Typewriter", classes="settings-label")
             with Horizontal(classes="settings-row settings-section"):
                 yield Button("On", id="btn-settings-typewriter-on")
@@ -1078,7 +1165,9 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         self._set_selected("btn-settings-provider-mock", self._provider == "mock")
         self._set_selected("btn-settings-provider-llama", self._provider == "llama_cpp")
         self.query_one("#settings-provider-value", Label).update(
-            "Quick Demo keeps startup safe." if self._provider == "mock" else "Use a saved GGUF on restart."
+            "Quick Demo keeps startup safe."
+            if self._provider == "mock"
+            else "Use a saved GGUF on restart."
         )
 
         self._set_selected("btn-settings-dark-on", self._dark)
@@ -1114,6 +1203,12 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         )
 
     def _dismiss_with_value(self) -> None:
+        validation = validate_keybindings(self._collect_keybinding_values())
+        if validation.errors:
+            self._set_keybinding_feedback(" ".join(validation.errors))
+            return
+
+        self._set_keybinding_feedback("")
         model_path = self.query_one("#settings-model-path", Input).value.strip() or None
         self.dismiss(
             {
@@ -1127,11 +1222,24 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 "text_scale": self._text_scale,
                 "line_width": self._line_width,
                 "line_spacing": self._line_spacing,
+                "keybindings": validation.overrides,
                 "typewriter": self._typewriter,
                 "typewriter_speed": self._typewriter_speed,
                 "diagnostics_enabled": self._diagnostics_enabled,
             }
         )
+
+    def _collect_keybinding_values(self) -> dict[str, str]:
+        collected: dict[str, str] = {}
+        for _section_title, specs in iter_binding_sections():
+            for spec in specs:
+                collected[spec.id] = self.query_one(f"#{binding_input_id(spec.id)}", Input).value
+        return collected
+
+    def _set_keybinding_feedback(self, message: str) -> None:
+        feedback = self.query_one("#settings-keybindings-feedback", Label)
+        feedback.update(message)
+        feedback.set_class(bool(message), "settings-validation-error")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:  # noqa: C901
         button_id = event.button.id
@@ -1192,6 +1300,10 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             self._typewriter_speed = button_id.rsplit("-", 1)[-1]
         self._refresh_state()
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id and event.input.id.startswith("settings-binding-"):
+            self._set_keybinding_feedback("")
+
     def action_save(self) -> None:
         self._dismiss_with_value()
 
@@ -1210,13 +1322,23 @@ class NotificationHistoryScreen(ModalScreen[None]):
         self._entries = entries
 
     def compose(self) -> ComposeResult:
-        with DialogFrame(id="notification-history-dialog", classes="dialog-frame dialog-frame-scroll"):
-            yield Label("[b]Notification History[/b]", id="notification-history-title", classes="dialog-title")
+        with DialogFrame(
+            id="notification-history-dialog", classes="dialog-frame dialog-frame-scroll"
+        ):
+            yield Label(
+                "[b]Notification History[/b]",
+                id="notification-history-title",
+                classes="dialog-title",
+            )
             if self._entries:
                 yield ListView(id="notification-history-list", classes="dialog-list")
             else:
-                yield Static("No notifications yet.", id="notification-history-empty", classes="dialog-entry")
-            yield Button("Close [b](Esc)[/b]", id="btn-notification-history-close", variant="primary")
+                yield Static(
+                    "No notifications yet.", id="notification-history-empty", classes="dialog-entry"
+                )
+            yield Button(
+                "Close [b](Esc)[/b]", id="btn-notification-history-close", variant="primary"
+            )
 
     def on_mount(self) -> None:
         if not self._entries:
@@ -1225,9 +1347,7 @@ class NotificationHistoryScreen(ModalScreen[None]):
 
         list_view = self.query_one("#notification-history-list", ListView)
         for index, entry in enumerate(self._entries, start=1):
-            list_view.append(
-                ListItem(Label(escape(f"{index}. {entry}"), classes="dialog-entry"))
-            )
+            list_view.append(ListItem(Label(escape(f"{index}. {entry}"), classes="dialog-entry")))
         list_view.index = len(self._entries) - 1
         list_view.scroll_end(animate=False)
         self.call_after_refresh(list_view.focus)
@@ -1258,7 +1378,9 @@ class TextPromptScreen(ModalScreen[str]):
 
     BINDINGS = [("escape", "cancel", "Cancel"), ("enter", "submit", "Submit")]
 
-    def __init__(self, title: str, *, value: str = "", placeholder: str = "", **kwargs: Any) -> None:
+    def __init__(
+        self, title: str, *, value: str = "", placeholder: str = "", **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self._title = title
         self._value = value
@@ -1289,6 +1411,7 @@ class TextPromptScreen(ModalScreen[str]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
 
 class StatusDisplay(Static):
     """A reactive status area that groups player state and runtime metadata."""
@@ -1325,7 +1448,9 @@ class StatusDisplay(Static):
 
     def watch_health(self, health: int) -> None:
         self.query_one("#health-bar", ProgressBar).progress = health
-        self.query_one("#health-value", Label).update(f"{health}% {self._health_status_text(health)}")
+        self.query_one("#health-value", Label).update(
+            f"{health}% {self._health_status_text(health)}"
+        )
         self._update_stats_text()
         self._set_health_class(health)
 

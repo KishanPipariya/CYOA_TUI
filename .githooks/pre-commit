@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v uv >/dev/null 2>&1; then
+    echo "pre-commit: uv is required but was not found in PATH." >&2
+    exit 1
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/cyoa-tui-uv-cache}"
+
+python_files=()
+should_validate_themes=false
+
+while IFS= read -r staged_file; do
+    [[ -z "$staged_file" ]] && continue
+
+    case "$staged_file" in
+        *.py)
+            python_files+=("$staged_file")
+            ;;
+        themes/*.toml|themes/themes.json)
+            should_validate_themes=true
+            ;;
+    esac
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+if ((${#python_files[@]} > 0)); then
+    echo "pre-commit: running Ruff lint checks on staged Python files"
+    uv run ruff check --output-format=concise "${python_files[@]}"
+
+    echo "pre-commit: running Ruff format checks on staged Python files"
+    uv run ruff format --check "${python_files[@]}"
+fi
+
+if [[ "$should_validate_themes" == true ]]; then
+    echo "pre-commit: validating theme assets"
+    uv run python scripts/validate_themes.py
+fi

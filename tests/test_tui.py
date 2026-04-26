@@ -26,6 +26,7 @@ from cyoa.ui.components import (
     TextPromptScreen,
 )
 from cyoa.ui.mixins.navigation import NavigationMixin
+from cyoa.ui.mixins.persistence import PersistenceMixin
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -261,7 +262,7 @@ async def test_stats_display_reflects_player_stats(mock_app_dependencies):
 
         # Update stats to mid-health
         app.query_one("StatusDisplay").health = 50
-        await pilot.pause(0.1) # Wait for reactive update
+        await pilot.pause(0.1)  # Wait for reactive update
         assert "50%" in str(health_value.render())
         assert status_display.has_class("health-mid")
 
@@ -387,6 +388,7 @@ async def test_locked_choices_render_disabled_and_block_selection(mock_app_depen
 
         buttons = list(app.query_one("#choices-container", Container).query(Button))
         assert buttons[0].disabled is True
+        assert "Missing event: sigil_unlocked" in str(buttons[0].label)
 
         current_story_before = app._current_story
         await app._trigger_choice(0)
@@ -862,6 +864,26 @@ async def test_help_screen(mock_app_dependencies):
 
 
 @pytest.mark.asyncio
+async def test_remapped_help_binding_uses_saved_keymap(mock_app_dependencies):
+    with patch(
+        "cyoa.ui.app.load_user_config",
+        return_value=UserConfig(setup_completed=True, keybindings={"show_help": "f1"}),
+    ):
+        app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+
+        await pilot.press("h")
+        await pilot.pause(0.2)
+        assert not isinstance(app.screen, HelpScreen)
+
+        await pilot.press("f1")
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, HelpScreen)
+
+
+@pytest.mark.asyncio
 async def test_notification_history_screen_opens_from_action(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
@@ -873,7 +895,9 @@ async def test_notification_history_screen_opens_from_action(mock_app_dependenci
         await pilot.pause(0.2)
 
         assert isinstance(app.screen, NotificationHistoryScreen)
-        entries = [label.render().plain for label in app.screen.query("#notification-history-list Label")]
+        entries = [
+            label.render().plain for label in app.screen.query("#notification-history-list Label")
+        ]
         assert entries == ["1. Information: A distant bell rings."]
 
         await pilot.press("escape")
@@ -1143,7 +1167,13 @@ async def test_main_game_layout_fits_standard_terminal(mock_app_dependencies) ->
         status_bar = app.query_one("#status-bar", Container)
         choices_container = app.query_one("#choices-container", Container)
 
-        for widget in (main_container, story_container, action_panel, status_bar, choices_container):
+        for widget in (
+            main_container,
+            story_container,
+            action_panel,
+            status_bar,
+            choices_container,
+        ):
             _assert_region_within_screen(widget, app.size)
 
         assert status_bar.region.x >= action_panel.region.x
@@ -1192,7 +1222,13 @@ async def test_main_game_layout_fits_compact_terminal(mock_app_dependencies) -> 
         status_bar = app.query_one("#status-bar", Container)
         choices_container = app.query_one("#choices-container", Container)
 
-        for widget in (main_container, story_container, action_panel, status_bar, choices_container):
+        for widget in (
+            main_container,
+            story_container,
+            action_panel,
+            status_bar,
+            choices_container,
+        ):
             _assert_region_within_screen(widget, app.size)
 
         assert status_bar.region.x >= action_panel.region.x
@@ -1304,7 +1340,12 @@ async def test_shipped_themes_render_stable_layouts(theme_name: str, mock_app_de
     )
 
     async with app.run_test(size=(140, 38)) as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_pilot(
+            pilot,
+            lambda: "You awaken in a test dungeon" in app._current_story,
+            timeout=3.0,
+        )
+        app.action_skip_typewriter()
 
         assert "You awaken in a test dungeon." in app._current_story
 
@@ -1335,7 +1376,13 @@ async def test_modal_dialog_borders_do_not_clip_on_small_terminals(mock_app_depe
             (TextPromptScreen("Rename bookmark", value="turn-3"), "#text-prompt-dialog"),
             (
                 BranchScreen(
-                    scenes=[{"narrative": "Opening scene", "available_choices": ["Go North"], "inventory": []}],
+                    scenes=[
+                        {
+                            "narrative": "Opening scene",
+                            "available_choices": ["Go North"],
+                            "inventory": [],
+                        }
+                    ],
                     choices=["Go North"],
                 ),
                 "#branch-dialog",
@@ -1465,7 +1512,9 @@ async def test_initial_scene_does_not_create_autosave(mock_app_dependencies, tmp
 
 
 @pytest.mark.asyncio
-async def test_autosave_payload_can_restore_last_session(mock_app_dependencies, tmp_path, monkeypatch):
+async def test_autosave_payload_can_restore_last_session(
+    mock_app_dependencies, tmp_path, monkeypatch
+):
     from cyoa.core import constants
 
     monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
@@ -1535,10 +1584,12 @@ async def test_startup_offers_new_game_or_resume_when_autosave_exists(
         restarted.initialize_and_start(restarted.model_path)
         await _wait_for_pilot(
             pilot3,
-            lambda: restarted.turn_count == 1
-            and restarted.engine is not None
-            and restarted.engine.state.current_node is not None
-            and restarted.engine.state.current_node.narrative == "You awaken in a test dungeon.",
+            lambda: (
+                restarted.turn_count == 1
+                and restarted.engine is not None
+                and restarted.engine.state.current_node is not None
+                and restarted.engine.state.current_node.narrative == "You awaken in a test dungeon."
+            ),
             timeout=5.0,
         )
         assert not autosave_path.exists()
@@ -1676,7 +1727,7 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
             )
 
             # Find the save file
-            save_files = [f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]
+            save_files = PersistenceMixin._list_manual_save_files()
             assert len(save_files) == 1
             save_path = os.path.join(str(tmp_path), save_files[0])
 
@@ -1697,6 +1748,16 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
             assert "88%" in health_value_text
 
 
+def test_list_manual_save_files_excludes_autosave(tmp_path, monkeypatch) -> None:
+    from cyoa.core import constants
+
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+    (tmp_path / "autosave_latest.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "manual_turn2.json").write_text("{}", encoding="utf-8")
+
+    assert PersistenceMixin._list_manual_save_files() == ["manual_turn2.json"]
+
+
 @pytest.mark.asyncio
 async def test_restore_from_save_handles_malformed_ui_state(mock_app_dependencies, tmp_path):
     save_path = tmp_path / "broken-ui-save.json"
@@ -1715,7 +1776,10 @@ async def test_restore_from_save_handles_malformed_ui_state(mock_app_dependencie
                 "ui_state": {
                     "current_story_text": 99,
                     "current_turn_text": None,
-                    "journal_entries": ["bad", {"label": 55, "scene_index": "oops", "entry_kind": 8}],
+                    "journal_entries": [
+                        "bad",
+                        {"label": 55, "scene_index": "oops", "entry_kind": 8},
+                    ],
                     "journal_panel_collapsed": False,
                     "story_map_panel_collapsed": "invalid",
                 },
@@ -1824,7 +1888,10 @@ async def test_restore_from_save_rebuilds_story_timeline(mock_app_dependencies, 
                         {"kind": "story_turn", "text": "Opening scene."},
                         {"kind": "player_choice", "text": "**You chose:** Go North"},
                         {"kind": "story_turn", "text": "North path."},
-                        {"kind": "branch_marker", "text": "**[Time fractures... you return to Turn 2]**"},
+                        {
+                            "kind": "branch_marker",
+                            "text": "**[Time fractures... you return to Turn 2]**",
+                        },
                         {"kind": "story_turn", "text": "You return to the crossroads."},
                     ],
                     "journal_entries": [
@@ -2247,7 +2314,9 @@ async def test_status_notifications_are_batched(mock_app_dependencies) -> None:
             bus.emit(Events.STATUS_MESSAGE, message="📜 Archiving old chapters...")
             await pilot.pause(0.3)
 
-            assert dispatched == ["Information: ⚡ Weaving possible futures... | 📜 Archiving old chapters..."]
+            assert dispatched == [
+                "Information: ⚡ Weaving possible futures... | 📜 Archiving old chapters..."
+            ]
             message = dispatched[0]
             assert "⚡ Weaving possible futures..." in message
             assert "📜 Archiving old chapters..." in message
