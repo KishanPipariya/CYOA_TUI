@@ -1,5 +1,6 @@
 import json
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,11 @@ ACCESSIBILITY_PRESET_OPTIONS = (
     "custom",
 )
 FIRST_RUN_ACCESSIBILITY_PRESET_OPTIONS = ACCESSIBILITY_PRESET_OPTIONS[:-1]
+ACCESSIBILITY_SETTING_KEYS = (
+    "high_contrast",
+    "reduced_motion",
+    "screen_reader_mode",
+)
 
 
 class UserConfigSaveError(RuntimeError):
@@ -267,6 +273,25 @@ class UserConfig:
             "typewriter": self.typewriter,
             "typewriter_speed": self.typewriter_speed,
         }
+
+
+def resolve_accessibility_preferences(
+    config: UserConfig,
+    overrides: Mapping[str, object] | None = None,
+) -> dict[str, bool]:
+    resolved = {
+        "high_contrast": bool(getattr(config, "high_contrast", False)),
+        "reduced_motion": bool(getattr(config, "reduced_motion", False)),
+        "screen_reader_mode": bool(getattr(config, "screen_reader_mode", False)),
+    }
+    if overrides is None:
+        return resolved
+
+    for key in ACCESSIBILITY_SETTING_KEYS:
+        value = overrides.get(key)
+        if isinstance(value, bool):
+            resolved[key] = value
+    return resolved
 
 
 def load_user_config() -> UserConfig:

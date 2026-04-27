@@ -14,6 +14,7 @@ from cyoa.ui.components import (
     HelpScreen,
     JournalListItem,
     NotificationHistoryScreen,
+    SceneRecapScreen,
 )
 from cyoa.ui.mixins.contracts import (
     as_command_host,
@@ -191,6 +192,11 @@ class NavigationMixin:
         app.push_screen(
             NotificationHistoryScreen(as_mixin_host(self).get_notification_history_lines())
         )
+
+    def action_show_scene_recap(self) -> None:
+        """Show a structured recap of the current scene and player state."""
+        app = as_textual_app(self)
+        app.push_screen(SceneRecapScreen(cast(Any, self).get_scene_recap_text()))
 
     def action_focus_story_region(self) -> None:
         """Jump focus to the story viewport."""

@@ -21,6 +21,7 @@ from cyoa.ui.components import (
     LoadGameScreen,
     ModelDownloadScreen,
     NotificationHistoryScreen,
+    SceneRecapScreen,
     SettingsScreen,
     StartupChoiceScreen,
     StatusDisplay,
@@ -33,7 +34,12 @@ from cyoa.ui.mixins.persistence import PersistenceMixin
 from cyoa.ui.mixins.rendering import RenderingMixin, _detect_scene_art
 from cyoa.ui.mixins.theme import ThemeMixin, _build_surface_style
 from cyoa.ui.mixins.typewriter import TypewriterMixin
-from cyoa.ui.presenters import build_choice_label, format_status_message, loading_story_text
+from cyoa.ui.presenters import (
+    build_choice_label,
+    build_scene_recap,
+    format_status_message,
+    loading_story_text,
+)
 
 
 class DummyTypewriterHost(TypewriterMixin):
@@ -485,6 +491,79 @@ def test_presenters_return_plain_text_variants_for_screen_reader_mode():
     ) == ("1. Open the gate\nUnavailable:\n- Missing item: key\n- Need reputation 3+ (current: 1)")
 
 
+def test_build_scene_recap_includes_visible_choices_progress_and_recent_changes() -> None:
+    node = StoryNode(
+        narrative="The vault door trembles but does not open.",
+        choices=[
+            Choice(
+                text="Open the sigil door",
+                requirements=ChoiceRequirement(flags=["sigil_unlocked"]),
+            ),
+            Choice(text="Wait and listen"),
+        ],
+        items_gained=["Ancient Coin"],
+        stat_updates={"health": -10, "gold": 5},
+        objectives_updated=[{"id": "escape", "text": "Escape the vault", "status": "active"}],
+        faction_updates={"guild": 1},
+        story_flags_set=["vault_seen"],
+    )
+
+    recap = build_scene_recap(
+        narrative=node.narrative,
+        choices=node.choices,
+        inventory=["Torch", "Ancient Coin"],
+        player_stats={"health": 90, "gold": 5, "reputation": 0},
+        objectives=[{"id": "escape", "text": "Escape the vault", "status": "active"}],
+        screen_reader_mode=False,
+        turn_count=2,
+        story_title="Vault Run",
+        story_flags=[],
+        items_gained=node.items_gained,
+        items_lost=node.items_lost,
+        stat_updates=node.stat_updates,
+        objectives_updated=node.objectives_updated,
+        faction_updates=node.faction_updates,
+        npc_affinity_updates=node.npc_affinity_updates,
+        story_flags_set=node.story_flags_set,
+        story_flags_cleared=node.story_flags_cleared,
+    )
+
+    assert "Vault Run | Turn 2" in recap
+    assert "## Scene" in recap
+    assert "1. Open the sigil door (Unavailable: Missing event: sigil_unlocked)" in recap
+    assert "2. Wait and listen" in recap
+    assert "## Objectives" in recap
+    assert "- Escape the vault" in recap
+    assert "- Stats: Health 90 | Gold 5 | Reputation 0" in recap
+    assert "- Inventory: Torch, Ancient Coin" in recap
+    assert "- Items gained: Ancient Coin" in recap
+    assert "- Stats changed: Health -10; Gold +5" in recap
+    assert "- Faction changes: guild +1" in recap
+    assert "- Flags set: vault_seen" in recap
+
+
+def test_build_scene_recap_is_more_explicit_in_screen_reader_mode() -> None:
+    recap = build_scene_recap(
+        narrative="A narrow bridge crosses the chasm.",
+        choices=[Choice(text="Cross carefully")],
+        inventory=[],
+        player_stats={"health": 100, "gold": 0, "reputation": 2},
+        objectives=[],
+        screen_reader_mode=True,
+        turn_count=4,
+        story_title="Bridge Watch",
+        last_choice_text="Light the beacon",
+        story_flags=[],
+    )
+
+    assert "Bridge Watch | Turn 4" in recap
+    assert "Last choice: Light the beacon" in recap
+    assert "- Health: 100" in recap
+    assert "- Gold: 0" in recap
+    assert "- Reputation: 2" in recap
+    assert "- Inventory: Empty" in recap
+
+
 def test_app_effective_keybindings_merge_defaults_and_overrides() -> None:
     merged = effective_keybindings({"show_settings": "f2", "repeat_latest_status": "f3"})
 
@@ -827,6 +906,14 @@ def test_startup_choice_screen_dismisses_expected_values():
     )
     history_screen.action_close()
     assert history_screen.dismiss.call_args_list == [call(None), call(None)]
+
+    recap_screen = SceneRecapScreen("## Scene\nA path opens.")
+    recap_screen.dismiss = MagicMock()
+    recap_screen.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-scene-recap-close"))
+    )
+    recap_screen.action_close()
+    assert recap_screen.dismiss.call_args_list == [call(None), call(None)]
 
 
 def test_first_run_setup_screen_dismisses_expected_values():

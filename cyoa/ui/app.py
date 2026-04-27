@@ -53,6 +53,7 @@ from cyoa.core.user_config import (
     infer_accessibility_preset,
     load_user_config,
     reset_user_config,
+    resolve_accessibility_preferences,
     update_user_config,
 )
 from cyoa.db.graph_db import CYOAGraphDB
@@ -82,7 +83,7 @@ from cyoa.ui.mixins import (
     ThemeMixin,
     TypewriterMixin,
 )
-from cyoa.ui.presenters import format_status_message, loading_story_text
+from cyoa.ui.presenters import build_scene_recap, format_status_message, loading_story_text
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,7 @@ class CYOAApp(
         initial_world_state: dict[str, object] | None = None,
         initial_prompt_config: dict[str, object] | None = None,
         runtime_diagnostics: dict[str, str] | None = None,
+        startup_accessibility_overrides: dict[str, bool] | None = None,
         allow_headless_startup_recovery: bool = False,
         **kwargs: Any,
     ) -> None:
@@ -156,8 +158,13 @@ class CYOAApp(
         self._initial_world_state = initial_world_state or {}
         self._initial_prompt_config = initial_prompt_config or {}
         self._runtime_diagnostics = runtime_diagnostics or {}
+        self._startup_accessibility_overrides = startup_accessibility_overrides or {}
         self._allow_headless_startup_recovery = allow_headless_startup_recovery
         self._user_config = load_user_config()
+        initial_accessibility_preferences = resolve_accessibility_preferences(
+            self._user_config,
+            self._startup_accessibility_overrides,
+        )
         self._keybinding_overrides = resolve_keybinding_overrides(
             getattr(self._user_config, "keybindings", {})
         )
@@ -167,7 +174,7 @@ class CYOAApp(
             self._user_config, "accessibility_preset", "default"
         )
         initial_story_text = loading_story_text(
-            screen_reader_mode=getattr(self._user_config, "screen_reader_mode", False)
+            screen_reader_mode=bool(initial_accessibility_preferences["screen_reader_mode"])
         )
 
         self.generator: ModelBroker | None = None
@@ -208,9 +215,9 @@ class CYOAApp(
         # Restore preferences
         config = self._user_config.to_ui_preferences()
         self.dark = config.get("dark", True)
-        self.high_contrast_mode = config.get("high_contrast", False)
-        self.reduced_motion = config.get("reduced_motion", False)
-        self.screen_reader_mode = config.get("screen_reader_mode", False)
+        self.high_contrast_mode = bool(initial_accessibility_preferences["high_contrast"])
+        self.reduced_motion = bool(initial_accessibility_preferences["reduced_motion"])
+        self.screen_reader_mode = bool(initial_accessibility_preferences["screen_reader_mode"])
         self.cognitive_load_reduction_mode = config.get("cognitive_load_reduction_mode", False)
         self.text_scale = str(config.get("text_scale", "standard"))
         self.line_width = str(config.get("line_width", "standard"))
@@ -493,6 +500,39 @@ class CYOAApp(
             timeout=6,
             markup=False,
             update_latest=False,
+        )
+
+    def get_scene_recap_text(self) -> str:
+        if not self.engine or not self.engine.state.current_node:
+            return (
+                "## Scene\nNo current scene is available yet.\n\n"
+                "## Choices\nNo choices available yet.\n\n"
+                "## Objectives\n- None\n\n"
+                "## Progress\n- Stats: Health 100 | Gold 0 | Reputation 0\n- Inventory: Empty\n\n"
+                "## Recent Changes\n- No major changes this turn."
+            )
+
+        state = self.engine.state
+        node = state.current_node
+        return build_scene_recap(
+            narrative=node.narrative,
+            choices=node.choices,
+            inventory=state.inventory,
+            player_stats=state.player_stats,
+            objectives=state.objectives,
+            screen_reader_mode=self.screen_reader_mode,
+            turn_count=state.turn_count,
+            story_title=state.story_title or node.title,
+            last_choice_text=state.last_choice_text,
+            story_flags=state.story_flags,
+            items_gained=node.items_gained,
+            items_lost=node.items_lost,
+            stat_updates=node.stat_updates,
+            objectives_updated=node.objectives_updated,
+            faction_updates=node.faction_updates,
+            npc_affinity_updates=node.npc_affinity_updates,
+            story_flags_set=node.story_flags_set,
+            story_flags_cleared=node.story_flags_cleared,
         )
 
     def on_unmount(self) -> None:
@@ -1222,28 +1262,24 @@ class CYOAApp(
                 provider=pick("provider", config.provider),
                 model_path=pick("model_path", config.model_path),
                 theme=pick("theme", config.theme),
-                dark=bool(pick("dark", config.dark)),
-                high_contrast=bool(pick("high_contrast", getattr(config, "high_contrast", False))),
-                reduced_motion=bool(
-                    pick("reduced_motion", getattr(config, "reduced_motion", False))
-                ),
-                screen_reader_mode=bool(
-                    pick("screen_reader_mode", getattr(config, "screen_reader_mode", False))
-                ),
+                dark=bool(pick("dark", self.dark)),
+                high_contrast=bool(pick("high_contrast", self.high_contrast_mode)),
+                reduced_motion=bool(pick("reduced_motion", self.reduced_motion)),
+                screen_reader_mode=bool(pick("screen_reader_mode", self.screen_reader_mode)),
                 cognitive_load_reduction_mode=bool(
                     pick(
                         "cognitive_load_reduction_mode",
-                        getattr(config, "cognitive_load_reduction_mode", False),
+                        self.cognitive_load_reduction_mode,
                     )
                 ),
-                text_scale=str(pick("text_scale", getattr(config, "text_scale", "standard"))),
-                line_width=str(pick("line_width", getattr(config, "line_width", "standard"))),
-                line_spacing=str(pick("line_spacing", getattr(config, "line_spacing", "standard"))),
+                text_scale=str(pick("text_scale", self.text_scale)),
+                line_width=str(pick("line_width", self.line_width)),
+                line_spacing=str(pick("line_spacing", self.line_spacing)),
                 keybindings=cast(
                     dict[str, str], pick("keybindings", getattr(config, "keybindings", {}))
                 ),
-                typewriter=bool(pick("typewriter", config.typewriter)),
-                typewriter_speed=str(pick("typewriter_speed", config.typewriter_speed)),
+                typewriter=bool(pick("typewriter", self.typewriter_enabled)),
+                typewriter_speed=str(pick("typewriter_speed", self.typewriter_speed)),
                 diagnostics_enabled=bool(pick("diagnostics_enabled", config.diagnostics_enabled)),
                 available_themes=list_themes(),
                 initial_feedback=feedback_message,

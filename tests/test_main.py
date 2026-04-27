@@ -17,6 +17,9 @@ def _args(**overrides: str | None) -> argparse.Namespace:
         "prompt": None,
         "preset": None,
         "runtime_preset": None,
+        "screen_reader": False,
+        "high_contrast": False,
+        "reduced_motion": False,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -136,7 +139,10 @@ def test_validate_startup_config_falls_back_from_saved_llama_cpp_to_mock(
         config = main.validate_startup_config(_args())
 
     assert config.provider == "mock"
-    assert config.startup_note == "Configured local model was unavailable. Starting in mock mode instead."
+    assert (
+        config.startup_note
+        == "Configured local model was unavailable. Starting in mock mode instead."
+    )
 
 
 def test_validate_startup_config_uses_saved_user_config_defaults(
@@ -176,6 +182,23 @@ def test_validate_startup_config_prefers_cli_args_over_saved_config(tmp_path) ->
     assert config.model == str(model_path)
     assert config.theme == "dark_dungeon"
     assert config.preset == "precise"
+
+
+def test_validate_startup_config_collects_startup_accessibility_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_MODEL_PATH", raising=False)
+    with patch("cyoa.core.user_config.load_user_config", return_value=UserConfig()):
+        config = main.validate_startup_config(
+            _args(screen_reader=True, high_contrast=True, reduced_motion=True)
+        )
+
+    assert config.startup_accessibility_overrides == {
+        "screen_reader_mode": True,
+        "high_contrast": True,
+        "reduced_motion": True,
+    }
 
 
 def test_validate_startup_config_cli_model_overrides_mock_provider_env(
@@ -243,7 +266,9 @@ def test_main_returns_error_for_invalid_theme_payload(monkeypatch: pytest.Monkey
         patch("cyoa.core.theme_loader.list_themes", return_value=["dark_dungeon"]),
         patch(
             "cyoa.core.theme_loader.load_theme",
-            side_effect=ThemeValidationError("Theme 'dark_dungeon': prompt must be a non-empty string."),
+            side_effect=ThemeValidationError(
+                "Theme 'dark_dungeon': prompt must be a non-empty string."
+            ),
         ),
         patch("cyoa.db.story_logger.StoryLogger") as logger_cls,
         patch("cyoa.ui.app.CYOAApp") as app_cls,
@@ -292,14 +317,19 @@ def test_main_writes_crash_log_for_unexpected_failure(monkeypatch: pytest.Monkey
             "cyoa.core.theme_loader.load_theme",
             return_value={"prompt": "Start", "spinner_frames": ["-"], "accent_color": None},
         ),
-        patch("cyoa.core.support.write_crash_log", return_value="/tmp/last_crash.log") as write_crash_log,
+        patch(
+            "cyoa.core.support.write_crash_log", return_value="/tmp/last_crash.log"
+        ) as write_crash_log,
         patch("cyoa.db.story_logger.StoryLogger", return_value=logger_service),
         patch("cyoa.ui.app.CYOAApp", return_value=app),
     ):
         exit_code = main.main([])
 
     assert exit_code == 1
-    assert "Unexpected startup failure. Details were written to /tmp/last_crash.log" in stderr.getvalue()
+    assert (
+        "Unexpected startup failure. Details were written to /tmp/last_crash.log"
+        in stderr.getvalue()
+    )
     write_crash_log.assert_called_once()
     logger_service.close.assert_called_once_with()
 
@@ -354,6 +384,60 @@ def test_main_persists_resolved_user_config(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert exit_code == 0
     update_config.assert_called_once()
+
+
+def test_main_passes_startup_accessibility_overrides_to_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+
+    with (
+        patch("cyoa.core.constants.ensure_user_directories"),
+        patch("cyoa.core.observability.setup_observability"),
+        patch("cyoa.core.theme_loader.list_themes", return_value=["dark_dungeon"]),
+        patch(
+            "cyoa.core.theme_loader.load_theme",
+            return_value={"prompt": "Start", "spinner_frames": ["-"], "accent_color": None},
+        ),
+        patch("cyoa.core.user_config.update_user_config"),
+        patch("cyoa.db.story_logger.StoryLogger"),
+        patch("cyoa.ui.app.CYOAApp") as app_cls,
+    ):
+        app_cls.return_value.run.return_value = None
+        exit_code = main.main(["--screen-reader", "--high-contrast", "--reduced-motion"])
+
+    assert exit_code == 0
+    assert app_cls.call_args.kwargs["startup_accessibility_overrides"] == {
+        "screen_reader_mode": True,
+        "high_contrast": True,
+        "reduced_motion": True,
+    }
+
+
+def test_main_does_not_persist_startup_accessibility_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+
+    with (
+        patch("cyoa.core.constants.ensure_user_directories"),
+        patch("cyoa.core.observability.setup_observability"),
+        patch("cyoa.core.theme_loader.list_themes", return_value=["dark_dungeon"]),
+        patch(
+            "cyoa.core.theme_loader.load_theme",
+            return_value={"prompt": "Start", "spinner_frames": ["-"], "accent_color": None},
+        ),
+        patch("cyoa.core.user_config.update_user_config") as update_config,
+        patch("cyoa.db.story_logger.StoryLogger"),
+        patch("cyoa.ui.app.CYOAApp") as app_cls,
+    ):
+        app_cls.return_value.run.return_value = None
+        exit_code = main.main(["--screen-reader", "--high-contrast", "--reduced-motion"])
+
+    assert exit_code == 0
+    assert "screen_reader_mode" not in update_config.call_args.kwargs
+    assert "high_contrast" not in update_config.call_args.kwargs
+    assert "reduced_motion" not in update_config.call_args.kwargs
 
 
 def test_pyproject_registers_installed_cli_entrypoint() -> None:

@@ -17,6 +17,15 @@ uv sync
 uv run cyoa-tui
 ```
 
+You can force critical accessibility modes before the full UI renders:
+
+```bash
+uv run cyoa-tui --screen-reader --reduced-motion
+uv run cyoa-tui --high-contrast
+```
+
+These flags apply immediately for the current launch. They do not rewrite saved settings unless you later save the same values from the in-app Settings screen.
+
 On first launch, choose one of these:
 
 - `Quick Demo` for instant play with the built-in mock backend

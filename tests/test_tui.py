@@ -22,6 +22,7 @@ from cyoa.ui.components import (
     HelpScreen,
     LoadGameScreen,
     NotificationHistoryScreen,
+    SceneRecapScreen,
     StartupChoiceScreen,
     TextPromptScreen,
 )
@@ -304,6 +305,77 @@ async def test_screen_reader_mode_uses_plain_status_shell_on_startup(mock_app_de
         assert inventory_label.startswith("Inventory:")
         assert latest_status.startswith("Information:")
         assert scene_art.has_class("hidden")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("overrides", "attribute", "enabled_class"),
+    [
+        ({"screen_reader_mode": True}, "screen_reader_mode", "screen-reader-mode"),
+        ({"high_contrast": True}, "high_contrast_mode", "high-contrast-mode"),
+        ({"reduced_motion": True}, "reduced_motion", "reduced-motion"),
+    ],
+)
+async def test_startup_accessibility_overrides_apply_before_first_paint(
+    mock_app_dependencies,
+    overrides: dict[str, bool],
+    attribute: str,
+    enabled_class: str,
+):
+    with patch(
+        "cyoa.ui.app.load_user_config",
+        return_value=UserConfig(setup_completed=True),
+    ):
+        app = CYOAApp(
+            model_path="dummy_path.gguf",
+            startup_accessibility_overrides=overrides,
+        )
+
+    async with app.run_test() as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+        assert getattr(app, attribute) is True
+        assert app.has_class(enabled_class)
+        if attribute == "screen_reader_mode":
+            assert app.query_one("#scene-art", Static).has_class("hidden")
+
+
+@pytest.mark.asyncio
+async def test_startup_accessibility_overrides_win_over_saved_config(
+    mock_app_dependencies,
+):
+    with patch(
+        "cyoa.ui.app.load_user_config",
+        return_value=UserConfig(
+            setup_completed=True,
+            high_contrast=False,
+            reduced_motion=False,
+            screen_reader_mode=False,
+        ),
+    ):
+        app = CYOAApp(
+            model_path="dummy_path.gguf",
+            startup_accessibility_overrides={
+                "screen_reader_mode": True,
+                "high_contrast": True,
+                "reduced_motion": True,
+            },
+        )
+
+    assert app._user_config.screen_reader_mode is False
+    assert app._user_config.high_contrast is False
+    assert app._user_config.reduced_motion is False
+
+    async with app.run_test() as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+        assert app.screen_reader_mode is True
+        assert app.high_contrast_mode is True
+        assert app.reduced_motion is True
 
 
 @pytest.mark.asyncio
@@ -903,6 +975,30 @@ async def test_notification_history_screen_opens_from_action(mock_app_dependenci
         await pilot.press("escape")
         await pilot.pause(0.2)
         assert not isinstance(app.screen, NotificationHistoryScreen)
+
+
+@pytest.mark.asyncio
+async def test_scene_recap_screen_opens_during_live_play(mock_app_dependencies):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+
+        await pilot.press("i")
+        await pilot.pause(0.2)
+
+        assert isinstance(app.screen, SceneRecapScreen)
+        assert "## Scene" in app.screen._recap_text
+        assert "You awaken in a test dungeon." in app.screen._recap_text
+        assert "1. Go North" in app.screen._recap_text
+        assert "2. Go South" in app.screen._recap_text
+
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert not isinstance(app.screen, SceneRecapScreen)
 
 
 @pytest.mark.asyncio

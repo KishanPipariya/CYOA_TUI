@@ -29,6 +29,7 @@ class StartupConfig:
     prompt: str | None
     preset: str | None
     runtime_preset: str | None
+    startup_accessibility_overrides: dict[str, bool]
     startup_note: str | None = None
 
 
@@ -43,8 +44,7 @@ def _build_parser(available_themes: Sequence[str] | None = None) -> argparse.Arg
     themes_help = "Story theme to use (default: dark_dungeon)."
     if available_themes:
         themes_help = (
-            "Story theme to use. "
-            f"Available: {', '.join(available_themes)} (default: dark_dungeon)"
+            f"Story theme to use. Available: {', '.join(available_themes)} (default: dark_dungeon)"
         )
 
     parser = argparse.ArgumentParser(description="CYOA Terminal Game with Local LLM")
@@ -77,6 +77,21 @@ def _build_parser(available_themes: Sequence[str] | None = None) -> argparse.Arg
         type=str,
         default=None,
         help="Runtime profile to apply (local-quality, local-fast, mock-smoke).",
+    )
+    parser.add_argument(
+        "--screen-reader",
+        action="store_true",
+        help="Start this session in screen reader mode without changing saved settings.",
+    )
+    parser.add_argument(
+        "--high-contrast",
+        action="store_true",
+        help="Start this session in high contrast mode without changing saved settings.",
+    )
+    parser.add_argument(
+        "--reduced-motion",
+        action="store_true",
+        help="Start this session with reduced motion without changing saved settings.",
     )
     return parser
 
@@ -191,7 +206,10 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:  # noqa:
         model = env_model
     elif raw_provider is None:
         model = saved_model
-    elif raw_provider.strip().lower() == "llama_cpp" and provider_source in {"user_config", "runtime_preset"}:
+    elif raw_provider.strip().lower() == "llama_cpp" and provider_source in {
+        "user_config",
+        "runtime_preset",
+    }:
         model = saved_model
     else:
         model = None
@@ -215,7 +233,9 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:  # noqa:
                         "No local model configured for llama_cpp. Use --model or set LLM_MODEL_PATH in .env."
                     )
                 provider = _select_safe_default_provider(model=None)
-                startup_note = f"Local model was not configured. Starting in {provider} mode instead."
+                startup_note = (
+                    f"Local model was not configured. Starting in {provider} mode instead."
+                )
             elif not os.path.exists(model):
                 if provider_source in {"env", "cli_model"}:
                     raise StartupConfigError(
@@ -231,6 +251,15 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:  # noqa:
         if isinstance(args.theme, str) and args.theme.strip()
         else user_config.theme or "dark_dungeon"
     )
+    startup_accessibility_overrides = {
+        key: True
+        for key, enabled in (
+            ("screen_reader_mode", args.screen_reader),
+            ("high_contrast", args.high_contrast),
+            ("reduced_motion", args.reduced_motion),
+        )
+        if enabled
+    }
 
     return StartupConfig(
         model=model,
@@ -239,6 +268,7 @@ def validate_startup_config(args: argparse.Namespace) -> StartupConfig:  # noqa:
         prompt=args.prompt,
         preset=preset,
         runtime_preset=runtime_preset,
+        startup_accessibility_overrides=startup_accessibility_overrides,
         startup_note=startup_note,
     )
 
@@ -326,9 +356,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         runtime_diagnostics={
             "runtime_preset": config.runtime_preset or "custom",
             "provider": config.provider,
-            "model": (config.model or "(provider default)") if config.provider != "mock" else "mock",
+            "model": (config.model or "(provider default)")
+            if config.provider != "mock"
+            else "mock",
             "startup_note": config.startup_note or "",
         },
+        startup_accessibility_overrides=config.startup_accessibility_overrides,
     )
 
     try:

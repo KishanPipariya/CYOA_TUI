@@ -46,6 +46,18 @@ uv sync --extra local-llm
 uv run cyoa-tui
 ```
 
+## Startup Accessibility Flags
+
+If you need an accessible startup mode before the full UI appears, launch with one or more of these flags:
+
+```bash
+uv run cyoa-tui --screen-reader
+uv run cyoa-tui --high-contrast
+uv run cyoa-tui --reduced-motion
+```
+
+You can combine them. These flags apply immediately for the current session and do not change your saved config unless you later save the same values from Settings.
+
 ## First Launch
 
 On a fresh machine, the app opens with a first-run setup screen.
@@ -86,6 +98,7 @@ Dark mode and typewriter changes apply immediately. Provider, model path, theme 
 - `s` / `l`: save or load
 - `u` / `y`: undo or redo
 - `j` / `m`: toggle journal or story map
+- `i`: open a structured recap of the current scene, choices, and progress
 - `e`: export story
 - `q`: quit
 

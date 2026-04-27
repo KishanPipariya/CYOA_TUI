@@ -66,6 +66,7 @@ __all__ = [
     "StatusBar",
     "TextPromptScreen",
     "JournalListItem",
+    "SceneRecapScreen",
     "SceneListItem",
     "SaveListItem",
     "StatusDisplay",
@@ -1563,6 +1564,35 @@ class NotificationHistoryScreen(ModalScreen[None]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-notification-history-close":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class SceneRecapScreen(ModalScreen[None]):
+    """Modal screen showing a structured recap of the current scene and state."""
+
+    DEFAULT_CSS = HelpScreen.DEFAULT_CSS
+    BINDINGS = [("escape", "close", "Close")]
+
+    def __init__(self, recap_text: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._recap_text = recap_text
+
+    def compose(self) -> ComposeResult:
+        with DialogFrame(
+            id="scene-recap-dialog", classes="dialog-frame dialog-frame-scroll dialog-frame-accent"
+        ):
+            with Container(id="scene-recap-content", classes="dialog-content"):
+                yield Markdown(self._recap_text, id="scene-recap-text")
+            yield Button("Close [b](Esc)[/b]", id="btn-scene-recap-close", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#btn-scene-recap-close", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-scene-recap-close":
             self.dismiss(None)
 
     def action_close(self) -> None:

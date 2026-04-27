@@ -200,6 +200,184 @@ def format_new_adventure_label(*, screen_reader_mode: bool) -> str:
     return "Start a new adventure" if screen_reader_mode else "✦ Start a New Adventure"
 
 
+def _format_signed_change(value: int) -> str:
+    return f"{value:+d}"
+
+
+def _format_stat_name(name: str) -> str:
+    return name.replace("_", " ").title()
+
+
+def _active_objective_texts(objectives: list[Any]) -> list[str]:
+    active: list[str] = []
+    for objective in objectives:
+        if isinstance(objective, dict):
+            text = objective.get("text")
+            status = objective.get("status", "active")
+        else:
+            text = getattr(objective, "text", None)
+            status = getattr(objective, "status", "active")
+        if isinstance(text, str) and text.strip() and status == "active":
+            active.append(text.strip())
+    return active
+
+
+def build_scene_recap(  # noqa: C901
+    *,
+    narrative: str,
+    choices: list[Any],
+    inventory: list[str],
+    player_stats: dict[str, int],
+    objectives: list[Any],
+    screen_reader_mode: bool,
+    turn_count: int,
+    story_title: str | None = None,
+    last_choice_text: str | None = None,
+    story_flags: set[str] | list[str] | None = None,
+    items_gained: list[str] | None = None,
+    items_lost: list[str] | None = None,
+    stat_updates: dict[str, int] | None = None,
+    objectives_updated: list[Any] | None = None,
+    faction_updates: dict[str, int] | None = None,
+    npc_affinity_updates: dict[str, int] | None = None,
+    story_flags_set: list[str] | None = None,
+    story_flags_cleared: list[str] | None = None,
+) -> str:
+    recap_lines = [f"Turn {turn_count}"]
+    if story_title:
+        recap_lines[0] = f"{story_title} | Turn {turn_count}"
+    if screen_reader_mode and last_choice_text:
+        recap_lines.append(f"Last choice: {last_choice_text}")
+
+    recap_lines.extend(
+        [
+            "",
+            "## Scene",
+            narrative.strip() or "No current scene available.",
+            "",
+            "## Choices",
+        ]
+    )
+
+    normalized_flags = set(story_flags or [])
+    if choices:
+        for index, choice in enumerate(choices, start=1):
+            choice_text = str(getattr(choice, "text", "")).strip() or "Unnamed choice"
+            availability_reason = None
+            reason_builder = getattr(choice, "availability_reason", None)
+            if callable(reason_builder):
+                availability_reason = reason_builder(
+                    inventory,
+                    player_stats,
+                    normalized_flags,
+                )
+            if availability_reason:
+                reason = format_status_message(
+                    availability_reason,
+                    screen_reader_mode=True,
+                )
+                if screen_reader_mode:
+                    recap_lines.append(f"{index}. {choice_text}")
+                    recap_lines.append(f"   Unavailable: {reason}")
+                else:
+                    recap_lines.append(f"{index}. {choice_text} (Unavailable: {reason})")
+            else:
+                recap_lines.append(f"{index}. {choice_text}")
+    else:
+        recap_lines.append("No further choices. This scene is an ending.")
+
+    active_objectives = _active_objective_texts(objectives)
+    recap_lines.extend(["", "## Objectives"])
+    if active_objectives:
+        recap_lines.extend(f"- {objective}" for objective in active_objectives)
+    else:
+        recap_lines.append("- None")
+
+    health = player_stats.get("health", 0)
+    gold = player_stats.get("gold", 0)
+    reputation = player_stats.get("reputation", 0)
+    inventory_text = ", ".join(inventory) if inventory else "Empty"
+
+    recap_lines.extend(["", "## Progress"])
+    if screen_reader_mode:
+        recap_lines.extend(
+            [
+                f"- Health: {health}",
+                f"- Gold: {gold}",
+                f"- Reputation: {reputation}",
+                f"- Inventory: {inventory_text}",
+            ]
+        )
+    else:
+        recap_lines.extend(
+            [
+                f"- Stats: Health {health} | Gold {gold} | Reputation {reputation}",
+                f"- Inventory: {inventory_text}",
+            ]
+        )
+
+    recent_changes: list[str] = []
+    if items_gained:
+        recent_changes.append(f"Items gained: {', '.join(items_gained)}")
+    if items_lost:
+        recent_changes.append(f"Items lost: {', '.join(items_lost)}")
+    if stat_updates:
+        ordered_stats = ["health", "gold", "reputation"]
+        stat_parts = [
+            f"{_format_stat_name(name)} {_format_signed_change(stat_updates[name])}"
+            for name in ordered_stats
+            if stat_updates.get(name)
+        ]
+        stat_parts.extend(
+            f"{_format_stat_name(name)} {_format_signed_change(change)}"
+            for name, change in sorted(stat_updates.items())
+            if name not in ordered_stats and change
+        )
+        if stat_parts:
+            recent_changes.append("Stats changed: " + "; ".join(stat_parts))
+    if objectives_updated:
+        objective_parts = []
+        for objective in objectives_updated:
+            if isinstance(objective, dict):
+                text = objective.get("text")
+                status = objective.get("status", "active")
+            else:
+                text = getattr(objective, "text", None)
+                status = getattr(objective, "status", "active")
+            if isinstance(text, str) and text.strip():
+                objective_parts.append(f"{text.strip()} ({status})")
+        if objective_parts:
+            recent_changes.append("Objective updates: " + "; ".join(objective_parts))
+    if faction_updates:
+        faction_parts = [
+            f"{name} {_format_signed_change(change)}"
+            for name, change in sorted(faction_updates.items())
+            if change
+        ]
+        if faction_parts:
+            recent_changes.append("Faction changes: " + "; ".join(faction_parts))
+    if npc_affinity_updates:
+        affinity_parts = [
+            f"{name} {_format_signed_change(change)}"
+            for name, change in sorted(npc_affinity_updates.items())
+            if change
+        ]
+        if affinity_parts:
+            recent_changes.append("NPC affinity changes: " + "; ".join(affinity_parts))
+    if story_flags_set:
+        recent_changes.append("Flags set: " + ", ".join(story_flags_set))
+    if story_flags_cleared:
+        recent_changes.append("Flags cleared: " + ", ".join(story_flags_cleared))
+
+    recap_lines.extend(["", "## Recent Changes"])
+    if recent_changes:
+        recap_lines.extend(f"- {change}" for change in recent_changes)
+    else:
+        recap_lines.append("- No major changes this turn.")
+
+    return "\n".join(recap_lines)
+
+
 def build_help_text(
     *,
     screen_reader_mode: bool,
