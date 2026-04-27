@@ -1,0 +1,36 @@
+name = "Fixture Valid Theme"
+description = "A valid theme fixture for accessibility validation tests."
+prompt = "Begin the story."
+accent_color = "cyan"
+spinner_frames = ["-", "|", "/"]
+goals = ["Investigate the signal"]
+directives = ["Respect locked choices"]
+opening_inventory = ["Field notebook"]
+story_flags = ["saw_signal"]
+content_tags = ["mystery"]
+persona = "Stay observant."
+
+[opening_stats]
+focus = 3
+
+[faction_reputation]
+Archivists = 1
+
+[npc_affinity]
+Ada = 2
+
+[[opening_objectives]]
+id = "signal"
+text = "Investigate the strange signal"
+status = "active"
+
+[ui]
+main_surface = "#101820"
+action_dock_surface = "#111827"
+side_panel_surface = "#121a22"
+status_surface = "#13202a"
+story_card_surface = "#17232c"
+story_card_muted_surface = "#0f161d"
+player_choice_surface = "#1a2f3d"
+choice_surface = "#20303d"
+choice_locked_surface = "#16191d"

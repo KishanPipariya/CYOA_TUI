@@ -1,4 +1,6 @@
 import json
+import tomllib
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +14,14 @@ from cyoa.core.theme_loader import (
     validate_moods_config,
     validate_theme,
 )
+
+FIXTURE_THEMES_DIR = Path(__file__).parent / "fixtures" / "themes"
+
+
+def _load_theme_fixture(*parts: str) -> dict:
+    fixture_path = FIXTURE_THEMES_DIR.joinpath(*parts)
+    with fixture_path.open("rb") as fixture:
+        return tomllib.load(fixture)
 
 
 def test_themes_directory_exists():
@@ -136,41 +146,11 @@ def test_load_theme_rejects_path_traversal():
 
 
 def test_validate_theme_accepts_richer_content_bundle():
-    theme = validate_theme(
-        {
-            "name": "Bundle",
-            "description": "Richer theme",
-            "prompt": "Start",
-            "accent_color": "cyan",
-            "spinner_frames": ["-", "|"],
-            "goals": ["Investigate"],
-            "directives": ["Respect locks"],
-            "opening_inventory": ["Keycard"],
-            "opening_stats": {"health": 90},
-            "opening_objectives": [{"id": "obj", "text": "Investigate", "status": "active"}],
-            "faction_reputation": {"Guild": 2},
-            "npc_affinity": {"Ada": 1},
-            "story_flags": ["met_ada"],
-            "content_tags": ["sci_fi"],
-            "persona": "Be precise.",
-            "ui": {
-                "main_surface": "#101820",
-                "action_dock_surface": "#111827",
-                "side_panel_surface": "#121a22",
-                "status_surface": "#13202a",
-                "story_card_surface": "#17232c",
-                "story_card_muted_surface": "#0f161d",
-                "player_choice_surface": "#1a2f3d",
-                "choice_surface": "#20303d",
-                "choice_locked_surface": "#16191d",
-            },
-        },
-        "bundle",
-    )
+    theme = validate_theme(_load_theme_fixture("passing", "valid_theme.toml"), "fixture_valid")
 
-    assert theme["opening_stats"] == {"health": 90}
-    assert theme["faction_reputation"] == {"Guild": 2}
-    assert theme["opening_objectives"][0]["id"] == "obj"
+    assert theme["opening_stats"] == {"focus": 3}
+    assert theme["faction_reputation"] == {"Archivists": 1}
+    assert theme["opening_objectives"][0]["id"] == "signal"
     assert theme["ui"]["choice_surface"] == "#20303d"
 
 
@@ -213,51 +193,15 @@ def test_validate_theme_rejects_missing_required_ui_field():
         )
 
 
-def test_validate_theme_rejects_muted_surface_that_matches_active_story_surface():
-    with pytest.raises(ThemeValidationError, match="story_card_muted_surface is too close"):
-        validate_theme(
-            {
-                "name": "Broken",
-                "description": "Muted surface blends into active story cards",
-                "prompt": "Start",
-                "accent_color": "blue",
-                "spinner_frames": ["-"],
-                "ui": {
-                    "main_surface": "#101010",
-                    "action_dock_surface": "#111111",
-                    "side_panel_surface": "#121212",
-                    "status_surface": "#131313",
-                    "story_card_surface": "#181818",
-                    "story_card_muted_surface": "#181818",
-                    "player_choice_surface": "#161616",
-                    "choice_surface": "#2A2A2A",
-                    "choice_locked_surface": "#1A1A1A",
-                },
-            },
-            "broken",
-        )
-
-
-def test_validate_theme_rejects_locked_choice_surface_that_matches_active_choice_surface():
-    with pytest.raises(ThemeValidationError, match="choice_locked_surface is too close"):
-        validate_theme(
-            {
-                "name": "Broken",
-                "description": "Locked choices should not look active",
-                "prompt": "Start",
-                "accent_color": "blue",
-                "spinner_frames": ["-"],
-                "ui": {
-                    "main_surface": "#101010",
-                    "action_dock_surface": "#111111",
-                    "side_panel_surface": "#121212",
-                    "status_surface": "#131313",
-                    "story_card_surface": "#1A1A1A",
-                    "story_card_muted_surface": "#141414",
-                    "player_choice_surface": "#161616",
-                    "choice_surface": "#2F3F55",
-                    "choice_locked_surface": "#2F3F55",
-                },
-            },
-            "broken",
-        )
+@pytest.mark.parametrize(
+    ("fixture_name", "message"),
+    [
+        ("muted_surface_too_close.toml", "story_card_muted_surface is too close"),
+        ("locked_surface_too_close.toml", "choice_locked_surface is too close"),
+    ],
+)
+def test_validate_theme_rejects_failing_accessibility_fixtures(
+    fixture_name: str, message: str
+) -> None:
+    with pytest.raises(ThemeValidationError, match=message):
+        validate_theme(_load_theme_fixture("failing", fixture_name), f"fixture_{fixture_name}")

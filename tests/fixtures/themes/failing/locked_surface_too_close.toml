@@ -1,0 +1,16 @@
+name = "Fixture Broken Locked Surface"
+description = "Locked choices should remain visually distinct."
+prompt = "Begin the story."
+accent_color = "blue"
+spinner_frames = ["-"]
+
+[ui]
+main_surface = "#101010"
+action_dock_surface = "#111111"
+side_panel_surface = "#121212"
+status_surface = "#131313"
+story_card_surface = "#1A1A1A"
+story_card_muted_surface = "#141414"
+player_choice_surface = "#161616"
+choice_surface = "#2F3F55"
+choice_locked_surface = "#2F3F55"
