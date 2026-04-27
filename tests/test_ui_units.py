@@ -35,6 +35,7 @@ from cyoa.ui.mixins.rendering import RenderingMixin, _detect_scene_art
 from cyoa.ui.mixins.theme import ThemeMixin, _build_surface_style
 from cyoa.ui.mixins.typewriter import TypewriterMixin
 from cyoa.ui.presenters import (
+    build_accessible_export,
     build_choice_label,
     build_scene_recap,
     format_status_message,
@@ -562,6 +563,37 @@ def test_build_scene_recap_is_more_explicit_in_screen_reader_mode() -> None:
     assert "- Gold: 0" in recap
     assert "- Reputation: 2" in recap
     assert "- Inventory: Empty" in recap
+
+
+def test_build_accessible_export_uses_plain_text_reading_order() -> None:
+    transcript = build_accessible_export(
+        story_title="Vault Run",
+        turn_count=3,
+        saved_at="2026-04-27T09:30:00Z",
+        story_segments=[
+            {"kind": "story_turn", "text": "The vault door trembles but does not open."},
+            {"kind": "player_choice", "text": "**You chose:** Wait and listen"},
+            {"kind": "branch_marker", "text": "**[Time fractures... you return to Turn 2]**"},
+            {"kind": "story_turn", "text": "A hidden latch clicks behind the mural."},
+        ],
+        current_story_text=None,
+        directives=["Avoid combat", "Stay quiet"],
+        inventory=["Torch", "Ancient Coin"],
+        player_stats={"health": 90, "gold": 5, "reputation": 1},
+        objectives=[{"id": "escape", "text": "Escape the vault", "status": "active"}],
+    )
+
+    assert "Title: Vault Run" in transcript
+    assert "Turn Count: 3" in transcript
+    assert "Active Directives:" in transcript
+    assert "Transcript:" in transcript
+    assert "Scene:\nThe vault door trembles but does not open." in transcript
+    assert "Choice: Wait and listen" in transcript
+    assert "Branch: Time fractures... you return to Turn 2" in transcript
+    assert "Current Progress:" in transcript
+    assert "- Inventory: Torch, Ancient Coin" in transcript
+    assert "- Objectives: Escape the vault" in transcript
+    assert "---" not in transcript
 
 
 def test_app_effective_keybindings_merge_defaults_and_overrides() -> None:

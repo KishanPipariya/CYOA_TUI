@@ -77,6 +77,12 @@ def _mock_generator(*args, **kwargs):
     return mock_gen
 
 
+def _app_with_accessibility_config(**config_overrides: Any) -> CYOAApp:
+    config = UserConfig(setup_completed=True, **config_overrides)
+    with patch("cyoa.ui.app.load_user_config", return_value=config):
+        return CYOAApp(model_path="dummy_path.gguf")
+
+
 async def _wait_for(
     predicate: Any,
     *,
@@ -376,6 +382,82 @@ async def test_startup_accessibility_overrides_win_over_saved_config(
         assert app.screen_reader_mode is True
         assert app.high_contrast_mode is True
         assert app.reduced_motion is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config_overrides", "expected_classes", "expected_status_line", "expect_scene_art_hidden"),
+    [
+        (
+            {
+                "screen_reader_mode": True,
+                "reduced_motion": True,
+                "typewriter": False,
+            },
+            ("screen-reader-mode", "reduced-motion"),
+            "Information: Weaving possible futures...",
+            True,
+        ),
+        (
+            {
+                "high_contrast": True,
+                "text_scale": "xlarge",
+                "line_width": "focused",
+                "line_spacing": "relaxed",
+                "typewriter": False,
+            },
+            (
+                "high-contrast-mode",
+                "text-scale-xlarge",
+                "line-width-focused",
+                "line-spacing-relaxed",
+            ),
+            "Information: ⚡ Weaving possible futures...",
+            False,
+        ),
+        (
+            {
+                "screen_reader_mode": True,
+                "reduced_motion": True,
+                "cognitive_load_reduction_mode": True,
+                "typewriter": False,
+            },
+            ("screen-reader-mode", "reduced-motion", "cognitive-load-mode"),
+            "Update: Weaving possible futures...",
+            True,
+        ),
+    ],
+)
+async def test_accessibility_matrix_covers_story_notifications_and_settings(
+    mock_app_dependencies,
+    config_overrides: dict[str, Any],
+    expected_classes: tuple[str, ...],
+    expected_status_line: str,
+    expect_scene_art_hidden: bool,
+) -> None:
+    app = _app_with_accessibility_config(**config_overrides)
+
+    async with app.run_test(size=(100, 34)) as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+
+        for class_name in expected_classes:
+            assert app.has_class(class_name)
+
+        assert app.query_one("#scene-art", Static).has_class("hidden") is expect_scene_art_hidden
+
+        app.notify("⚡ Weaving possible futures...", severity="information", timeout=1)
+        await pilot.pause(0.2)
+        assert app.get_notification_history_lines()[-1] == expected_status_line
+
+        app.action_show_settings()
+        await pilot.pause(0.2)
+        assert app.screen.query_one("#settings-dialog")
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert app.screen.id == "_default"
 
 
 @pytest.mark.asyncio
@@ -1548,6 +1630,106 @@ async def test_startup_choice_screen_supports_keyboard_focus_and_enter(
 
 
 @pytest.mark.asyncio
+async def test_modal_close_restores_previous_focus_for_help_settings_and_notifications(
+    mock_app_dependencies,
+) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+
+        status_display = app.query_one("#status-display", Static)
+        story = app.query_one("#story-container", VerticalScroll)
+        choice_buttons = list(app.query_one("#choices-container", Container).query(Button))
+
+        status_display.focus()
+        await pilot.pause(0.1)
+        app.action_show_help()
+        await pilot.pause(0.2)
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert app.focused is status_display
+
+        story.focus()
+        await pilot.pause(0.1)
+        app.action_show_settings()
+        await pilot.pause(0.2)
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert app.focused is story
+
+        choice_buttons[1].focus()
+        await pilot.pause(0.1)
+        app.action_show_notification_history()
+        await pilot.pause(0.2)
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert app.focused is choice_buttons[1]
+
+
+@pytest.mark.asyncio
+async def test_nested_modal_close_restores_focus_to_startup_dialog(mock_app_dependencies) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        app._push_modal_screen(StartupChoiceScreen("Resume your last session?"))
+        await pilot.pause(0.2)
+
+        new_button = app.screen.query_one("#btn-startup-new", Button)
+        new_button.focus()
+        await pilot.pause(0.1)
+
+        app._push_modal_screen(ConfirmScreen("Discard the recovered run?"))
+        await _wait_for_pilot(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, StartupChoiceScreen)
+        assert app.focused is new_button
+
+
+@pytest.mark.asyncio
+async def test_choice_rerender_preserves_story_focus_and_recovers_removed_choice_target(
+    mock_app_dependencies,
+) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+
+        story = app.query_one("#story-container", VerticalScroll)
+        story.focus()
+        await pilot.pause(0.1)
+
+        app.screen_reader_mode = True
+        await pilot.pause(0.2)
+        assert app.focused is story
+
+        choices_container = app.query_one("#choices-container", Container)
+        choice_buttons = list(choices_container.query(Button))
+        choice_buttons[1].focus()
+        await pilot.pause(0.1)
+
+        focus_target = app._capture_focus_target()
+        choices_container.remove_children()
+        app._mount_choice_buttons(
+            StoryNode(
+                narrative="You opened the door and escaped!",
+                choices=[],
+                is_ending=True,
+                title="Test Adventure",
+            ),
+            choices_container,
+            False,
+            focus_target=focus_target,
+        )
+        await pilot.pause(0.2)
+
+        assert app.focused is app.query_one("#btn-new-adventure", Button)
+
+
+@pytest.mark.asyncio
 async def test_save_and_load_game(mock_app_dependencies, tmp_path, monkeypatch):
     """Test saving and loading a game state."""
     from cyoa.core import constants
@@ -1735,7 +1917,7 @@ async def test_startup_new_game_requires_confirmation_before_discarding_autosave
 
 
 @pytest.mark.asyncio
-async def test_export_story_writes_markdown_and_timeline_json(
+async def test_export_story_writes_markdown_accessible_text_and_timeline_json(
     mock_app_dependencies, tmp_path, monkeypatch
 ):
     from cyoa.core import constants
@@ -1751,13 +1933,62 @@ async def test_export_story_writes_markdown_and_timeline_json(
         await _wait_for_pilot(pilot, lambda: len(list((tmp_path / "exports").glob("*.md"))) == 1)
 
         markdown_files = list((tmp_path / "exports").glob("*.md"))
+        accessible_files = list((tmp_path / "exports").glob("*.accessible.txt"))
         json_files = list((tmp_path / "exports").glob("*.timeline.json"))
         assert len(markdown_files) == 1
+        assert len(accessible_files) == 1
         assert len(json_files) == 1
         assert "## Story" in markdown_files[0].read_text(encoding="utf-8")
+        accessible_text = accessible_files[0].read_text(encoding="utf-8")
+        assert "Transcript:" in accessible_text
+        assert "Choice: Go North" in accessible_text
+        assert "---" not in accessible_text
         timeline = json.loads(json_files[0].read_text(encoding="utf-8"))
         assert timeline["turn_count"] == 2
         assert timeline["story_segments"]
+
+
+@pytest.mark.asyncio
+async def test_accessibility_matrix_export_supports_combined_mode(
+    mock_app_dependencies, tmp_path, monkeypatch
+) -> None:
+    from cyoa.core import constants
+
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+    app = _app_with_accessibility_config(
+        screen_reader_mode=True,
+        reduced_motion=True,
+        cognitive_load_reduction_mode=True,
+        typewriter=False,
+    )
+
+    async with app.run_test() as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+        await _wait_for_pilot(
+            pilot,
+            lambda: len(list(app.query_one("#choices-container", Container).query(Button))) > 0,
+        )
+        first_choice = list(app.query_one("#choices-container", Container).query(Button))[0]
+        first_choice.focus()
+        await pilot.pause(0.1)
+        await pilot.press("enter")
+        await _wait_for_pilot(pilot, lambda: app.turn_count == 2, timeout=5.0)
+        await pilot.press("e")
+        await _wait_for_pilot(
+            pilot,
+            lambda: len(list((tmp_path / "exports").glob("*.accessible.txt"))) == 1,
+        )
+
+        accessible_file = next((tmp_path / "exports").glob("*.accessible.txt"))
+        transcript = accessible_file.read_text(encoding="utf-8")
+        assert "Transcript:" in transcript
+        assert "Choice: Go North" in transcript
+        assert "Current Progress:" in transcript
+        assert "**" not in transcript
+        assert "---" not in transcript
 
 
 @pytest.mark.asyncio

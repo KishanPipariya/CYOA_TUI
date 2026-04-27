@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from typing import Any, cast
 
 from textual.app import App
 from textual.containers import Container, VerticalScroll
@@ -107,11 +108,15 @@ class UndoCommand:
         else:
             host._update_current_story_segment(host._current_turn_text)
 
+        focus_target = host._capture_focus_target()
         choices_container = app.query_one("#choices-container", Container)
         choices_container.remove_children()
         if host.engine.state.current_node:
             host._mount_choice_buttons(
-                host.engine.state.current_node, choices_container, is_error=False
+                host.engine.state.current_node,
+                choices_container,
+                is_error=False,
+                focus_target=focus_target,
             )
 
         app.query_one("#loading", Static).add_class("hidden")
@@ -173,7 +178,7 @@ class SaveGameCommand:
         if os.path.exists(save_path):
             from cyoa.ui.components import ConfirmScreen
 
-            app.push_screen(
+            cast(Any, app)._push_modal_screen(
                 ConfirmScreen(
                     f"[b]Overwrite existing save?[/b]\n\n{os.path.basename(save_path)} already exists for this turn. Replace it with the current state."
                 ),
@@ -194,9 +199,11 @@ class ExportStoryCommand:
             return
 
         payload = owner._build_save_payload(host, app)
-        markdown_path, json_path = owner._write_export_files(
+        markdown_path, accessible_path, json_path = owner._write_export_files(
             payload, owner._resolve_save_title(host) or "adventure"
         )
         app.notify(
-            f"Exported story to {markdown_path} and {json_path}", severity="information", timeout=4
+            (f"Exported story to {markdown_path}, {accessible_path}, and {json_path}"),
+            severity="information",
+            timeout=4,
         )

@@ -154,7 +154,7 @@ class NavigationMixin:
             if confirmed:
                 app.run_worker(self.action_restart(), exclusive=True)
 
-        app.push_screen(
+        cast(Any, app)._push_modal_screen(
             ConfirmScreen(
                 "[b]Restart the adventure?[/b]\n\nThe current run resets to turn 1. Manual saves and restore points stay available."
             ),
@@ -169,14 +169,14 @@ class NavigationMixin:
             if confirmed:
                 app.exit()
 
-        app.push_screen(
+        cast(Any, app)._push_modal_screen(
             ConfirmScreen("[b]Quit the game?[/b]\n\nUnsaved progress will be lost."),
             on_confirm,
         )
 
     def action_show_help(self) -> None:
         """Show the help screen with keybindings and game mechanics."""
-        as_textual_app(self).push_screen(
+        cast(Any, as_textual_app(self))._push_modal_screen(
             HelpScreen(
                 screen_reader_mode=as_mixin_host(self).screen_reader_mode,
                 cognitive_load_reduction_mode=getattr(
@@ -189,14 +189,14 @@ class NavigationMixin:
     def action_show_notification_history(self) -> None:
         """Show a modal list of recent notifications without altering game state."""
         app = as_textual_app(self)
-        app.push_screen(
+        cast(Any, app)._push_modal_screen(
             NotificationHistoryScreen(as_mixin_host(self).get_notification_history_lines())
         )
 
     def action_show_scene_recap(self) -> None:
         """Show a structured recap of the current scene and player state."""
         app = as_textual_app(self)
-        app.push_screen(SceneRecapScreen(cast(Any, self).get_scene_recap_text()))
+        cast(Any, app)._push_modal_screen(SceneRecapScreen(cast(Any, self).get_scene_recap_text()))
 
     def action_focus_story_region(self) -> None:
         """Jump focus to the story viewport."""
@@ -296,14 +296,14 @@ class NavigationMixin:
                 if confirmed:
                     persist_restore_point(normalized)
 
-            app.push_screen(
+            cast(Any, app)._push_modal_screen(
                 ConfirmScreen(
                     f"[b]Overwrite restore point '{normalized}'?[/b]\n\nThe older checkpoint will be replaced with the current turn."
                 ),
                 on_confirm,
             )
 
-        app.push_screen(
+        cast(Any, app)._push_modal_screen(
             TextPromptScreen(
                 "[b]Create Restore Point[/b]",
                 value=f"Turn {host.engine.state.turn_count}",
@@ -332,7 +332,7 @@ class NavigationMixin:
                 )
                 app.notify(f"Restored restore point: {name}", severity="information", timeout=3)
 
-        app.push_screen(
+        cast(Any, app)._push_modal_screen(
             OptionListScreen(
                 "[b]Restore Point[/b]",
                 list(host._bookmark_payloads),
@@ -397,7 +397,10 @@ class NavigationMixin:
             if idx is not None:
                 self.restore_to_scene(idx, history)
 
-        app.push_screen(BranchScreen(history["scenes"], history["choices"]), check_branch)
+        cast(Any, app)._push_modal_screen(
+            BranchScreen(history["scenes"], history["choices"]),
+            check_branch,
+        )
 
     @work(exclusive=True)
     async def restore_to_scene(self, idx: int, history: dict[str, Any]) -> None:

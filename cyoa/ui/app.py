@@ -16,7 +16,9 @@ from textual.css.query import NoMatches
 from textual.events import Click, Resize
 from textual.notifications import SeverityLevel
 from textual.reactive import reactive
+from textual.screen import ModalScreen
 from textual.timer import Timer
+from textual.widget import Widget
 from textual.widgets import (
     Button,
     Footer,
@@ -101,6 +103,12 @@ class BufferedNotification:
 class NotificationHistoryEntry:
     message: str
     severity: Literal["information", "warning", "error"]
+
+
+@dataclass(slots=True)
+class FocusTarget:
+    kind: Literal["widget_id", "choice_index"]
+    value: str | int
 
 
 class CYOAApp(
@@ -200,6 +208,7 @@ class CYOAApp(
         self._notification_history: list[NotificationHistoryEntry] = []
         self._notification_history_limit: int = 200
         self._latest_status_message: str = "Information: Waiting for adventure updates."
+        self._modal_focus_return_target: FocusTarget | None = None
         self._redo_payloads: list[dict[str, object]] = []
         self._bookmark_payloads: dict[str, dict[str, object]] = {}
         self._last_manual_save_turn: int | None = None
@@ -334,6 +343,7 @@ class CYOAApp(
                 choices_container = self.query_one("#choices-container", Container)
             except Exception:
                 return
+            focus_target = self._capture_focus_target()
             choices_container.remove_children()
             self._mount_choice_buttons(
                 self.engine.state.current_node,
@@ -341,6 +351,7 @@ class CYOAApp(
                 self.engine.state.current_node.narrative.startswith(
                     constants.ERROR_NARRATIVE_PREFIX
                 ),
+                focus_target=focus_target,
             )
 
     def watch_cognitive_load_reduction_mode(self, enabled: bool) -> None:
@@ -501,6 +512,123 @@ class CYOAApp(
             markup=False,
             update_latest=False,
         )
+
+    def _capture_focus_target(self) -> FocusTarget | None:
+        focused = self.focused
+        if not isinstance(focused, Widget) or not focused.is_attached:
+            return None
+
+        if isinstance(focused, Button):
+            buttons = self._available_action_buttons()
+            if focused in buttons:
+                return FocusTarget("choice_index", buttons.index(focused))
+
+        widget: Widget | None = focused
+        while widget is not None:
+            if widget.id:
+                return FocusTarget("widget_id", widget.id)
+            parent = widget.parent
+            widget = parent if isinstance(parent, Widget) else None
+        return None
+
+    def _widget_can_receive_focus(self, widget: Widget) -> bool:
+        if not widget.is_attached or not widget.visible or not widget.display:
+            return False
+        if bool(getattr(widget, "disabled", False)):
+            return False
+
+        current: Widget | None = widget
+        while current is not None:
+            if current.has_class("hidden") or current.has_class("panel-collapsed"):
+                return False
+            parent = current.parent
+            current = parent if isinstance(parent, Widget) else None
+        return True
+
+    def _resolve_focus_target_widget(self, target: FocusTarget | None) -> Widget | None:
+        if target is None:
+            return None
+        if target.kind == "choice_index":
+            buttons = self._available_action_buttons()
+            if not buttons:
+                return None
+            index = min(int(target.value), len(buttons) - 1)
+            return buttons[index]
+        if target.kind == "widget_id":
+            try:
+                widget = self.query_one(f"#{target.value}", Widget)
+            except NoMatches:
+                return None
+            return widget if self._widget_can_receive_focus(widget) else None
+        return None
+
+    def _fallback_focus_widget(self, fallback: str = "choices") -> Widget | None:
+        fallback_methods: dict[str, Callable[[], Widget | None]] = {
+            "choices": lambda: (
+                self._available_action_buttons()[0] if self._available_action_buttons() else None
+            ),
+            "story": lambda: self.query_one("#story-container", Widget),
+            "status": lambda: self.query_one("#status-display", Widget),
+            "journal": lambda: self.query_one("#journal-list", Widget),
+            "story_map": lambda: self.query_one("#story-map-tree", Widget),
+        }
+        ordered = [fallback, "choices", "story", "status", "journal", "story_map"]
+        for key in ordered:
+            resolver = fallback_methods.get(key)
+            if resolver is None:
+                continue
+            try:
+                widget = resolver()
+            except NoMatches:
+                continue
+            if widget is not None and self._widget_can_receive_focus(widget):
+                return widget
+        return None
+
+    def _restore_focus_target(
+        self,
+        target: FocusTarget | None,
+        *,
+        fallback: str = "choices",
+    ) -> None:
+        def apply_focus() -> None:
+            widget = self._resolve_focus_target_widget(target)
+            if widget is None:
+                widget = self._fallback_focus_widget(fallback)
+            if widget is not None and self._widget_can_receive_focus(widget):
+                widget.focus()
+
+        self.call_after_refresh(apply_focus)
+
+    def _has_open_modal_screen(self) -> bool:
+        return any(isinstance(screen, ModalScreen) for screen in self.screen_stack[1:])
+
+    def _push_modal_screen(
+        self,
+        screen: ModalScreen[Any],
+        callback: Callable[[Any], None] | None = None,
+        *,
+        fallback_focus: str = "choices",
+    ) -> None:
+        opened_over_modal = self._has_open_modal_screen()
+        modal_focus_target = self._capture_focus_target()
+        if self._modal_focus_return_target is None:
+            self._modal_focus_return_target = modal_focus_target
+
+        def on_dismiss(result: Any) -> None:
+            try:
+                if callback is not None:
+                    callback(result)
+            finally:
+                if self._has_open_modal_screen():
+                    if opened_over_modal:
+                        self._restore_focus_target(modal_focus_target, fallback=fallback_focus)
+                else:
+                    target = self._modal_focus_return_target
+                    self._modal_focus_return_target = None
+                    self._restore_focus_target(target, fallback=fallback_focus)
+
+        self.push_screen(screen, on_dismiss)
 
     def get_scene_recap_text(self) -> str:
         if not self.engine or not self.engine.state.current_node:
@@ -912,7 +1040,7 @@ class CYOAApp(
             term=os.getenv("TERM"),
             is_headless=self.is_headless,
         )
-        self.push_screen(
+        self._push_modal_screen(
             FirstRunSetupScreen(
                 general_notes=tuple(terminal_report.render_lines()),
                 selected_accessibility_preset=self._pending_accessibility_preset,
@@ -930,7 +1058,7 @@ class CYOAApp(
             term=os.getenv("TERM"),
             is_headless=self.is_headless,
         )
-        self.push_screen(
+        self._push_modal_screen(
             ModelDownloadScreen(
                 recommendation,
                 models_dir=str(get_models_dir()),
@@ -1257,7 +1385,7 @@ class CYOAApp(
             except UserConfigSaveError as exc:
                 self._show_settings_screen(payload, feedback_message=str(exc))
 
-        self.push_screen(
+        self._push_modal_screen(
             SettingsScreen(
                 provider=pick("provider", config.provider),
                 model_path=pick("model_path", config.model_path),
@@ -1304,7 +1432,7 @@ class CYOAApp(
             self._reveal_save_folder()
             return
         if action == "reset_settings":
-            self.push_screen(
+            self._push_modal_screen(
                 ConfirmScreen("Reset saved settings to safe defaults?"),
                 self._confirm_settings_reset,
             )
@@ -1581,7 +1709,7 @@ class CYOAApp(
             self.query_one(StatusDisplay).directives = directives
             self.notify("Updated directives.", severity="information", timeout=2)
 
-        self.push_screen(
+        self._push_modal_screen(
             TextPromptScreen(
                 "[b]Edit Directives[/b]",
                 value=current,
@@ -1649,9 +1777,17 @@ class CYOAApp(
             if isinstance(btn, Button) and btn.id and btn.id.startswith(prefix) and not btn.disabled
         ]
 
+    def _available_action_buttons(self) -> list[Button]:
+        """Return enabled action buttons from the choices dock in render order."""
+        return [
+            btn
+            for btn in self.query("#choices-container Button")
+            if isinstance(btn, Button) and not btn.disabled
+        ]
+
     def _move_choice_focus(self, step: int) -> None:
         """Move focus between available choice buttons."""
-        buttons = self._enabled_choice_buttons()
+        buttons = self._available_action_buttons()
         if not buttons:
             return
 

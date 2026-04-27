@@ -222,6 +222,75 @@ def _active_objective_texts(objectives: list[Any]) -> list[str]:
     return active
 
 
+def _clean_export_text(text: str) -> str:
+    plain = text.replace("**", "").replace("__", "").replace("`", "").replace("\r\n", "\n").strip()
+    if plain.startswith("[") and plain.endswith("]") and "[/" not in plain and "][" not in plain:
+        plain = plain[1:-1].strip()
+    return MARKUP_TAG_RE.sub("", plain).strip()
+
+
+def _choice_export_text(text: str) -> str:
+    cleaned = _clean_export_text(text)
+    prefix = "you chose:"
+    if cleaned.lower().startswith(prefix):
+        return cleaned[len(prefix) :].strip()
+    return cleaned
+
+
+def build_accessible_export(
+    *,
+    story_title: str | None,
+    turn_count: int | None,
+    saved_at: str | None,
+    story_segments: list[dict[str, str]],
+    current_story_text: str | None,
+    directives: list[str],
+    inventory: list[str],
+    player_stats: dict[str, int],
+    objectives: list[Any],
+) -> str:
+    lines = [f"Title: {story_title or 'Untitled Adventure'}"]
+    if isinstance(turn_count, int):
+        lines.append(f"Turn Count: {turn_count}")
+    if isinstance(saved_at, str) and saved_at.strip():
+        lines.append(f"Saved At: {saved_at.strip()}")
+    lines.append("")
+
+    if directives:
+        lines.append("Active Directives:")
+        lines.extend(f"- {directive}" for directive in directives if directive.strip())
+        lines.append("")
+
+    lines.append("Transcript:")
+    rendered_segments = story_segments or (
+        [{"kind": "story_turn", "text": current_story_text}]
+        if isinstance(current_story_text, str) and current_story_text.strip()
+        else []
+    )
+    for segment in rendered_segments:
+        kind = segment.get("kind", "story_turn")
+        text = str(segment.get("text", "")).strip()
+        if not text:
+            continue
+        if kind == "player_choice":
+            lines.append(f"Choice: {_choice_export_text(text)}")
+        elif kind == "branch_marker":
+            lines.append(f"Branch: {_clean_export_text(text)}")
+        else:
+            lines.append("Scene:")
+            lines.append(_clean_export_text(text))
+        lines.append("")
+
+    objective_texts = _active_objective_texts(objectives)
+    lines.append("Current Progress:")
+    lines.append(f"- Health: {player_stats.get('health', 100)}")
+    lines.append(f"- Gold: {player_stats.get('gold', 0)}")
+    lines.append(f"- Reputation: {player_stats.get('reputation', 0)}")
+    lines.append(f"- Inventory: {', '.join(inventory) if inventory else 'Empty'}")
+    lines.append(f"- Objectives: {' | '.join(objective_texts) if objective_texts else 'None'}")
+    return "\n".join(lines).strip() + "\n"
+
+
 def build_scene_recap(  # noqa: C901
     *,
     narrative: str,

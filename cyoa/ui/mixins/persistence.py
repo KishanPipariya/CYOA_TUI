@@ -20,6 +20,7 @@ from cyoa.ui.mixins.contracts import (
     as_persistence_owner,
     as_textual_app,
 )
+from cyoa.ui.presenters import build_accessible_export
 
 logger = logging.getLogger(__name__)
 
@@ -354,7 +355,7 @@ class PersistenceMixin:
             if save_file:
                 self._restore_from_save(os.path.join(constants.SAVES_DIR, save_file))
 
-        app.push_screen(LoadGameScreen(save_files), on_selected)
+        cast(Any, app)._push_modal_screen(LoadGameScreen(save_files), on_selected)
 
     def _restore_from_save(self, save_path: str) -> None:
         """Load game state via the engine."""
@@ -399,10 +400,16 @@ class PersistenceMixin:
                 for name, payload in self._coerce_restore_points(data.get("restore_points")).items()
             }
 
+        focus_target = host._capture_focus_target()
         choices_container = app.query_one("#choices-container", Container)
         choices_container.remove_children()
         if host.engine.state.current_node:
-            host._mount_choice_buttons(host.engine.state.current_node, choices_container, False)
+            host._mount_choice_buttons(
+                host.engine.state.current_node,
+                choices_container,
+                False,
+                focus_target=focus_target,
+            )
         else:
             choices_container.mount(
                 Button(
@@ -411,6 +418,7 @@ class PersistenceMixin:
                     variant="success",
                 )
             )
+            host._restore_focus_target(focus_target, fallback="choices")
         host.apply_ui_theme()
         self._restore_journal_and_panels(app, ui_state)
         story_map_panel = self._query_optional_container(app, "#story-map-panel")
@@ -549,7 +557,7 @@ class PersistenceMixin:
 
         from cyoa.ui.components import StartupChoiceScreen
 
-        app.push_screen(
+        cast(Any, app)._push_modal_screen(
             StartupChoiceScreen(
                 "A previous session was found.\n\nResume the saved adventure or start a new game."
             ),
@@ -578,7 +586,7 @@ class PersistenceMixin:
                     lambda: runtime.initialize_and_start(host.model_path),
                 )
 
-            app.push_screen(
+            cast(Any, app)._push_modal_screen(
                 ConfirmScreen(
                     "[b]Start a new game?[/b]\n\nThis discards the recovered autosave and any restore points saved inside it."
                 ),
@@ -610,28 +618,36 @@ class PersistenceMixin:
             )
         )
 
-    def export_save_file(self, save_path: str) -> tuple[str, str]:
+    def export_save_file(self, save_path: str) -> tuple[str, str, str]:
         """Export an existing named save file into Markdown and JSON timeline files."""
         with open(save_path, encoding="utf-8") as f:
             payload = json.load(f)
         title = str(payload.get("story_title") or os.path.splitext(os.path.basename(save_path))[0])
         return self._write_export_files(payload, title)
 
-    def _write_export_files(self, payload: dict[str, object], title: str) -> tuple[str, str]:
-        """Write paired Markdown and JSON exports for a story payload."""
+    def _write_export_files(
+        self,
+        payload: dict[str, object],
+        title: str,
+    ) -> tuple[str, str, str]:
+        """Write Markdown, accessible text, and JSON exports for a story payload."""
         os.makedirs(self._exports_dir(), exist_ok=True)
         safe_title = (
             "".join(c if c.isalnum() or c in " _-" else "_" for c in title).strip() or "adventure"
         )
         stem = os.path.join(self._exports_dir(), safe_title)
         markdown_path = f"{stem}.md"
+        accessible_path = f"{stem}.accessible.txt"
         json_path = f"{stem}.timeline.json"
         markdown = self._render_markdown_export(payload)
+        accessible_text = self._render_accessible_export(payload)
         timeline_payload = self._build_timeline_export(payload)
         with open_private_text_file(markdown_path, "w") as f:
             f.write(markdown)
+        with open_private_text_file(accessible_path, "w") as f:
+            f.write(accessible_text)
         self._write_json_payload(json_path, timeline_payload)
-        return markdown_path, json_path
+        return markdown_path, accessible_path, json_path
 
     def _render_markdown_export(self, payload: dict[str, object]) -> str:
         """Render a readable Markdown export from a save payload."""
@@ -661,6 +677,40 @@ class PersistenceMixin:
                 lines.append(current_story)
                 lines.append("")
         return "\n".join(lines).strip() + "\n"
+
+    def _render_accessible_export(self, payload: dict[str, object]) -> str:
+        """Render a plain-text transcript export for assistive-technology workflows."""
+        ui_state = self._coerce_ui_state(payload.get("ui_state"))
+        prompt_config = payload.get("prompt_config", {})
+        directives = []
+        if isinstance(prompt_config, dict):
+            raw_directives = prompt_config.get("directives")
+            if isinstance(raw_directives, list):
+                directives = [
+                    directive for directive in raw_directives if isinstance(directive, str)
+                ]
+        inventory = payload.get("inventory")
+        player_stats = payload.get("player_stats")
+        objectives = payload.get("objectives")
+        return build_accessible_export(
+            story_title=payload.get("story_title")
+            if isinstance(payload.get("story_title"), str)
+            else None,
+            turn_count=payload.get("turn_count")
+            if isinstance(payload.get("turn_count"), int)
+            else None,
+            saved_at=payload.get("saved_at") if isinstance(payload.get("saved_at"), str) else None,
+            story_segments=self._coerce_story_segments(ui_state.get("story_segments")),
+            current_story_text=(
+                ui_state.get("current_story_text")
+                if isinstance(ui_state.get("current_story_text"), str)
+                else None
+            ),
+            directives=directives,
+            inventory=inventory if isinstance(inventory, list) else [],
+            player_stats=player_stats if isinstance(player_stats, dict) else {},
+            objectives=objectives if isinstance(objectives, list) else [],
+        )
 
     def _build_timeline_export(self, payload: dict[str, object]) -> dict[str, object]:
         """Build the machine-readable JSON export."""

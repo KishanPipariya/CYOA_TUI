@@ -21,6 +21,7 @@ from cyoa.ui.presenters import (
 
 logger = logging.getLogger(__name__)
 
+
 def _detect_scene_art(narrative: str) -> str | None:
     """Return ASCII art matching keywords found in the narrative, or None."""
     lower = narrative.lower()
@@ -28,6 +29,7 @@ def _detect_scene_art(narrative: str) -> str | None:
         if any(kw in lower for kw in keywords):
             return SCENE_ART.get(scene_key)
     return None
+
 
 class RenderingMixin:
     """Mixin for story narrative rendering and UI updates."""
@@ -47,7 +49,9 @@ class RenderingMixin:
             except Exception as exc:
                 logger.debug("Unable to clear loading state styling from story container: %s", exc)
 
-            if host._current_story == loading_story_text(screen_reader_mode=host.screen_reader_mode):
+            if host._current_story == loading_story_text(
+                screen_reader_mode=host.screen_reader_mode
+            ):
                 host._current_story = ""
                 host._current_turn_text = ""
                 host._reset_story_segments("")
@@ -178,7 +182,9 @@ class RenderingMixin:
         if host._loading_suffix_shown:
             host._loading_suffix_shown = False
 
-            if host._current_story == loading_story_text(screen_reader_mode=host.screen_reader_mode):
+            if host._current_story == loading_story_text(
+                screen_reader_mode=host.screen_reader_mode
+            ):
                 host._current_story = ""
                 host._current_turn_text = ""
                 host._reset_story_segments("")
@@ -221,7 +227,12 @@ class RenderingMixin:
         ]
 
     def _mount_choice_buttons(
-        self, node: StoryNode, choices_container: Container, is_error: bool
+        self,
+        node: StoryNode,
+        choices_container: Container,
+        is_error: bool,
+        *,
+        focus_target: object | None = None,
     ) -> None:
         """Mount choice buttons based on the node state."""
         # Error UX: show a Retry button alongside the fallback choice
@@ -250,7 +261,9 @@ class RenderingMixin:
                 choices_container.mount(btn)
         elif node.is_ending:
             end_btn = Button(
-                format_new_adventure_label(screen_reader_mode=as_mixin_host(self).screen_reader_mode),
+                format_new_adventure_label(
+                    screen_reader_mode=as_mixin_host(self).screen_reader_mode
+                ),
                 id="btn-new-adventure",
                 variant="success",
             )
@@ -275,7 +288,9 @@ class RenderingMixin:
                     disabled_reason,
                     screen_reader_mode=host.screen_reader_mode,
                 )
-                btn = Button(label, id=btn_id, variant="primary", disabled=disabled_reason is not None)
+                btn = Button(
+                    label, id=btn_id, variant="primary", disabled=disabled_reason is not None
+                )
                 btn.add_class("choice-card")
                 if disabled_reason is None:
                     btn.add_class("choice-card-available")
@@ -283,7 +298,10 @@ class RenderingMixin:
                     btn.add_class("choice-card-locked")
                 choices_container.mount(btn)
 
-        self._focus_first_choice_button(choices_container)
+        if focus_target is not None:
+            as_mixin_host(self)._restore_focus_target(focus_target, fallback="choices")
+        else:
+            self._focus_first_choice_button(choices_container)
 
     def _focus_first_choice_button(self, choices_container: Container) -> None:
         """Focus first available choice button for faster keyboard play."""
@@ -316,7 +334,9 @@ class RenderingMixin:
             return
         choice_text = choice.text
         rendered_turn_index = host._current_story_turn_index()
-        choice_message = format_choice_confirmation(choice_text, screen_reader_mode=host.screen_reader_mode)
+        choice_message = format_choice_confirmation(
+            choice_text, screen_reader_mode=host.screen_reader_mode
+        )
 
         # 1. Instant UI feedback
         host.action_skip_typewriter()
