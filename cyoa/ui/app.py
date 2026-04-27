@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
 
 from textual import work
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, ScreenStackError
 from textual.containers import Container, VerticalScroll
 from textual.css.query import NoMatches
 from textual.events import Click, Resize
@@ -345,14 +345,17 @@ class CYOAApp(
                 return
             focus_target = self._capture_focus_target()
             choices_container.remove_children()
-            self._mount_choice_buttons(
+            mount_args = (
                 self.engine.state.current_node,
                 choices_container,
                 self.engine.state.current_node.narrative.startswith(
                     constants.ERROR_NARRATIVE_PREFIX
                 ),
-                focus_target=focus_target,
             )
+            if focus_target is None:
+                self._mount_choice_buttons(*mount_args)
+            else:
+                self._mount_choice_buttons(*mount_args, focus_target=focus_target)
 
     def watch_cognitive_load_reduction_mode(self, enabled: bool) -> None:
         self.set_class(enabled, "cognitive-load-mode")
@@ -513,9 +516,16 @@ class CYOAApp(
             update_latest=False,
         )
 
+    def _focused_widget(self) -> Widget | None:
+        try:
+            focused = self.focused
+        except ScreenStackError:
+            return None
+        return focused if isinstance(focused, Widget) else None
+
     def _capture_focus_target(self) -> FocusTarget | None:
-        focused = self.focused
-        if not isinstance(focused, Widget) or not focused.is_attached:
+        focused = self._focused_widget()
+        if focused is None or not focused.is_attached:
             return None
 
         if isinstance(focused, Button):
@@ -601,7 +611,11 @@ class CYOAApp(
         self.call_after_refresh(apply_focus)
 
     def _has_open_modal_screen(self) -> bool:
-        return any(isinstance(screen, ModalScreen) for screen in self.screen_stack[1:])
+        try:
+            screen_stack = self.screen_stack
+        except ScreenStackError:
+            return False
+        return any(isinstance(screen, ModalScreen) for screen in screen_stack[1:])
 
     def _push_modal_screen(
         self,
@@ -1791,7 +1805,7 @@ class CYOAApp(
         if not buttons:
             return
 
-        focused = self.focused
+        focused = self._focused_widget()
         try:
             current_index = buttons.index(focused) if isinstance(focused, Button) else -1
         except ValueError:
