@@ -18,6 +18,7 @@ from cyoa.ui.app import BufferedNotification, CYOAApp
 from cyoa.ui.components import (
     AccessibleSummaryScreen,
     BranchScreen,
+    CommandPaletteScreen,
     FirstRunSetupScreen,
     LoadGameScreen,
     ModelDownloadScreen,
@@ -28,7 +29,11 @@ from cyoa.ui.components import (
     StatusDisplay,
     ThemeSpinner,
 )
-from cyoa.ui.keybindings import effective_keybindings
+from cyoa.ui.keybindings import (
+    build_command_palette_entries,
+    effective_keybindings,
+    search_command_palette,
+)
 from cyoa.ui.mixins.events import EventsMixin
 from cyoa.ui.mixins.navigation import NavigationMixin
 from cyoa.ui.mixins.persistence import PersistenceMixin
@@ -739,6 +744,33 @@ def test_app_effective_keybindings_merge_defaults_and_overrides() -> None:
     assert merged["toggle_journal"] == "j"
 
 
+def test_command_palette_entries_reflect_saved_bindings() -> None:
+    entries = build_command_palette_entries(
+        {"show_settings": "f2", "show_help": "f1", "show_command_palette": "f4"}
+    )
+    entries_by_id = {entry.id: entry for entry in entries}
+
+    assert "show_command_palette" not in entries_by_id
+    assert entries_by_id["show_settings"].keybinding == "F2"
+    assert entries_by_id["show_help"].keybinding == "F1"
+
+
+def test_command_palette_search_matches_labels_actions_and_fuzzy_queries() -> None:
+    entries = build_command_palette_entries({"show_settings": "f2"})
+
+    settings_results = search_command_palette(entries, "settings")
+    assert settings_results
+    assert settings_results[0].id == "show_settings"
+
+    help_results = search_command_palette(entries, "open help")
+    assert help_results
+    assert help_results[0].id == "show_help"
+
+    fuzzy_results = search_command_palette(entries, "stngs")
+    assert fuzzy_results
+    assert fuzzy_results[0].id == "show_settings"
+
+
 def test_sync_narrative_replaces_finalized_streamed_turn():
     host = DummyRenderingHost()
     host._loading_suffix_shown = False
@@ -1070,6 +1102,14 @@ def test_startup_choice_screen_dismisses_expected_values():
     help_screen.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-help-close")))
     help_screen.action_close()
     assert help_screen.dismiss.call_args_list == [call(None), call(None)]
+
+    palette = CommandPaletteScreen(build_command_palette_entries({}))
+    palette.dismiss = MagicMock()
+    palette.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-command-palette-close"))
+    )
+    palette.action_close()
+    assert palette.dismiss.call_args_list == [call(None), call(None)]
 
     history_screen = NotificationHistoryScreen(["Information: A path opens."])
     history_screen.dismiss = MagicMock()

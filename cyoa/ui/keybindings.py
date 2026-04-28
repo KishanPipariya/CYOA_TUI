@@ -14,6 +14,17 @@ class AppBindingSpec:
     settings_section: str
     show: bool = True
     key_display: str | None = None
+    palette: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class CommandPaletteEntry:
+    id: str
+    action: str
+    title: str
+    description: str
+    section: str
+    keybinding: str
 
 
 APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
@@ -25,6 +36,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Previous choice",
         "Navigation",
         show=False,
+        palette=False,
     ),
     AppBindingSpec(
         "focus_next_choice",
@@ -34,6 +46,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Next choice",
         "Navigation",
         show=False,
+        palette=False,
     ),
     AppBindingSpec(
         "focus_story_region",
@@ -120,6 +133,15 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Help",
         "Open help",
         "Panels And Help",
+    ),
+    AppBindingSpec(
+        "show_command_palette",
+        "ctrl+shift+p",
+        "show_action_palette",
+        "Palette",
+        "Open command palette",
+        "Panels And Help",
+        palette=False,
     ),
     AppBindingSpec(
         "repeat_latest_status",
@@ -289,6 +311,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Select choice 1",
         "Choice Shortcuts",
         show=False,
+        palette=False,
     ),
     AppBindingSpec(
         "choose_2",
@@ -298,6 +321,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Select choice 2",
         "Choice Shortcuts",
         show=False,
+        palette=False,
     ),
     AppBindingSpec(
         "choose_3",
@@ -307,6 +331,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Select choice 3",
         "Choice Shortcuts",
         show=False,
+        palette=False,
     ),
     AppBindingSpec(
         "choose_4",
@@ -316,6 +341,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Select choice 4",
         "Choice Shortcuts",
         show=False,
+        palette=False,
     ),
 )
 
@@ -418,6 +444,42 @@ def effective_keybindings(overrides: object) -> dict[str, str]:
     return {**default_keybindings(), **resolve_keybinding_overrides(overrides)}
 
 
+def build_command_palette_entries(overrides: object) -> tuple[CommandPaletteEntry, ...]:
+    bindings = effective_keybindings(overrides)
+    return tuple(
+        CommandPaletteEntry(
+            id=spec.id,
+            action=spec.action,
+            title=spec.settings_label,
+            description=spec.description,
+            section=spec.settings_section,
+            keybinding=format_key_for_display(bindings[spec.id]),
+        )
+        for spec in APP_BINDING_SPECS
+        if spec.palette
+    )
+
+
+def search_command_palette(
+    entries: tuple[CommandPaletteEntry, ...] | list[CommandPaletteEntry],
+    query: str,
+) -> list[CommandPaletteEntry]:
+    normalized_query = _normalize_search_text(query)
+    if not normalized_query:
+        return list(entries)
+
+    query_tokens = normalized_query.split()
+    ranked_matches: list[tuple[int, int, CommandPaletteEntry]] = []
+    for index, entry in enumerate(entries):
+        score = _command_palette_match_score(entry, query_tokens)
+        if score is None:
+            continue
+        ranked_matches.append((score, index, entry))
+
+    ranked_matches.sort(key=lambda item: (item[0], item[1], item[2].title))
+    return [entry for _score, _index, entry in ranked_matches]
+
+
 def validate_keybindings(raw_values: Mapping[str, str | None]) -> KeybindingValidationResult:
     defaults = default_keybindings()
     effective: dict[str, str] = {}
@@ -469,3 +531,56 @@ def _format_single_key(key: str) -> str:
             KEY_DISPLAY_OVERRIDES.get(lowered, piece.upper() if len(piece) == 1 else piece.title())
         )
     return "+".join(formatted)
+
+
+def _normalize_search_text(value: str) -> str:
+    return " ".join(value.lower().replace("_", " ").replace("-", " ").split())
+
+
+def _command_palette_match_score(
+    entry: CommandPaletteEntry,
+    query_tokens: list[str],
+) -> int | None:
+    title = _normalize_search_text(entry.title)
+    action = _normalize_search_text(entry.action)
+    search_blob = _normalize_search_text(
+        " ".join(
+            (
+                entry.title,
+                entry.description,
+                entry.section,
+                entry.keybinding,
+                entry.id,
+                entry.action,
+            )
+        )
+    )
+    search_words = search_blob.split()
+
+    score = 0
+    for token in query_tokens:
+        if title.startswith(token) or action.startswith(token):
+            continue
+        if any(word.startswith(token) for word in search_blob.split()):
+            score += 1
+            continue
+        if token in search_blob:
+            score += 2
+            continue
+        if any(_is_subsequence(token, word) for word in search_words):
+            score += 3
+            continue
+        return None
+    return score
+
+
+def _is_subsequence(needle: str, haystack: str) -> bool:
+    if not needle:
+        return True
+    position = 0
+    for char in haystack:
+        if char == needle[position]:
+            position += 1
+            if position == len(needle):
+                return True
+    return False

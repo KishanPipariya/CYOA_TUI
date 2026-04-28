@@ -25,9 +25,11 @@ from cyoa.core.user_config import (
     accessibility_preset_overrides,
 )
 from cyoa.ui.keybindings import (
+    CommandPaletteEntry,
     binding_input_id,
     effective_keybindings,
     iter_binding_sections,
+    search_command_palette,
     validate_keybindings,
 )
 from cyoa.ui.presenters import (
@@ -48,6 +50,7 @@ __all__ = [
     "BranchScreen",
     "ThemeSpinner",
     "ConfirmScreen",
+    "CommandPaletteScreen",
     "DialogActions",
     "DialogFrame",
     "HelpScreen",
@@ -96,6 +99,14 @@ class OptionListItem(ListItem):
     def __init__(self, *args: Any, option_value: str = "", **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.option_value = option_value
+
+
+class CommandPaletteListItem(ListItem):
+    """List item that carries a command palette action string."""
+
+    def __init__(self, *args: Any, action_value: str = "", **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.action_value = action_value
 
 
 class JournalListItem(ListItem):
@@ -481,6 +492,125 @@ class HelpScreen(ModalScreen[None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-help-close":
             self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class CommandPaletteScreen(ModalScreen[str]):
+    """Searchable command launcher for keyboard-first action discovery."""
+
+    DEFAULT_CSS = """
+    CommandPaletteScreen {
+        align: center middle;
+        background: $background 80%;
+    }
+    #command-palette-dialog {
+        width: 84;
+        height: 80%;
+        max-width: 96%;
+    }
+    #command-palette-search {
+        margin: 1 0;
+    }
+    #command-palette-list {
+        height: 1fr;
+    }
+    #btn-command-palette-close {
+        width: 100%;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS = [
+        ("escape", "close", "Close"),
+        ("down", "focus_results", "Results"),
+        ("ctrl+n", "focus_results", "Results"),
+        ("up", "focus_search", "Search"),
+        ("ctrl+p", "focus_search", "Search"),
+    ]
+
+    def __init__(self, entries: tuple[CommandPaletteEntry, ...], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._entries = entries
+
+    def compose(self) -> ComposeResult:
+        with DialogFrame(
+            id="command-palette-dialog",
+            classes="dialog-frame dialog-frame-scroll dialog-frame-accent",
+        ):
+            yield Label(
+                "[b]Command Palette[/b]", id="command-palette-title", classes="dialog-title"
+            )
+            yield Label(
+                "Search actions, settings, and help text. Press Enter to run the top match.",
+                id="command-palette-kicker",
+                classes="dialog-entry",
+            )
+            yield Input(placeholder="Search commands", id="command-palette-search")
+            yield ListView(id="command-palette-list", classes="dialog-list")
+            yield Button("Close [b](Esc)[/b]", id="btn-command-palette-close", variant="primary")
+
+    def on_mount(self) -> None:
+        self._refresh_results()
+        self.query_one("#command-palette-search", Input).focus()
+
+    def _refresh_results(self) -> None:
+        query = self.query_one("#command-palette-search", Input).value
+        matches = search_command_palette(self._entries, query)
+        list_view = self.query_one("#command-palette-list", ListView)
+        list_view.clear()
+        if not matches:
+            list_view.append(
+                CommandPaletteListItem(
+                    Label("No matching commands.", classes="dialog-entry"),
+                    action_value="",
+                )
+            )
+            return
+
+        for entry in matches:
+            label = self._format_entry_label(entry)
+            list_view.append(
+                CommandPaletteListItem(
+                    Label(escape(label), classes="dialog-entry"),
+                    action_value=entry.action,
+                )
+            )
+        list_view.index = 0
+
+    @staticmethod
+    def _format_entry_label(entry: CommandPaletteEntry) -> str:
+        return f"{entry.title} ({entry.keybinding})\n{entry.description} [{entry.section}]"
+
+    def _dismiss_top_result(self) -> None:
+        list_view = self.query_one("#command-palette-list", ListView)
+        for item in list_view.query(CommandPaletteListItem):
+            if item.action_value:
+                self.dismiss(item.action_value)
+                return
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "command-palette-search":
+            self._refresh_results()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "command-palette-search":
+            self._dismiss_top_result()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if isinstance(event.item, CommandPaletteListItem) and event.item.action_value:
+            self.dismiss(event.item.action_value)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-command-palette-close":
+            self.dismiss(None)
+
+    def action_focus_results(self) -> None:
+        self.query_one("#command-palette-list", ListView).focus()
+
+    def action_focus_search(self) -> None:
+        self.query_one("#command-palette-search", Input).focus()
 
     def action_close(self) -> None:
         self.dismiss(None)

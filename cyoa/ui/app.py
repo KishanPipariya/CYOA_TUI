@@ -63,6 +63,7 @@ from cyoa.db.rag_memory import is_rag_diagnostics_enabled
 from cyoa.llm.broker import ModelBroker
 from cyoa.llm.providers import LlamaCppProvider
 from cyoa.ui.components import (
+    CommandPaletteScreen,
     ConfirmScreen,
     FirstRunSetupScreen,
     GameWorkspace,
@@ -74,6 +75,7 @@ from cyoa.ui.components import (
 )
 from cyoa.ui.keybindings import (
     build_app_bindings,
+    build_command_palette_entries,
     effective_keybindings,
     resolve_keybinding_overrides,
 )
@@ -606,6 +608,17 @@ class CYOAApp(
             markup=False,
             update_latest=False,
         )
+
+    def action_show_action_palette(self) -> None:
+        """Open a searchable command palette for discoverable action launching."""
+        entries = build_command_palette_entries(self._keybinding_overrides)
+
+        def on_selected(action: str | None) -> None:
+            if not action:
+                return
+            self.run_worker(self.run_action(action), exclusive=False, group="palette")
+
+        self._push_modal_screen(CommandPaletteScreen(entries), on_selected)
 
     def _focused_widget(self) -> Widget | None:
         try:

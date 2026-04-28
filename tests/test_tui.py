@@ -19,11 +19,13 @@ from cyoa.ui.app import CYOAApp
 from cyoa.ui.components import (
     AccessibleSummaryScreen,
     BranchScreen,
+    CommandPaletteScreen,
     ConfirmScreen,
     HelpScreen,
     LoadGameScreen,
     NotificationHistoryScreen,
     SceneRecapScreen,
+    SettingsScreen,
     StartupChoiceScreen,
     TextPromptScreen,
 )
@@ -1085,6 +1087,25 @@ async def test_help_screen(mock_app_dependencies):
         await pilot.press("escape")
         await pilot.pause(0.2)
         assert not isinstance(app.screen, HelpScreen)
+
+
+@pytest.mark.asyncio
+async def test_command_palette_opens_and_launches_settings(mock_app_dependencies):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+
+        await pilot.press("ctrl+shift+p")
+        await pilot.pause(0.2)
+
+        assert isinstance(app.screen, CommandPaletteScreen)
+
+        await pilot.press(*tuple("settings"))
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+
+        assert isinstance(app.screen, SettingsScreen)
 
 
 @pytest.mark.asyncio
