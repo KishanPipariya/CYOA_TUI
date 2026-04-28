@@ -22,6 +22,7 @@ from cyoa.ui.app import BufferedNotification, CYOAApp
 from cyoa.ui.components import (
     AccessibleSummaryScreen,
     BranchScreen,
+    CharacterSheetScreen,
     CommandPaletteScreen,
     FirstRunSetupScreen,
     LoadGameScreen,
@@ -51,6 +52,7 @@ from cyoa.ui.presenters import (
     build_journal_summary,
     build_scene_recap,
     build_story_map_summary,
+    build_world_state_summary,
     format_status_message,
     loading_story_text,
 )
@@ -623,6 +625,47 @@ def test_build_scene_recap_is_more_explicit_in_screen_reader_mode() -> None:
     assert "- Inventory: Empty" in recap
 
 
+def test_build_world_state_summary_groups_objectives_and_relationships() -> None:
+    summary = build_world_state_summary(
+        story_title="Vault Run",
+        turn_count=4,
+        player_stats={"health": 82, "gold": 7, "reputation": 3},
+        inventory=["Torch", "Silver Key"],
+        objectives=[
+            {"id": "escape", "text": "Escape the vault", "status": "active"},
+            {"id": "seal", "text": "Seal the breach", "status": "completed"},
+            {"id": "warn", "text": "Warn the guild", "status": "failed"},
+        ],
+        faction_reputation={"Guild": 2},
+        npc_affinity={"Steward Hale": 1},
+        story_flags={"vault_seen", "guild_trusted"},
+        last_choice_text="Open the lower gate",
+        current_scene_id="scene-4",
+    )
+
+    assert "## Overview" in summary
+    assert "- Adventure: Vault Run" in summary
+    assert "- Turn: 4" in summary
+    assert "- Scene ID: scene-4" in summary
+    assert "- Last choice: Open the lower gate" in summary
+    assert "## Inventory" in summary
+    assert "- Torch" in summary
+    assert "- Silver Key" in summary
+    assert "### Active" in summary
+    assert "- Escape the vault" in summary
+    assert "### Completed" in summary
+    assert "- Seal the breach" in summary
+    assert "### Failed" in summary
+    assert "- Warn the guild" in summary
+    assert "## Faction Reputation" in summary
+    assert "- Guild: 2" in summary
+    assert "## NPC Affinity" in summary
+    assert "- Steward Hale: 1" in summary
+    assert "## Story Flags" in summary
+    assert "- guild_trusted" in summary
+    assert "- vault_seen" in summary
+
+
 def test_build_accessible_export_uses_plain_text_reading_order() -> None:
     transcript = build_accessible_export(
         story_title="Vault Run",
@@ -1175,6 +1218,14 @@ def test_startup_choice_screen_dismisses_expected_values():
     )
     recap_screen.action_close()
     assert recap_screen.dismiss.call_args_list == [call(None), call(None)]
+
+    character_sheet = CharacterSheetScreen("## Stats\n- Health: 100")
+    character_sheet.dismiss = MagicMock()
+    character_sheet.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-character-sheet-close"))
+    )
+    character_sheet.action_close()
+    assert character_sheet.dismiss.call_args_list == [call(None), call(None)]
 
 
 def test_first_run_setup_screen_dismisses_expected_values():

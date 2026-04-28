@@ -91,7 +91,12 @@ from cyoa.ui.mixins import (
     ThemeMixin,
     TypewriterMixin,
 )
-from cyoa.ui.presenters import build_scene_recap, format_status_message, loading_story_text
+from cyoa.ui.presenters import (
+    build_scene_recap,
+    build_world_state_summary,
+    format_status_message,
+    loading_story_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -787,6 +792,33 @@ class CYOAApp(
             npc_affinity_updates=node.npc_affinity_updates,
             story_flags_set=node.story_flags_set,
             story_flags_cleared=node.story_flags_cleared,
+        )
+
+    def get_world_state_text(self) -> str:
+        if not self.engine:
+            return build_world_state_summary(
+                story_title=None,
+                turn_count=1,
+                player_stats={},
+                inventory=[],
+                objectives=[],
+                faction_reputation={},
+                npc_affinity={},
+                story_flags=[],
+            )
+
+        state = self.engine.state
+        return build_world_state_summary(
+            story_title=state.story_title,
+            turn_count=state.turn_count,
+            player_stats=state.player_stats,
+            inventory=state.inventory,
+            objectives=state.objectives,
+            faction_reputation=state.faction_reputation,
+            npc_affinity=state.npc_affinity,
+            story_flags=state.story_flags,
+            last_choice_text=state.last_choice_text,
+            current_scene_id=state.current_scene_id,
         )
 
     def on_unmount(self) -> None:

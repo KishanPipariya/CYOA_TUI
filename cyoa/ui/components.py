@@ -49,6 +49,7 @@ from cyoa.ui.presenters import (
 
 __all__ = [
     "ActionPanel",
+    "CharacterSheetScreen",
     "ChoicePanel",
     "BranchScreen",
     "ThemeSpinner",
@@ -1981,6 +1982,39 @@ class SceneRecapScreen(ModalScreen[None]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-scene-recap-close":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class CharacterSheetScreen(ModalScreen[None]):
+    """Modal screen showing the player's persistent state in readable sections."""
+
+    DEFAULT_CSS = HelpScreen.DEFAULT_CSS
+    BINDINGS = [("escape", "close", "Close")]
+
+    def __init__(self, summary_text: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._summary_text = summary_text
+
+    def compose(self) -> ComposeResult:
+        with DialogFrame(
+            id="character-sheet-dialog",
+            classes="dialog-frame dialog-frame-scroll dialog-frame-accent",
+        ):
+            with Container(id="character-sheet-content", classes="dialog-content"):
+                yield Label(
+                    "[b]Character Sheet[/b]", id="character-sheet-title", classes="dialog-title"
+                )
+                yield Markdown(self._summary_text, id="character-sheet-text")
+            yield Button("Close [b](Esc)[/b]", id="btn-character-sheet-close", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#btn-character-sheet-close", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-character-sheet-close":
             self.dismiss(None)
 
     def action_close(self) -> None:

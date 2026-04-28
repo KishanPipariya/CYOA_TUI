@@ -11,6 +11,7 @@ from cyoa.ui.commands import RedoCommand, RestartCommand, UICommandContext, Undo
 from cyoa.ui.components import (
     AccessibleSummaryScreen,
     BranchScreen,
+    CharacterSheetScreen,
     ConfirmScreen,
     HelpScreen,
     JournalListItem,
@@ -202,6 +203,13 @@ class NavigationMixin:
         """Show a structured recap of the current scene and player state."""
         app = as_textual_app(self)
         cast(Any, app)._push_modal_screen(SceneRecapScreen(cast(Any, self).get_scene_recap_text()))
+
+    def action_show_world_state(self) -> None:
+        """Show a dedicated character sheet for persistent player and world state."""
+        app = as_textual_app(self)
+        cast(Any, app)._push_modal_screen(
+            CharacterSheetScreen(cast(Any, self).get_world_state_text())
+        )
 
     def action_show_journal_summary(self) -> None:
         """Show a linear summary of journal entries for text-first review."""

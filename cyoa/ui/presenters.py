@@ -523,6 +523,112 @@ def build_scene_recap(  # noqa: C901
     return "\n".join(recap_lines)
 
 
+def build_world_state_summary(  # noqa: C901
+    *,
+    story_title: str | None,
+    turn_count: int,
+    player_stats: dict[str, int],
+    inventory: list[str],
+    objectives: list[Any],
+    faction_reputation: dict[str, int],
+    npc_affinity: dict[str, int],
+    story_flags: set[str] | list[str] | None,
+    last_choice_text: str | None = None,
+    current_scene_id: str | None = None,
+) -> str:
+    def _normalize_objective(objective: Any) -> tuple[str, str] | None:
+        if isinstance(objective, dict):
+            text = objective.get("text")
+            status = objective.get("status", "active")
+        else:
+            text = getattr(objective, "text", None)
+            status = getattr(objective, "status", "active")
+        if not isinstance(text, str) or not text.strip():
+            return None
+        normalized_status = status if isinstance(status, str) and status.strip() else "active"
+        return text.strip(), normalized_status.strip().lower()
+
+    lines = ["## Overview"]
+    lines.append(f"- Adventure: {story_title or 'Untitled Adventure'}")
+    lines.append(f"- Turn: {turn_count}")
+    if current_scene_id:
+        lines.append(f"- Scene ID: {current_scene_id}")
+    if last_choice_text:
+        lines.append(f"- Last choice: {last_choice_text}")
+
+    lines.extend(
+        [
+            "",
+            "## Stats",
+            f"- Health: {player_stats.get('health', 100)}",
+            f"- Gold: {player_stats.get('gold', 0)}",
+            f"- Reputation: {player_stats.get('reputation', 0)}",
+            "",
+            "## Inventory",
+        ]
+    )
+    if inventory:
+        lines.extend(f"- {item}" for item in inventory)
+    else:
+        lines.append("- Empty")
+
+    objective_buckets: dict[str, list[str]] = {
+        "active": [],
+        "completed": [],
+        "failed": [],
+        "other": [],
+    }
+    for objective in objectives:
+        normalized = _normalize_objective(objective)
+        if normalized is None:
+            continue
+        text, status = normalized
+        if status in objective_buckets:
+            objective_buckets[status].append(text)
+        else:
+            objective_buckets["other"].append(f"{text} ({status})")
+
+    lines.extend(["", "## Objectives"])
+    if not any(objective_buckets.values()):
+        lines.append("- None")
+    else:
+        for heading, items in (
+            ("Active", objective_buckets["active"]),
+            ("Completed", objective_buckets["completed"]),
+            ("Failed", objective_buckets["failed"]),
+            ("Other", objective_buckets["other"]),
+        ):
+            if not items:
+                continue
+            lines.append(f"### {heading}")
+            lines.extend(f"- {item}" for item in items)
+
+    lines.extend(["", "## Faction Reputation"])
+    if faction_reputation:
+        for name, value in sorted(faction_reputation.items()):
+            lines.append(f"- {name}: {value}")
+    else:
+        lines.append("- None")
+
+    lines.extend(["", "## NPC Affinity"])
+    if npc_affinity:
+        for name, value in sorted(npc_affinity.items()):
+            lines.append(f"- {name}: {value}")
+    else:
+        lines.append("- None")
+
+    lines.extend(["", "## Story Flags"])
+    normalized_flags = sorted(
+        {flag for flag in story_flags or [] if isinstance(flag, str) and flag}
+    )
+    if normalized_flags:
+        lines.extend(f"- {flag}" for flag in normalized_flags)
+    else:
+        lines.append("- None")
+
+    return "\n".join(lines)
+
+
 def build_help_text(
     *,
     screen_reader_mode: bool,

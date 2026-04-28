@@ -19,6 +19,7 @@ from cyoa.ui.app import CYOAApp
 from cyoa.ui.components import (
     AccessibleSummaryScreen,
     BranchScreen,
+    CharacterSheetScreen,
     CommandPaletteScreen,
     ConfirmScreen,
     HelpScreen,
@@ -800,6 +801,8 @@ async def test_accessible_journal_and_story_map_summaries_open_switch_and_restor
             lambda: len(list(app.query_one("#choices-container", Container).query(Button))) >= 2,
         )
         choices = list(app.query_one("#choices-container", Container).query(Button))
+        app.action_focus_choices_region()
+        await pilot.pause(0.2)
         assert app.focused is choices[0]
 
         await pilot.press("1")
@@ -829,6 +832,54 @@ async def test_accessible_journal_and_story_map_summaries_open_switch_and_restor
             in app.screen.query_one("#accessible-summary-title", Label).render().plain
         )
         assert "Choice: Go North" in app.screen._summary_text
+
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert app.screen.id == "_default"
+        assert app.focused is choices[0]
+
+
+@pytest.mark.asyncio
+async def test_character_sheet_modal_opens_and_reflects_current_world_state(
+    mock_app_dependencies,
+):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(100, 34)) as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+        assert app.engine is not None
+
+        await _wait_for_pilot(
+            pilot,
+            lambda: len(list(app.query_one("#choices-container", Container).query(Button))) >= 2,
+        )
+        choices = list(app.query_one("#choices-container", Container).query(Button))
+        assert app.focused is choices[0]
+
+        app.engine.state.objectives = [
+            {"id": "escape", "text": "Escape the dungeon", "status": "active"}
+        ]
+        app.engine.state.faction_reputation = {"Guild": 2}
+        app.engine.state.npc_affinity = {"Steward Hale": 1}
+        app.engine.state.story_flags = {"vault_seen"}
+        app.engine.state.last_choice_text = "Go North"
+
+        await pilot.press("c")
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, CharacterSheetScreen)
+        assert (
+            "Character Sheet"
+            in app.screen.query_one("#character-sheet-title", Label).render().plain
+        )
+        summary_text = app.screen._summary_text
+        assert "Escape the dungeon" in summary_text
+        assert "Guild: 2" in summary_text
+        assert "Steward Hale: 1" in summary_text
+        assert "vault_seen" in summary_text
+        assert "Go North" in summary_text
 
         await pilot.press("escape")
         await pilot.pause(0.2)
