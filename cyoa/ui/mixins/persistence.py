@@ -710,6 +710,7 @@ class PersistenceMixin:
             inventory=inventory if isinstance(inventory, list) else [],
             player_stats=player_stats if isinstance(player_stats, dict) else {},
             objectives=objectives if isinstance(objectives, list) else [],
+            verbosity=getattr(self, "scene_recap_verbosity", "standard"),
         )
 
     def _build_timeline_export(self, payload: dict[str, object]) -> dict[str, object]:

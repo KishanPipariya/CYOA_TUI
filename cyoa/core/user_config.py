@@ -10,6 +10,7 @@ from cyoa.core.constants import (
     LINE_SPACING_OPTIONS,
     READING_WIDTH_OPTIONS,
     TEXT_SCALE_OPTIONS,
+    VERBOSITY_OPTIONS,
 )
 from cyoa.core.support import open_private_text_file
 
@@ -109,6 +110,10 @@ class UserConfig:
     text_scale: str = "standard"
     line_width: str = "standard"
     line_spacing: str = "standard"
+    notification_verbosity: str = "standard"
+    scene_recap_verbosity: str = "standard"
+    runtime_metadata_verbosity: str = "standard"
+    locked_choice_verbosity: str = "standard"
     keybindings: dict[str, str] = field(default_factory=dict)
     typewriter: bool = True
     typewriter_speed: str = "normal"
@@ -137,6 +142,10 @@ class UserConfig:
             "text_scale",
             "line_width",
             "line_spacing",
+            "notification_verbosity",
+            "scene_recap_verbosity",
+            "runtime_metadata_verbosity",
+            "locked_choice_verbosity",
             "keybindings",
             "typewriter",
             "typewriter_speed",
@@ -165,6 +174,10 @@ class UserConfig:
         text_scale = payload.get("text_scale")
         line_width = payload.get("line_width")
         line_spacing = payload.get("line_spacing")
+        notification_verbosity = payload.get("notification_verbosity")
+        scene_recap_verbosity = payload.get("scene_recap_verbosity")
+        runtime_metadata_verbosity = payload.get("runtime_metadata_verbosity")
+        locked_choice_verbosity = payload.get("locked_choice_verbosity")
         keybindings = payload.get("keybindings")
         typewriter = payload.get("typewriter")
         typewriter_speed = payload.get("typewriter_speed")
@@ -205,6 +218,18 @@ class UserConfig:
             text_scale=_coerce_option(text_scale, TEXT_SCALE_OPTIONS, "standard"),
             line_width=_coerce_option(line_width, READING_WIDTH_OPTIONS, "standard"),
             line_spacing=_coerce_option(line_spacing, LINE_SPACING_OPTIONS, "standard"),
+            notification_verbosity=_coerce_option(
+                notification_verbosity, VERBOSITY_OPTIONS, "standard"
+            ),
+            scene_recap_verbosity=_coerce_option(
+                scene_recap_verbosity, VERBOSITY_OPTIONS, "standard"
+            ),
+            runtime_metadata_verbosity=_coerce_option(
+                runtime_metadata_verbosity, VERBOSITY_OPTIONS, "standard"
+            ),
+            locked_choice_verbosity=_coerce_option(
+                locked_choice_verbosity, VERBOSITY_OPTIONS, "standard"
+            ),
             keybindings=parsed_keybindings,
             typewriter=typewriter if isinstance(typewriter, bool) else True,
             typewriter_speed=(
@@ -247,6 +272,10 @@ class UserConfig:
                 "text_scale": self.text_scale,
                 "line_width": self.line_width,
                 "line_spacing": self.line_spacing,
+                "notification_verbosity": self.notification_verbosity,
+                "scene_recap_verbosity": self.scene_recap_verbosity,
+                "runtime_metadata_verbosity": self.runtime_metadata_verbosity,
+                "locked_choice_verbosity": self.locked_choice_verbosity,
                 "keybindings": self.keybindings,
                 "typewriter": self.typewriter,
                 "typewriter_speed": self.typewriter_speed,
@@ -270,6 +299,10 @@ class UserConfig:
             "text_scale": self.text_scale,
             "line_width": self.line_width,
             "line_spacing": self.line_spacing,
+            "notification_verbosity": self.notification_verbosity,
+            "scene_recap_verbosity": self.scene_recap_verbosity,
+            "runtime_metadata_verbosity": self.runtime_metadata_verbosity,
+            "locked_choice_verbosity": self.locked_choice_verbosity,
             "typewriter": self.typewriter,
             "typewriter_speed": self.typewriter_speed,
         }

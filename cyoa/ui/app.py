@@ -141,6 +141,10 @@ class CYOAApp(
     text_scale: reactive[str] = reactive("standard")
     line_width: reactive[str] = reactive("standard")
     line_spacing: reactive[str] = reactive("standard")
+    notification_verbosity: reactive[str] = reactive("standard")
+    scene_recap_verbosity: reactive[str] = reactive("standard")
+    runtime_metadata_verbosity: reactive[str] = reactive("standard")
+    locked_choice_verbosity: reactive[str] = reactive("standard")
     compact_layout: reactive[bool] = reactive(False)
 
     def __init__(
@@ -207,7 +211,12 @@ class CYOAApp(
         self._notification_timer: Any | None = None
         self._notification_history: list[NotificationHistoryEntry] = []
         self._notification_history_limit: int = 200
-        self._latest_status_message: str = "Information: Waiting for adventure updates."
+        self._latest_status_source_message: str = "Waiting for adventure updates."
+        self._latest_status_severity: SeverityLevel = "information"
+        self._latest_status_message: str = self._prepare_status_message(
+            self._latest_status_source_message,
+            self._latest_status_severity,
+        )
         self._modal_focus_return_target: FocusTarget | None = None
         self._redo_payloads: list[dict[str, object]] = []
         self._bookmark_payloads: dict[str, dict[str, object]] = {}
@@ -231,6 +240,10 @@ class CYOAApp(
         self.text_scale = str(config.get("text_scale", "standard"))
         self.line_width = str(config.get("line_width", "standard"))
         self.line_spacing = str(config.get("line_spacing", "standard"))
+        self.notification_verbosity = str(config.get("notification_verbosity", "standard"))
+        self.scene_recap_verbosity = str(config.get("scene_recap_verbosity", "standard"))
+        self.runtime_metadata_verbosity = str(config.get("runtime_metadata_verbosity", "standard"))
+        self.locked_choice_verbosity = str(config.get("locked_choice_verbosity", "standard"))
         self.typewriter_enabled = config.get("typewriter", True)
         self.typewriter_speed = config.get("typewriter_speed", "normal")
 
@@ -264,6 +277,7 @@ class CYOAApp(
         status_display.generation_preset = "balanced"
         status_display.screen_reader_mode = self.screen_reader_mode
         status_display.cognitive_load_reduction_mode = self.cognitive_load_reduction_mode
+        status_display.runtime_metadata_verbosity = self.runtime_metadata_verbosity
         status_display.latest_status = self._latest_status_message
         self._sync_runtime_status()
         self.apply_ui_theme()
@@ -356,6 +370,7 @@ class CYOAApp(
                 self._mount_choice_buttons(*mount_args)
             else:
                 self._mount_choice_buttons(*mount_args, focus_target=focus_target)
+        self._refresh_latest_status_message()
 
     def watch_cognitive_load_reduction_mode(self, enabled: bool) -> None:
         self.set_class(enabled, "cognitive-load-mode")
@@ -364,6 +379,7 @@ class CYOAApp(
         except Exception:
             return
         status_display.cognitive_load_reduction_mode = enabled
+        self._refresh_latest_status_message()
 
     def _set_variant_class(
         self, prefix: str, value: str, allowed: tuple[str, ...], default: str
@@ -402,6 +418,48 @@ class CYOAApp(
     def watch_line_spacing(self, _value: str) -> None:
         self._apply_reading_preference_classes()
 
+    def watch_notification_verbosity(self, _value: str) -> None:
+        self._refresh_latest_status_message()
+
+    def watch_scene_recap_verbosity(self, _value: str) -> None:
+        return
+
+    def watch_runtime_metadata_verbosity(self, value: str) -> None:
+        try:
+            self.query_one(StatusDisplay).runtime_metadata_verbosity = value
+        except Exception:
+            return
+
+    def watch_locked_choice_verbosity(self, _value: str) -> None:
+        if (
+            self.engine is None
+            or self.engine.state.current_node is None
+            or self._loading_suffix_shown
+        ):
+            return
+        try:
+            choices_container = self.query_one("#choices-container", Container)
+        except Exception:
+            return
+        focus_target = self._capture_focus_target()
+        choices_container.remove_children()
+        self._mount_choice_buttons(
+            self.engine.state.current_node,
+            choices_container,
+            self.engine.state.current_node.narrative.startswith(constants.ERROR_NARRATIVE_PREFIX),
+            focus_target=focus_target,
+        )
+
+    def _notification_prefix(self, severity: SeverityLevel) -> str:
+        prefix = self._notification_title(severity)
+        if self.cognitive_load_reduction_mode:
+            prefix = {
+                "information": "Update",
+                "warning": "Attention",
+                "error": "Problem",
+            }.get(severity, "Update")
+        return prefix
+
     @staticmethod
     def _notification_title(severity: SeverityLevel) -> str:
         titles = {
@@ -412,21 +470,34 @@ class CYOAApp(
         return titles.get(severity, "Notice")
 
     def _prepare_status_message(self, message: str, severity: SeverityLevel) -> str:
-        prefix = self._notification_title(severity)
-        if self.cognitive_load_reduction_mode:
-            prefix = {
-                "information": "Update",
-                "warning": "Attention",
-                "error": "Problem",
-            }.get(severity, "Update")
+        prefix = self._notification_prefix(severity)
         cleaned = format_status_message(
             message,
             screen_reader_mode=self.screen_reader_mode,
             simplified_mode=self.cognitive_load_reduction_mode,
         ).strip()
-        if cleaned and not cleaned.lower().startswith(f"{prefix.lower()}:"):
+        if not cleaned:
+            return cleaned
+        if self.notification_verbosity == "minimal":
+            return cleaned
+        if self.notification_verbosity == "detailed":
+            detailed_prefix = f"{prefix} update"
+            if cleaned.lower().startswith(f"{detailed_prefix.lower()}:"):
+                return cleaned
+            return f"{detailed_prefix}: {cleaned}"
+        if not cleaned.lower().startswith(f"{prefix.lower()}:"):
             cleaned = f"{prefix}: {cleaned}"
         return cleaned
+
+    def _refresh_latest_status_message(self) -> None:
+        self._latest_status_message = self._prepare_status_message(
+            self._latest_status_source_message,
+            self._latest_status_severity,
+        )
+        try:
+            self.query_one(StatusDisplay).latest_status = self._latest_status_message
+        except Exception:
+            return
 
     def _record_notification_history(self, message: str, severity: SeverityLevel) -> None:
         cleaned = self._prepare_status_message(message, severity)
@@ -459,6 +530,8 @@ class CYOAApp(
         if not message:
             return
         if update_latest:
+            self._latest_status_source_message = message
+            self._latest_status_severity = severity
             self._latest_status_message = message
             try:
                 self.query_one(StatusDisplay).latest_status = message
@@ -682,6 +755,8 @@ class CYOAApp(
             objectives=state.objectives,
             screen_reader_mode=self.screen_reader_mode,
             turn_count=state.turn_count,
+            scene_recap_verbosity=self.scene_recap_verbosity,
+            locked_choice_verbosity=self.locked_choice_verbosity,
             story_title=state.story_title or node.title,
             last_choice_text=state.last_choice_text,
             story_flags=state.story_flags,
@@ -1435,6 +1510,18 @@ class CYOAApp(
                 text_scale=str(pick("text_scale", self.text_scale)),
                 line_width=str(pick("line_width", self.line_width)),
                 line_spacing=str(pick("line_spacing", self.line_spacing)),
+                notification_verbosity=str(
+                    pick("notification_verbosity", self.notification_verbosity)
+                ),
+                scene_recap_verbosity=str(
+                    pick("scene_recap_verbosity", self.scene_recap_verbosity)
+                ),
+                runtime_metadata_verbosity=str(
+                    pick("runtime_metadata_verbosity", self.runtime_metadata_verbosity)
+                ),
+                locked_choice_verbosity=str(
+                    pick("locked_choice_verbosity", self.locked_choice_verbosity)
+                ),
                 keybindings=cast(
                     dict[str, str], pick("keybindings", getattr(config, "keybindings", {}))
                 ),
@@ -1548,6 +1635,30 @@ class CYOAApp(
             getattr(self._user_config, "line_spacing", "standard"),
             constants.LINE_SPACING_OPTIONS,
         )
+        notification_verbosity = self._resolve_option_setting(
+            payload,
+            "notification_verbosity",
+            getattr(self._user_config, "notification_verbosity", "standard"),
+            constants.VERBOSITY_OPTIONS,
+        )
+        scene_recap_verbosity = self._resolve_option_setting(
+            payload,
+            "scene_recap_verbosity",
+            getattr(self._user_config, "scene_recap_verbosity", "standard"),
+            constants.VERBOSITY_OPTIONS,
+        )
+        runtime_metadata_verbosity = self._resolve_option_setting(
+            payload,
+            "runtime_metadata_verbosity",
+            getattr(self._user_config, "runtime_metadata_verbosity", "standard"),
+            constants.VERBOSITY_OPTIONS,
+        )
+        locked_choice_verbosity = self._resolve_option_setting(
+            payload,
+            "locked_choice_verbosity",
+            getattr(self._user_config, "locked_choice_verbosity", "standard"),
+            constants.VERBOSITY_OPTIONS,
+        )
         typewriter = bool(payload.get("typewriter", self._user_config.typewriter))
         typewriter_speed = self._resolve_option_setting(
             payload,
@@ -1577,6 +1688,10 @@ class CYOAApp(
             text_scale=text_scale,
             line_width=line_width,
             line_spacing=line_spacing,
+            notification_verbosity=notification_verbosity,
+            scene_recap_verbosity=scene_recap_verbosity,
+            runtime_metadata_verbosity=runtime_metadata_verbosity,
+            locked_choice_verbosity=locked_choice_verbosity,
             keybindings=keybinding_overrides,
             typewriter=typewriter,
             typewriter_speed=typewriter_speed,
@@ -1597,6 +1712,10 @@ class CYOAApp(
         self.text_scale = text_scale
         self.line_width = line_width
         self.line_spacing = line_spacing
+        self.notification_verbosity = notification_verbosity
+        self.scene_recap_verbosity = scene_recap_verbosity
+        self.runtime_metadata_verbosity = runtime_metadata_verbosity
+        self.locked_choice_verbosity = locked_choice_verbosity
         self.typewriter_enabled = typewriter
         self.typewriter_speed = typewriter_speed
         self._keybinding_overrides = keybinding_overrides
@@ -1639,6 +1758,18 @@ class CYOAApp(
         self.text_scale = getattr(self._user_config, "text_scale", "standard")
         self.line_width = getattr(self._user_config, "line_width", "standard")
         self.line_spacing = getattr(self._user_config, "line_spacing", "standard")
+        self.notification_verbosity = getattr(
+            self._user_config, "notification_verbosity", "standard"
+        )
+        self.scene_recap_verbosity = getattr(self._user_config, "scene_recap_verbosity", "standard")
+        self.runtime_metadata_verbosity = getattr(
+            self._user_config,
+            "runtime_metadata_verbosity",
+            "standard",
+        )
+        self.locked_choice_verbosity = getattr(
+            self._user_config, "locked_choice_verbosity", "standard"
+        )
         self.typewriter_enabled = self._user_config.typewriter
         self.typewriter_speed = self._user_config.typewriter_speed
         self.notify(

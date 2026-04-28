@@ -16,6 +16,7 @@ from cyoa.core.runtime import EnginePhase, EngineTransition
 from cyoa.core.user_config import UserConfigSaveError
 from cyoa.ui.app import BufferedNotification, CYOAApp
 from cyoa.ui.components import (
+    AccessibleSummaryScreen,
     BranchScreen,
     FirstRunSetupScreen,
     LoadGameScreen,
@@ -37,7 +38,9 @@ from cyoa.ui.mixins.typewriter import TypewriterMixin
 from cyoa.ui.presenters import (
     build_accessible_export,
     build_choice_label,
+    build_journal_summary,
     build_scene_recap,
+    build_story_map_summary,
     format_status_message,
     loading_story_text,
 )
@@ -364,12 +367,17 @@ class SettingsScreenHarness(App[None]):
             model_path="",
             theme="dark_dungeon",
             dark=True,
+            high_contrast=False,
             reduced_motion=False,
             screen_reader_mode=False,
             cognitive_load_reduction_mode=False,
             text_scale="standard",
             line_width="standard",
             line_spacing="standard",
+            notification_verbosity="standard",
+            scene_recap_verbosity="standard",
+            runtime_metadata_verbosity="standard",
+            locked_choice_verbosity="standard",
             keybindings={"show_settings": "f2"},
             typewriter=True,
             typewriter_speed="normal",
@@ -490,6 +498,16 @@ def test_presenters_return_plain_text_variants_for_screen_reader_mode():
         "🔒 Missing item: key | Need reputation 3+ (current: 1)",
         screen_reader_mode=True,
     ) == ("1. Open the gate\nUnavailable:\n- Missing item: key\n- Need reputation 3+ (current: 1)")
+    assert (
+        build_choice_label(
+            0,
+            "Open the gate",
+            "🔒 Missing item: key | Need reputation 3+ (current: 1)",
+            screen_reader_mode=True,
+            verbosity="minimal",
+        )
+        == "1. Open the gate\nUnavailable"
+    )
 
 
 def test_build_scene_recap_includes_visible_choices_progress_and_recent_changes() -> None:
@@ -517,6 +535,8 @@ def test_build_scene_recap_includes_visible_choices_progress_and_recent_changes(
         objectives=[{"id": "escape", "text": "Escape the vault", "status": "active"}],
         screen_reader_mode=False,
         turn_count=2,
+        scene_recap_verbosity="standard",
+        locked_choice_verbosity="standard",
         story_title="Vault Run",
         story_flags=[],
         items_gained=node.items_gained,
@@ -552,6 +572,8 @@ def test_build_scene_recap_is_more_explicit_in_screen_reader_mode() -> None:
         objectives=[],
         screen_reader_mode=True,
         turn_count=4,
+        scene_recap_verbosity="detailed",
+        locked_choice_verbosity="detailed",
         story_title="Bridge Watch",
         last_choice_text="Light the beacon",
         story_flags=[],
@@ -594,6 +616,119 @@ def test_build_accessible_export_uses_plain_text_reading_order() -> None:
     assert "- Inventory: Torch, Ancient Coin" in transcript
     assert "- Objectives: Escape the vault" in transcript
     assert "---" not in transcript
+
+
+def test_build_scene_recap_minimal_and_export_detailed_respect_verbosity() -> None:
+    recap = build_scene_recap(
+        narrative="The atrium hums with trapped magic.",
+        choices=[
+            Choice(
+                text="Break the seal",
+                requirements=ChoiceRequirement(items=["Seal Key"]),
+            )
+        ],
+        inventory=["Torch"],
+        player_stats={"health": 80, "gold": 3, "reputation": 1},
+        objectives=[{"id": "seal", "text": "Find the key", "status": "active"}],
+        screen_reader_mode=False,
+        turn_count=5,
+        scene_recap_verbosity="minimal",
+        locked_choice_verbosity="minimal",
+        story_title="Atrium Run",
+        story_flags=[],
+        items_gained=["Rune"],
+    )
+
+    transcript = build_accessible_export(
+        story_title="Atrium Run",
+        turn_count=5,
+        saved_at="2026-04-28T09:30:00Z",
+        story_segments=[{"kind": "story_turn", "text": "The atrium hums with trapped magic."}],
+        current_story_text=None,
+        directives=["Move quietly"],
+        inventory=["Torch"],
+        player_stats={"health": 80, "gold": 3, "reputation": 1},
+        objectives=[{"id": "seal", "text": "Find the key", "status": "active"}],
+        verbosity="detailed",
+    )
+
+    assert "## Recent Changes" not in recap
+    assert "1. Break the seal (Unavailable)" in recap
+    assert "- Inventory: 1 item(s)" in recap
+    assert "Saved At: 2026-04-28T09:30:00Z" in transcript
+    assert "Objective Details:" in transcript
+    assert "- Find the key" in transcript
+
+
+def test_build_journal_and_story_map_summaries_are_linear_and_ordered() -> None:
+    journal_summary = build_journal_summary(
+        [
+            {"label": "Turn 1: Wake up", "scene_index": 0, "entry_kind": "choice"},
+            {
+                "label": "Timeline fracture → resumed from Turn 1",
+                "scene_index": 1,
+                "entry_kind": "branch",
+            },
+        ],
+        screen_reader_mode=True,
+    )
+    story_map_summary = build_story_map_summary(
+        {
+            "root_id": "scene-1",
+            "nodes": {
+                "scene-1": {
+                    "narrative": "You wake in a cell.",
+                    "available_choices": ["Go North"],
+                },
+                "scene-2": {
+                    "narrative": "A corridor opens into moonlight.",
+                    "available_choices": [],
+                },
+            },
+            "edges": {"scene-1": [{"target_id": "scene-2", "choice": "Go North"}], "scene-2": []},
+        },
+        current_scene_id="scene-2",
+        timeline_metadata=[
+            {"kind": "branch_restore", "target_scene_id": "scene-1", "restored_turn": 1}
+        ],
+        screen_reader_mode=True,
+    )
+
+    assert "## Timeline" in journal_summary
+    assert "- Turn 1: Turn 1: Wake up" in journal_summary
+    assert "## Branch Restores" in journal_summary
+    assert "Timeline fracture" in journal_summary
+    assert "## Structure" in story_map_summary
+    assert "Turn 1 | Depth 0 | Restored from Turn 1" in story_map_summary
+    assert "Choice: Go North" in story_map_summary
+    assert "Turn 2 | Depth 1 | Current | Ending" in story_map_summary
+
+
+def test_accessible_summary_screen_switches_and_closes() -> None:
+    screen = AccessibleSummaryScreen(
+        "Journal Summary",
+        "# Journal Summary\n\n## Timeline\n- Turn 1: Wake up",
+        active="journal",
+    )
+    screen.dismiss = MagicMock()
+
+    screen.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-accessible-summary-map"))
+    )
+    screen.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-accessible-summary-close"))
+    )
+    screen.action_show_journal()
+    screen.action_show_story_map()
+    screen.action_close()
+
+    assert screen.dismiss.call_args_list == [
+        call("story_map"),
+        call(None),
+        call("journal"),
+        call("story_map"),
+        call(None),
+    ]
 
 
 def test_app_effective_keybindings_merge_defaults_and_overrides() -> None:
@@ -827,10 +962,8 @@ async def test_status_display_watchers_and_spinner_tick() -> None:
         assert "25%" in _render_text(display.query_one("#health-value", Label))
         assert "Critical" in _render_text(display.query_one("#health-value", Label))
         assert "Gold 9" in _render_text(display.query_one("#stats-text", Label))
-        assert "Preset fast" in _render_text(display.query_one("#runtime-text", Label))
-        assert "Phase ready" in _render_text(display.query_one("#runtime-text", Label))
-        assert "Provider provider-with-a-very-long-name" in _render_text(
-            display.query_one("#runtime-text", Label)
+        assert (
+            _render_text(display.query_one("#runtime-text", Label)) == "Preset fast | Phase ready"
         )
         assert "Inventory: Torch, Key" in _render_text(display.query_one("#inventory-label", Label))
         assert "Objectives: Escape | Survive" in _render_text(
@@ -850,6 +983,13 @@ async def test_status_display_watchers_and_spinner_tick() -> None:
         assert display.query_one("#runtime-text", Label).has_class("hidden")
         assert display.query_one("#directives-label", Label).has_class("hidden")
         assert "Focus: Escape" in _render_text(display.query_one("#objectives-label", Label))
+
+        display.cognitive_load_reduction_mode = False
+        display.runtime_metadata_verbosity = "detailed"
+        await pilot.pause(0.1)
+        assert "Provider provider-with-a-very-long-name" in _render_text(
+            display.query_one("#runtime-text", Label)
+        )
 
     spinner_app = SpinnerHarness()
     async with spinner_app.run_test() as pilot:
@@ -985,6 +1125,10 @@ def test_settings_screen_dismisses_saved_payload(tmp_path) -> None:
         text_scale="standard",
         line_width="standard",
         line_spacing="standard",
+        notification_verbosity="standard",
+        scene_recap_verbosity="standard",
+        runtime_metadata_verbosity="standard",
+        locked_choice_verbosity="standard",
         keybindings={},
         typewriter=True,
         typewriter_speed="normal",
@@ -1039,6 +1183,18 @@ def test_settings_screen_dismisses_saved_payload(tmp_path) -> None:
         SimpleNamespace(button=SimpleNamespace(id="btn-settings-spacing-relaxed"))
     )
     settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-notification-verbosity-minimal"))
+    )
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-recap-verbosity-detailed"))
+    )
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-runtime-verbosity-minimal"))
+    )
+    settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-locked-choice-verbosity-detailed"))
+    )
+    settings.on_button_pressed(
         SimpleNamespace(button=SimpleNamespace(id="btn-settings-typewriter-off"))
     )
     settings.on_button_pressed(
@@ -1062,6 +1218,10 @@ def test_settings_screen_dismisses_saved_payload(tmp_path) -> None:
         "text_scale": "xlarge",
         "line_width": "focused",
         "line_spacing": "relaxed",
+        "notification_verbosity": "minimal",
+        "scene_recap_verbosity": "detailed",
+        "runtime_metadata_verbosity": "minimal",
+        "locked_choice_verbosity": "detailed",
         "keybindings": {"show_settings": "f2", "toggle_journal": "f3"},
         "typewriter": False,
         "typewriter_speed": "fast",
@@ -1082,6 +1242,10 @@ def test_settings_screen_support_actions_dismiss_expected_payloads():
         text_scale="standard",
         line_width="standard",
         line_spacing="standard",
+        notification_verbosity="standard",
+        scene_recap_verbosity="standard",
+        runtime_metadata_verbosity="standard",
+        locked_choice_verbosity="standard",
         keybindings={},
         typewriter=True,
         typewriter_speed="normal",
@@ -1135,6 +1299,10 @@ def test_settings_screen_blocks_save_when_keybindings_conflict() -> None:
         text_scale="standard",
         line_width="standard",
         line_spacing="standard",
+        notification_verbosity="standard",
+        scene_recap_verbosity="standard",
+        runtime_metadata_verbosity="standard",
+        locked_choice_verbosity="standard",
         keybindings={},
         typewriter=True,
         typewriter_speed="normal",
@@ -1175,6 +1343,10 @@ def test_settings_screen_blocks_save_when_local_model_path_is_invalid() -> None:
         text_scale="standard",
         line_width="standard",
         line_spacing="standard",
+        notification_verbosity="standard",
+        scene_recap_verbosity="standard",
+        runtime_metadata_verbosity="standard",
+        locked_choice_verbosity="standard",
         keybindings={},
         typewriter=True,
         typewriter_speed="normal",
@@ -1334,6 +1506,10 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
                 "text_scale": "xlarge",
                 "line_width": "focused",
                 "line_spacing": "relaxed",
+                "notification_verbosity": "minimal",
+                "scene_recap_verbosity": "detailed",
+                "runtime_metadata_verbosity": "minimal",
+                "locked_choice_verbosity": "detailed",
                 "keybindings": {"show_settings": "f2", "toggle_journal": "f3"},
                 "typewriter": False,
                 "typewriter_speed": "fast",
@@ -1348,6 +1524,10 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         assert app.text_scale == "xlarge"
         assert app.line_width == "focused"
         assert app.line_spacing == "relaxed"
+        assert app.notification_verbosity == "minimal"
+        assert app.scene_recap_verbosity == "detailed"
+        assert app.runtime_metadata_verbosity == "minimal"
+        assert app.locked_choice_verbosity == "detailed"
         assert app.typewriter_enabled is False
         assert app.typewriter_speed == "fast"
         assert os.environ["CYOA_ENABLE_RAG"] == "1"
@@ -1361,6 +1541,10 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
         assert saved["text_scale"] == "xlarge"
         assert saved["line_width"] == "focused"
         assert saved["line_spacing"] == "relaxed"
+        assert saved["notification_verbosity"] == "minimal"
+        assert saved["scene_recap_verbosity"] == "detailed"
+        assert saved["runtime_metadata_verbosity"] == "minimal"
+        assert saved["locked_choice_verbosity"] == "detailed"
         assert saved["keybindings"] == {"show_settings": "f2", "toggle_journal": "f3"}
         assert saved["diagnostics_enabled"] is True
         assert app._pending_accessibility_preset == "custom"
@@ -1401,6 +1585,10 @@ def test_cyoa_app_reset_settings_restores_safe_defaults(monkeypatch: pytest.Monk
         text_scale="xlarge",
         line_width="focused",
         line_spacing="relaxed",
+        notification_verbosity="minimal",
+        scene_recap_verbosity="detailed",
+        runtime_metadata_verbosity="minimal",
+        locked_choice_verbosity="detailed",
         keybindings={"show_help": "f1"},
         typewriter=False,
         typewriter_speed="fast",
@@ -1418,6 +1606,10 @@ def test_cyoa_app_reset_settings_restores_safe_defaults(monkeypatch: pytest.Monk
             text_scale="standard",
             line_width="standard",
             line_spacing="standard",
+            notification_verbosity="standard",
+            scene_recap_verbosity="standard",
+            runtime_metadata_verbosity="standard",
+            locked_choice_verbosity="standard",
             keybindings={},
             typewriter=True,
             typewriter_speed="normal",
@@ -1432,6 +1624,10 @@ def test_cyoa_app_reset_settings_restores_safe_defaults(monkeypatch: pytest.Monk
     assert app.text_scale == "standard"
     assert app.line_width == "standard"
     assert app.line_spacing == "standard"
+    assert app.notification_verbosity == "standard"
+    assert app.scene_recap_verbosity == "standard"
+    assert app.runtime_metadata_verbosity == "standard"
+    assert app.locked_choice_verbosity == "standard"
     assert app.typewriter_enabled is True
     assert app.typewriter_speed == "normal"
     app.set_keymap.assert_called_once_with({})
@@ -1476,6 +1672,10 @@ def test_cyoa_app_reopens_settings_after_save_failure(monkeypatch: pytest.Monkey
         text_scale="standard",
         line_width="standard",
         line_spacing="standard",
+        notification_verbosity="standard",
+        scene_recap_verbosity="standard",
+        runtime_metadata_verbosity="standard",
+        locked_choice_verbosity="standard",
         keybindings={},
         typewriter=True,
         typewriter_speed="normal",
@@ -1507,6 +1707,10 @@ def test_cyoa_app_reopens_settings_after_save_failure(monkeypatch: pytest.Monkey
             "text_scale": "large",
             "line_width": "focused",
             "line_spacing": "relaxed",
+            "notification_verbosity": "minimal",
+            "scene_recap_verbosity": "detailed",
+            "runtime_metadata_verbosity": "minimal",
+            "locked_choice_verbosity": "detailed",
             "keybindings": {"show_settings": "f2"},
             "typewriter": True,
             "typewriter_speed": "fast",
@@ -1519,6 +1723,10 @@ def test_cyoa_app_reopens_settings_after_save_failure(monkeypatch: pytest.Monkey
     assert screens[1]._model_path == ""
     assert screens[1]._provider == "mock"
     assert screens[1]._cognitive_load_reduction_mode is True
+    assert screens[1]._notification_verbosity == "minimal"
+    assert screens[1]._scene_recap_verbosity == "detailed"
+    assert screens[1]._runtime_metadata_verbosity == "minimal"
+    assert screens[1]._locked_choice_verbosity == "detailed"
     assert screens[1]._theme_names == ["dark_dungeon", "space_explorer"]
     assert screens[1]._current_theme == "space_explorer"
 
@@ -1868,6 +2076,7 @@ def test_app_notification_and_cache_helpers_cover_ui_shell(monkeypatch: pytest.M
 def test_app_notify_tracks_latest_status_and_repeat_action(monkeypatch: pytest.MonkeyPatch) -> None:
     app = CYOAApp(model_path="dummy.gguf")
     app.screen_reader_mode = True
+    app.notification_verbosity = "minimal"
     repeated: list[tuple[str, str, str, bool]] = []
 
     monkeypatch.setattr(
@@ -1880,16 +2089,16 @@ def test_app_notify_tracks_latest_status_and_repeat_action(monkeypatch: pytest.M
     app.notify("⚡ Weaving possible futures...", severity="information", timeout=3)
     app.action_repeat_latest_status()
 
-    assert app._latest_status_message == "Information: Weaving possible futures..."
-    assert app.get_notification_history_lines() == ["Information: Weaving possible futures..."]
+    assert app._latest_status_message == "Weaving possible futures..."
+    assert app.get_notification_history_lines() == ["Weaving possible futures..."]
     assert repeated[0] == (
-        "Information: Weaving possible futures...",
+        "Weaving possible futures...",
         "Information",
         "information",
         False,
     )
     assert repeated[1] == (
-        "Information: Weaving possible futures...",
+        "Weaving possible futures...",
         "Latest Status",
         "information",
         False,

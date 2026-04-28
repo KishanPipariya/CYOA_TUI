@@ -138,6 +138,22 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Panels And Help",
     ),
     AppBindingSpec(
+        "show_journal_summary",
+        "[",
+        "show_journal_summary",
+        "Journal Summary",
+        "Open journal summary",
+        "Panels And Help",
+    ),
+    AppBindingSpec(
+        "show_story_map_summary",
+        "]",
+        "show_story_map_summary",
+        "Map Summary",
+        "Open story map summary",
+        "Panels And Help",
+    ),
+    AppBindingSpec(
         "show_settings",
         "o",
         "show_settings",

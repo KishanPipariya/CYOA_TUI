@@ -47,6 +47,10 @@ def test_save_config_creates_parent_directory(tmp_path, monkeypatch) -> None:
         "text_scale": "standard",
         "line_width": "standard",
         "line_spacing": "standard",
+        "notification_verbosity": "standard",
+        "scene_recap_verbosity": "standard",
+        "runtime_metadata_verbosity": "standard",
+        "locked_choice_verbosity": "standard",
         "typewriter": False,
         "typewriter_speed": "normal",
     }
@@ -68,6 +72,10 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
             text_scale="xlarge",
             line_width="focused",
             line_spacing="relaxed",
+            notification_verbosity="minimal",
+            scene_recap_verbosity="detailed",
+            runtime_metadata_verbosity="minimal",
+            locked_choice_verbosity="detailed",
             keybindings={"show_settings": "f2"},
             typewriter=False,
             typewriter_speed="fast",
@@ -93,6 +101,10 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
     assert restored.text_scale == "xlarge"
     assert restored.line_width == "focused"
     assert restored.line_spacing == "relaxed"
+    assert restored.notification_verbosity == "minimal"
+    assert restored.scene_recap_verbosity == "detailed"
+    assert restored.runtime_metadata_verbosity == "minimal"
+    assert restored.locked_choice_verbosity == "detailed"
     assert restored.keybindings == {"show_settings": "f2"}
     assert restored.typewriter is False
     assert restored.typewriter_speed == "fast"

@@ -17,6 +17,7 @@ from cyoa.core.theme_loader import load_theme
 from cyoa.core.user_config import UserConfig
 from cyoa.ui.app import CYOAApp
 from cyoa.ui.components import (
+    AccessibleSummaryScreen,
     BranchScreen,
     ConfirmScreen,
     HelpScreen,
@@ -749,6 +750,75 @@ async def test_structural_navigation_shortcuts_jump_to_major_regions(mock_app_de
         await pilot.press("shift+n")
         await pilot.pause(0.2)
         assert isinstance(app.screen, NotificationHistoryScreen)
+
+
+@pytest.mark.asyncio
+async def test_accessible_journal_and_story_map_summaries_open_switch_and_restore_focus(
+    mock_app_dependencies,
+):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(100, 34)) as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+        assert app.engine is not None
+        assert app.engine.db is not None
+        app.engine.db.get_story_tree.return_value = {
+            "root_id": "scene-1",
+            "nodes": {
+                "scene-1": {
+                    "narrative": "You awaken in a test dungeon.",
+                    "available_choices": ["Go North", "Go South"],
+                },
+                "scene-2": {
+                    "narrative": "You went North.",
+                    "available_choices": [],
+                },
+            },
+            "edges": {"scene-1": [{"target_id": "scene-2", "choice": "Go North"}], "scene-2": []},
+        }
+
+        await _wait_for_pilot(
+            pilot,
+            lambda: len(list(app.query_one("#choices-container", Container).query(Button))) >= 2,
+        )
+        choices = list(app.query_one("#choices-container", Container).query(Button))
+        assert app.focused is choices[0]
+
+        await pilot.press("1")
+        await pilot.pause(1.0)
+        app.action_skip_typewriter()
+        await _wait_for_pilot(
+            pilot,
+            lambda: len(list(app.query_one("#choices-container", Container).query(Button))) >= 1,
+        )
+        choices = list(app.query_one("#choices-container", Container).query(Button))
+        assert app.focused is choices[0]
+
+        await pilot.press("[")
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, AccessibleSummaryScreen)
+        assert (
+            "Journal Summary"
+            in app.screen.query_one("#accessible-summary-title", Label).render().plain
+        )
+        assert "Go North" in app.screen._summary_text
+
+        await pilot.press("]")
+        await pilot.pause(0.3)
+        assert isinstance(app.screen, AccessibleSummaryScreen)
+        assert (
+            "Story Map Summary"
+            in app.screen.query_one("#accessible-summary-title", Label).render().plain
+        )
+        assert "Choice: Go North" in app.screen._summary_text
+
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert app.screen.id == "_default"
+        assert app.focused is choices[0]
 
 
 @pytest.mark.asyncio

@@ -94,6 +94,7 @@ def ensure_user_directories() -> None:
     get_user_data_dir().mkdir(parents=True, exist_ok=True)
     get_user_state_dir().mkdir(parents=True, exist_ok=True)
 
+
 # --- Narrative & Gameplay ---
 
 DEFAULT_STARTING_PROMPT = """You are a dark fantasy interactive fiction engine.
@@ -139,6 +140,7 @@ TYPEWRITER_SPEEDS: dict[str, float] = {
 TEXT_SCALE_OPTIONS: tuple[str, ...] = ("standard", "large", "xlarge")
 READING_WIDTH_OPTIONS: tuple[str, ...] = ("focused", "standard", "full")
 LINE_SPACING_OPTIONS: tuple[str, ...] = ("compact", "standard", "relaxed")
+VERBOSITY_OPTIONS: tuple[str, ...] = ("minimal", "standard", "detailed")
 TYPEWRITER_CHAR_DELAY = 0.02  # seconds per character (legacy, kept for compat)
 TYPEWRITER_CATCHUP_THRESHOLD = 50  # if queue > 50, speed up reveal
 TYPEWRITER_MAX_BATCH = 5  # max characters to reveal per tick during catchup

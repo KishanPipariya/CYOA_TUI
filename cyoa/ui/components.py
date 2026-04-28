@@ -67,6 +67,7 @@ __all__ = [
     "TextPromptScreen",
     "JournalListItem",
     "SceneRecapScreen",
+    "AccessibleSummaryScreen",
     "SceneListItem",
     "SaveListItem",
     "StatusDisplay",
@@ -1078,6 +1079,10 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         text_scale: str,
         line_width: str,
         line_spacing: str,
+        notification_verbosity: str,
+        scene_recap_verbosity: str,
+        runtime_metadata_verbosity: str,
+        locked_choice_verbosity: str,
         keybindings: dict[str, str] | None = None,
         typewriter: bool,
         typewriter_speed: str,
@@ -1103,6 +1108,26 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         )
         self._line_spacing = (
             line_spacing if line_spacing in constants.LINE_SPACING_OPTIONS else "standard"
+        )
+        self._notification_verbosity = (
+            notification_verbosity
+            if notification_verbosity in constants.VERBOSITY_OPTIONS
+            else "standard"
+        )
+        self._scene_recap_verbosity = (
+            scene_recap_verbosity
+            if scene_recap_verbosity in constants.VERBOSITY_OPTIONS
+            else "standard"
+        )
+        self._runtime_metadata_verbosity = (
+            runtime_metadata_verbosity
+            if runtime_metadata_verbosity in constants.VERBOSITY_OPTIONS
+            else "standard"
+        )
+        self._locked_choice_verbosity = (
+            locked_choice_verbosity
+            if locked_choice_verbosity in constants.VERBOSITY_OPTIONS
+            else "standard"
         )
         self._effective_keybindings = effective_keybindings(keybindings)
         self._typewriter = typewriter
@@ -1233,6 +1258,36 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 classes="settings-value",
             )
 
+            yield Label("Verbosity", classes="settings-label")
+            yield Label(
+                "Set how much detail appears per surface. Screen Reader Friendly keeps plain wording, and Cognitive Load Reduction can still hide lower-priority runtime metadata.",
+                classes="settings-value",
+            )
+
+            yield Label("Notifications", classes="settings-label settings-subsection")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Minimal", id="btn-settings-notification-verbosity-minimal")
+                yield Button("Standard", id="btn-settings-notification-verbosity-standard")
+                yield Button("Detailed", id="btn-settings-notification-verbosity-detailed")
+
+            yield Label("Scene Recap", classes="settings-label settings-subsection")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Minimal", id="btn-settings-recap-verbosity-minimal")
+                yield Button("Standard", id="btn-settings-recap-verbosity-standard")
+                yield Button("Detailed", id="btn-settings-recap-verbosity-detailed")
+
+            yield Label("Runtime Metadata", classes="settings-label settings-subsection")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Minimal", id="btn-settings-runtime-verbosity-minimal")
+                yield Button("Standard", id="btn-settings-runtime-verbosity-standard")
+                yield Button("Detailed", id="btn-settings-runtime-verbosity-detailed")
+
+            yield Label("Locked Choices", classes="settings-label settings-subsection")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Minimal", id="btn-settings-locked-choice-verbosity-minimal")
+                yield Button("Standard", id="btn-settings-locked-choice-verbosity-standard")
+                yield Button("Detailed", id="btn-settings-locked-choice-verbosity-detailed")
+
             yield Label("Key Bindings", classes="settings-label")
             yield Label(
                 "Edit the keys for major actions here. Leave a field blank to restore its default key. Conflicts block saving.",
@@ -1337,6 +1392,23 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 f"btn-settings-spacing-{spacing}",
                 self._line_spacing == spacing,
             )
+        for verbosity in constants.VERBOSITY_OPTIONS:
+            self._set_selected(
+                f"btn-settings-notification-verbosity-{verbosity}",
+                self._notification_verbosity == verbosity,
+            )
+            self._set_selected(
+                f"btn-settings-recap-verbosity-{verbosity}",
+                self._scene_recap_verbosity == verbosity,
+            )
+            self._set_selected(
+                f"btn-settings-runtime-verbosity-{verbosity}",
+                self._runtime_metadata_verbosity == verbosity,
+            )
+            self._set_selected(
+                f"btn-settings-locked-choice-verbosity-{verbosity}",
+                self._locked_choice_verbosity == verbosity,
+            )
         self._set_selected("btn-settings-typewriter-on", self._typewriter)
         self._set_selected("btn-settings-typewriter-off", not self._typewriter)
 
@@ -1435,6 +1507,10 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             "text_scale": self._text_scale,
             "line_width": self._line_width,
             "line_spacing": self._line_spacing,
+            "notification_verbosity": self._notification_verbosity,
+            "scene_recap_verbosity": self._scene_recap_verbosity,
+            "runtime_metadata_verbosity": self._runtime_metadata_verbosity,
+            "locked_choice_verbosity": self._locked_choice_verbosity,
             "keybindings": keybinding_overrides,
             "typewriter": self._typewriter,
             "typewriter_speed": self._typewriter_speed,
@@ -1499,6 +1575,20 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             self._line_width = button_id.removeprefix("btn-settings-width-")
         elif button_id and button_id.startswith("btn-settings-spacing-"):
             self._line_spacing = button_id.removeprefix("btn-settings-spacing-")
+        elif button_id and button_id.startswith("btn-settings-notification-verbosity-"):
+            self._notification_verbosity = button_id.removeprefix(
+                "btn-settings-notification-verbosity-"
+            )
+        elif button_id and button_id.startswith("btn-settings-recap-verbosity-"):
+            self._scene_recap_verbosity = button_id.removeprefix("btn-settings-recap-verbosity-")
+        elif button_id and button_id.startswith("btn-settings-runtime-verbosity-"):
+            self._runtime_metadata_verbosity = button_id.removeprefix(
+                "btn-settings-runtime-verbosity-"
+            )
+        elif button_id and button_id.startswith("btn-settings-locked-choice-verbosity-"):
+            self._locked_choice_verbosity = button_id.removeprefix(
+                "btn-settings-locked-choice-verbosity-"
+            )
         elif button_id == "btn-settings-typewriter-on":
             self._typewriter = True
         elif button_id == "btn-settings-typewriter-off":
@@ -1605,6 +1695,62 @@ class SceneRecapScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
+class AccessibleSummaryScreen(ModalScreen[str | None]):
+    """Modal screen for text-first journal and story-map summaries."""
+
+    DEFAULT_CSS = HelpScreen.DEFAULT_CSS
+    BINDINGS = [
+        ("escape", "close", "Close"),
+        ("[", "show_journal", "Journal Summary"),
+        ("]", "show_story_map", "Map Summary"),
+    ]
+
+    def __init__(self, title: str, summary_text: str, *, active: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._title = title
+        self._summary_text = summary_text
+        self._active = active
+
+    def compose(self) -> ComposeResult:
+        with DialogFrame(
+            id="accessible-summary-dialog",
+            classes="dialog-frame dialog-frame-scroll dialog-frame-accent",
+        ):
+            yield Label(self._title, id="accessible-summary-title", classes="dialog-title")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Journal Summary", id="btn-accessible-summary-journal")
+                yield Button("Map Summary", id="btn-accessible-summary-map")
+            with Container(id="accessible-summary-content", classes="dialog-content"):
+                yield Markdown(self._summary_text, id="accessible-summary-text")
+            yield Button("Close [b](Esc)[/b]", id="btn-accessible-summary-close", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#btn-accessible-summary-journal", Button).variant = (
+            "primary" if self._active == "journal" else "default"
+        )
+        self.query_one("#btn-accessible-summary-map", Button).variant = (
+            "primary" if self._active == "story_map" else "default"
+        )
+        self.query_one("#btn-accessible-summary-close", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-accessible-summary-journal":
+            self.dismiss("journal")
+        elif event.button.id == "btn-accessible-summary-map":
+            self.dismiss("story_map")
+        elif event.button.id == "btn-accessible-summary-close":
+            self.dismiss(None)
+
+    def action_show_journal(self) -> None:
+        self.dismiss("journal")
+
+    def action_show_story_map(self) -> None:
+        self.dismiss("story_map")
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
 class TextPromptScreen(ModalScreen[str]):
     """Simple text-entry modal for bookmark/directive editing."""
 
@@ -1675,6 +1821,7 @@ class StatusDisplay(Static):
     latest_status = reactive("Status: Waiting for adventure updates.")
     screen_reader_mode = reactive(False)
     cognitive_load_reduction_mode = reactive(False)
+    runtime_metadata_verbosity = reactive("standard")
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="stats-row"):
@@ -1747,6 +1894,7 @@ class StatusDisplay(Static):
                 runtime_profile=self.runtime_profile,
                 screen_reader_mode=self.screen_reader_mode,
                 simplified_mode=self.cognitive_load_reduction_mode,
+                verbosity=self.runtime_metadata_verbosity,
             )
         )
 
@@ -1780,6 +1928,9 @@ class StatusDisplay(Static):
         self._update_stats_text()
 
     def watch_engine_phase(self, _phase: str) -> None:
+        self._update_stats_text()
+
+    def watch_runtime_metadata_verbosity(self, _verbosity: str) -> None:
         self._update_stats_text()
 
     def _set_health_class(self, health: int) -> None:

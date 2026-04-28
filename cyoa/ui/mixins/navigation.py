@@ -9,6 +9,7 @@ from textual.widgets import Button, Label, ListView, Markdown, Static, Tree
 
 from cyoa.ui.commands import RedoCommand, RestartCommand, UICommandContext, UndoCommand
 from cyoa.ui.components import (
+    AccessibleSummaryScreen,
     BranchScreen,
     ConfirmScreen,
     HelpScreen,
@@ -22,7 +23,11 @@ from cyoa.ui.mixins.contracts import (
     as_persistence_owner,
     as_textual_app,
 )
-from cyoa.ui.presenters import format_branch_restore_text
+from cyoa.ui.presenters import (
+    build_journal_summary,
+    build_story_map_summary,
+    format_branch_restore_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +202,75 @@ class NavigationMixin:
         """Show a structured recap of the current scene and player state."""
         app = as_textual_app(self)
         cast(Any, app)._push_modal_screen(SceneRecapScreen(cast(Any, self).get_scene_recap_text()))
+
+    def action_show_journal_summary(self) -> None:
+        """Show a linear summary of journal entries for text-first review."""
+        app = as_textual_app(self)
+        entries = [
+            {
+                "label": item.label_text,
+                "scene_index": item.scene_index,
+                "entry_kind": item.entry_kind,
+            }
+            for item in app.query_one("#journal-list", ListView).query(JournalListItem)
+        ]
+
+        def on_dismiss(result: str | None) -> None:
+            if result == "story_map":
+                self.action_show_story_map_summary()
+
+        cast(Any, app)._push_modal_screen(
+            AccessibleSummaryScreen(
+                "Journal Summary",
+                build_journal_summary(
+                    entries,
+                    screen_reader_mode=as_mixin_host(self).screen_reader_mode,
+                ),
+                active="journal",
+            ),
+            on_dismiss,
+            fallback_focus="journal",
+        )
+
+    @work(exclusive=False)
+    async def action_show_story_map_summary(self) -> None:
+        """Show a linear summary of the story map for text-first review."""
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        tree_data: dict[str, Any] | None = None
+        if host.engine is not None:
+            current_scene_id = host.engine.state.current_scene_id
+            tree_data = host.get_cached_story_map(current_scene_id)
+            if tree_data is None and host.engine.db and host.engine.state.story_title:
+                tree_data = await asyncio.to_thread(
+                    host.engine.db.get_story_tree,
+                    host.engine.state.story_title,
+                )
+                if tree_data:
+                    host.cache_story_map(current_scene_id, tree_data)
+
+        def on_dismiss(result: str | None) -> None:
+            if result == "journal":
+                self.action_show_journal_summary()
+
+        cast(Any, app)._push_modal_screen(
+            AccessibleSummaryScreen(
+                "Story Map Summary",
+                build_story_map_summary(
+                    tree_data,
+                    current_scene_id=(
+                        host.engine.state.current_scene_id if host.engine is not None else None
+                    ),
+                    timeline_metadata=(
+                        host.engine.state.timeline_metadata if host.engine is not None else []
+                    ),
+                    screen_reader_mode=host.screen_reader_mode,
+                ),
+                active="story_map",
+            ),
+            on_dismiss,
+            fallback_focus="story_map",
+        )
 
     def action_focus_story_region(self) -> None:
         """Jump focus to the story viewport."""
