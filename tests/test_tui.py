@@ -151,6 +151,13 @@ def mock_app_dependencies():
     with (
         patch("cyoa.ui.app.ModelBroker", new=_mock_generator),
         patch("cyoa.ui.app.CYOAGraphDB") as mock_db,
+        patch(
+            "cyoa.ui.app.load_user_config",
+            return_value=UserConfig(
+                setup_completed=True,
+                dismissed_startup_recommendations=["narrow_terminal_screen_reader"],
+            ),
+        ),
     ):
         # Configure the mock DB to not fail async DB operations
         db_instance = mock_db.return_value
