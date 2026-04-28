@@ -145,6 +145,11 @@ def _assert_horizontal_region_within_parent(widget: Any, parent: Any) -> None:
     assert region.right <= parent_region.right
 
 
+@pytest.fixture(autouse=True)
+def _clear_terminal_fallback_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+
 @pytest.fixture
 def mock_app_dependencies():
     """Mock the LLM Generator and DB to be fast and deterministic in UI tests."""
@@ -1494,6 +1499,30 @@ async def test_startup_accessibility_recommendation_yields_to_explicit_cli_overr
 
 
 @pytest.mark.asyncio
+async def test_terminal_capability_fallback_forces_plaintext_accessibility_modes(
+    mock_app_dependencies,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    with (
+        patch("cyoa.ui.app.load_user_config", return_value=UserConfig(setup_completed=True)),
+        patch.object(CYOAApp, "_autosave_path", return_value=None),
+    ):
+        app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(140, 38)) as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+
+        assert app._terminal_accessibility_fallback is not None
+        assert app.screen_reader_mode is True
+        assert app.reduced_motion is True
+        assert app.high_contrast_mode is False
+
+
+@pytest.mark.asyncio
 async def test_main_game_layout_fits_standard_terminal(mock_app_dependencies) -> None:
     app = CYOAApp(model_path="dummy_path.gguf")
 
@@ -1609,7 +1638,7 @@ async def test_narrow_terminal_rescue_mode_uses_single_column_panel_drawers(
         assert journal_panel.has_class("panel-collapsed")
         assert map_panel.has_class("panel-collapsed")
 
-        await pilot.click("#btn-compact-journal")
+        app.action_toggle_journal()
         await pilot.pause(0.2)
 
         assert not journal_panel.has_class("panel-collapsed")
@@ -1618,7 +1647,7 @@ async def test_narrow_terminal_rescue_mode_uses_single_column_panel_drawers(
         assert journal_panel.region.x <= main_container.region.x + 1
         assert journal_panel.region.right >= main_container.region.right - 1
 
-        await pilot.click("#btn-compact-map")
+        app.action_toggle_story_map()
         await pilot.pause(0.2)
 
         assert journal_panel.has_class("panel-collapsed")

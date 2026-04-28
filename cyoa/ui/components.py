@@ -23,7 +23,9 @@ from cyoa.core.model_download import DownloadProgress, ModelRecommendation
 from cyoa.core.user_config import (
     FIRST_RUN_ACCESSIBILITY_PRESET_OPTIONS,
     StartupAccessibilityRecommendation,
+    TerminalAccessibilityFallback,
     accessibility_preset_overrides,
+    build_accessibility_profile_report,
 )
 from cyoa.ui.keybindings import (
     CommandPaletteEntry,
@@ -1331,6 +1333,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         typewriter_speed: str,
         diagnostics_enabled: bool,
         available_themes: list[str],
+        terminal_accessibility_fallback: TerminalAccessibilityFallback | None = None,
         high_contrast: bool = False,
         initial_feedback: str = "",
         **kwargs: Any,
@@ -1378,6 +1381,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             typewriter_speed if typewriter_speed in constants.TYPEWRITER_SPEEDS else "normal"
         )
         self._diagnostics_enabled = diagnostics_enabled
+        self._terminal_accessibility_fallback = terminal_accessibility_fallback
         self._initial_feedback = initial_feedback.strip()
 
     def _resolve_theme_index(self, theme: str) -> int:
@@ -1469,6 +1473,13 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             yield Label(
                 "Reduced mode simplifies wording and hides lower-priority status detail so the story stays central.",
                 classes="settings-value",
+            )
+            yield Label("Accessibility Profile", classes="settings-label")
+            yield Label("", id="settings-accessibility-summary", classes="settings-value")
+            yield Label(
+                "",
+                id="settings-accessibility-advisories",
+                classes="settings-value settings-validation-feedback",
             )
 
             yield Label("Text Scale", classes="settings-label")
@@ -1667,6 +1678,40 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         self.query_one("#settings-theme-value", Label).update(
             f"{self._current_theme} ({self._theme_index + 1}/{len(self._theme_names)})"
         )
+        self._refresh_accessibility_profile_report()
+
+    def _effective_accessibility_state(self) -> dict[str, bool]:
+        effective = {
+            "high_contrast": self._high_contrast,
+            "reduced_motion": self._reduced_motion,
+            "screen_reader_mode": self._screen_reader_mode,
+        }
+        if self._terminal_accessibility_fallback is None:
+            return effective
+
+        for key, enabled in self._terminal_accessibility_fallback.overrides.items():
+            if enabled:
+                effective[key] = True
+        return effective
+
+    def _refresh_accessibility_profile_report(self) -> None:
+        effective = self._effective_accessibility_state()
+        report = build_accessibility_profile_report(
+            high_contrast=effective["high_contrast"],
+            reduced_motion=effective["reduced_motion"],
+            screen_reader_mode=effective["screen_reader_mode"],
+            cognitive_load_reduction_mode=self._cognitive_load_reduction_mode,
+            text_scale=self._text_scale,
+            line_width=self._line_width,
+            line_spacing=self._line_spacing,
+            runtime_metadata_verbosity=self._runtime_metadata_verbosity,
+            typewriter=self._typewriter,
+            terminal_fallback=self._terminal_accessibility_fallback,
+        )
+        self.query_one("#settings-accessibility-summary", Label).update(report.summary)
+        advisories = self.query_one("#settings-accessibility-advisories", Label)
+        advisories.update(" ".join(report.advisory_lines))
+        advisories.set_class(bool(report.advisory_lines), "settings-validation-error")
 
     def _dismiss_with_value(self) -> None:
         validation = validate_keybindings(self._collect_keybinding_values())

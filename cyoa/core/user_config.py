@@ -44,6 +44,25 @@ class StartupAccessibilityRecommendation:
     rescue_mode_active: bool = False
 
 
+@dataclass(slots=True, frozen=True)
+class TerminalAccessibilityFallback:
+    key: str
+    accessibility_preset: str
+    title: str
+    message: str
+    reasons: tuple[str, ...] = ()
+
+    @property
+    def overrides(self) -> dict[str, bool]:
+        return accessibility_preset_overrides(self.accessibility_preset)
+
+
+@dataclass(slots=True, frozen=True)
+class AccessibilityProfileReport:
+    summary: str
+    advisory_lines: tuple[str, ...] = ()
+
+
 class UserConfigSaveError(RuntimeError):
     """Raised when the durable user config cannot be persisted."""
 
@@ -425,17 +444,6 @@ def infer_startup_accessibility_recommendation(
             reasons=tuple(reasons),
             rescue_mode_active=width < STARTUP_RECOMMENDATION_COMPACT_WIDTH,
         )
-    elif limited_color:
-        recommendation = StartupAccessibilityRecommendation(
-            key="limited_color_high_contrast",
-            accessibility_preset="high_contrast",
-            title="High Contrast Startup Recommended",
-            message=(
-                "This terminal appears to have limited color support, so stronger contrast "
-                "will keep focus, warning, and error states easier to distinguish."
-            ),
-            reasons=("Detected limited color capability for this terminal session.",),
-        )
 
     if recommendation is None:
         return None
@@ -444,6 +452,150 @@ def infer_startup_accessibility_recommendation(
     if _recommendation_is_already_satisfied(recommendation, preferences):
         return None
     return recommendation
+
+
+def infer_terminal_accessibility_fallback(
+    *,
+    term: str | None = None,
+    colorterm: str | None = None,
+    no_color: bool = False,
+) -> TerminalAccessibilityFallback | None:
+    if not _has_limited_color_capability(term=term, colorterm=colorterm, no_color=no_color):
+        return None
+
+    reasons: list[str] = []
+    active_term = (term or "").strip().lower()
+    active_colorterm = (colorterm or "").strip().lower()
+    if no_color:
+        reasons.append("NO_COLOR is set for this terminal session.")
+    if "mono" in active_term:
+        reasons.append(f"Terminal reports monochrome capabilities via TERM={active_term!r}.")
+    elif active_term in {"ansi", "vt100", "vt220"} and not active_colorterm:
+        reasons.append(f"Terminal reports limited color support via TERM={active_term!r}.")
+    else:
+        reasons.append("Terminal color capability looks limited for this launch.")
+
+    return TerminalAccessibilityFallback(
+        key="limited_terminal_capability_plaintext",
+        accessibility_preset="screen_reader_friendly",
+        title="Terminal Capability Fallback Active",
+        message=(
+            "This terminal session looks color-limited, so the app is forcing plain-text "
+            "rendering and reduced motion for reliability."
+        ),
+        reasons=tuple(reasons),
+    )
+
+
+def _active_accessibility_modes(
+    *,
+    high_contrast: bool,
+    reduced_motion: bool,
+    screen_reader_mode: bool,
+    cognitive_load_reduction_mode: bool,
+) -> list[str]:
+    active_modes: list[str] = []
+    if screen_reader_mode:
+        active_modes.append("Screen Reader Friendly")
+    elif high_contrast:
+        active_modes.append("High Contrast")
+    if reduced_motion and not screen_reader_mode:
+        active_modes.append("Reduced Motion")
+    if cognitive_load_reduction_mode:
+        active_modes.append("Reduced Cognitive Load")
+    if not active_modes:
+        active_modes.append("Default")
+    return active_modes
+
+
+def _terminal_fallback_forced_modes(
+    fallback: TerminalAccessibilityFallback | None,
+) -> list[str]:
+    if fallback is None:
+        return []
+
+    return [
+        label
+        for key, label in (
+            ("high_contrast", "High Contrast"),
+            ("reduced_motion", "Reduced Motion"),
+            ("screen_reader_mode", "Screen Reader Friendly"),
+        )
+        if fallback.overrides.get(key, False)
+    ]
+
+
+def _accessibility_profile_advisories(
+    *,
+    reduced_motion: bool,
+    screen_reader_mode: bool,
+    cognitive_load_reduction_mode: bool,
+    runtime_metadata_verbosity: str,
+    typewriter: bool,
+    terminal_fallback: TerminalAccessibilityFallback | None,
+) -> list[str]:
+    advisory_lines: list[str] = []
+    if terminal_fallback is not None:
+        advisory_lines.append(terminal_fallback.message)
+    if screen_reader_mode and not reduced_motion:
+        advisory_lines.append(
+            "Screen Reader Friendly is enabled without Reduced Motion, so this is a custom mix instead of the standard preset."
+        )
+    if cognitive_load_reduction_mode and runtime_metadata_verbosity != "minimal":
+        advisory_lines.append(
+            "Reduced Cognitive Load can still hide lower-priority runtime detail even when Runtime Metadata is set above Minimal."
+        )
+    if reduced_motion and typewriter:
+        advisory_lines.append(
+            "Reduced Motion keeps narrated text instant even while Typewriter remains enabled."
+        )
+    return advisory_lines
+
+
+def build_accessibility_profile_report(
+    *,
+    high_contrast: bool,
+    reduced_motion: bool,
+    screen_reader_mode: bool,
+    cognitive_load_reduction_mode: bool,
+    text_scale: str,
+    line_width: str,
+    line_spacing: str,
+    runtime_metadata_verbosity: str,
+    typewriter: bool,
+    terminal_fallback: TerminalAccessibilityFallback | None = None,
+) -> AccessibilityProfileReport:
+    active_modes = _active_accessibility_modes(
+        high_contrast=high_contrast,
+        reduced_motion=reduced_motion,
+        screen_reader_mode=screen_reader_mode,
+        cognitive_load_reduction_mode=cognitive_load_reduction_mode,
+    )
+
+    summary_parts = [
+        f"Active profile: {', '.join(active_modes)}.",
+        f"Reading: {text_scale} text, {line_width} width, {line_spacing} spacing.",
+    ]
+
+    forced_modes = _terminal_fallback_forced_modes(terminal_fallback)
+    if forced_modes:
+        summary_parts.append(
+            f"Terminal fallback for this launch forces: {', '.join(forced_modes)}."
+        )
+
+    advisory_lines = _accessibility_profile_advisories(
+        reduced_motion=reduced_motion,
+        screen_reader_mode=screen_reader_mode,
+        cognitive_load_reduction_mode=cognitive_load_reduction_mode,
+        runtime_metadata_verbosity=runtime_metadata_verbosity,
+        typewriter=typewriter,
+        terminal_fallback=terminal_fallback,
+    )
+
+    return AccessibilityProfileReport(
+        summary=" ".join(summary_parts),
+        advisory_lines=tuple(advisory_lines),
+    )
 
 
 def load_user_config() -> UserConfig:

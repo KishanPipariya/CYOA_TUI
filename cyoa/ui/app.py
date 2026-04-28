@@ -55,6 +55,7 @@ from cyoa.core.user_config import (
     accessibility_preset_overrides,
     infer_accessibility_preset,
     infer_startup_accessibility_recommendation,
+    infer_terminal_accessibility_fallback,
     load_user_config,
     reset_user_config,
     resolve_accessibility_preferences,
@@ -178,9 +179,17 @@ class CYOAApp(
         self._startup_accessibility_overrides = startup_accessibility_overrides or {}
         self._allow_headless_startup_recovery = allow_headless_startup_recovery
         self._user_config = load_user_config()
+        self._terminal_accessibility_fallback = infer_terminal_accessibility_fallback(
+            term=os.getenv("TERM"),
+            colorterm=os.getenv("COLORTERM"),
+            no_color="NO_COLOR" in os.environ,
+        )
         initial_accessibility_preferences = resolve_accessibility_preferences(
             self._user_config,
             self._startup_accessibility_overrides,
+        )
+        initial_accessibility_preferences = self._merge_terminal_fallback_accessibility(
+            initial_accessibility_preferences
         )
         self._keybinding_overrides = resolve_keybinding_overrides(
             getattr(self._user_config, "keybindings", {})
@@ -1114,6 +1123,20 @@ class CYOAApp(
             **accessibility_preset_overrides(resolved),
         }
 
+    def _merge_terminal_fallback_accessibility(
+        self,
+        preferences: dict[str, bool],
+    ) -> dict[str, bool]:
+        fallback = self._terminal_accessibility_fallback
+        if fallback is None:
+            return dict(preferences)
+
+        merged = dict(preferences)
+        for key, enabled in fallback.overrides.items():
+            if enabled:
+                merged[key] = True
+        return merged
+
     def _apply_live_accessibility_settings(
         self,
         *,
@@ -1121,9 +1144,16 @@ class CYOAApp(
         reduced_motion: bool,
         screen_reader_mode: bool,
     ) -> None:
-        self.high_contrast_mode = high_contrast
-        self.reduced_motion = reduced_motion
-        self.screen_reader_mode = screen_reader_mode
+        effective = self._merge_terminal_fallback_accessibility(
+            {
+                "high_contrast": high_contrast,
+                "reduced_motion": reduced_motion,
+                "screen_reader_mode": screen_reader_mode,
+            }
+        )
+        self.high_contrast_mode = effective["high_contrast"]
+        self.reduced_motion = effective["reduced_motion"]
+        self.screen_reader_mode = effective["screen_reader_mode"]
         if self.reduced_motion or self.screen_reader_mode:
             self.action_skip_typewriter()
 
@@ -1632,6 +1662,7 @@ class CYOAApp(
                 typewriter_speed=str(pick("typewriter_speed", self.typewriter_speed)),
                 diagnostics_enabled=bool(pick("diagnostics_enabled", config.diagnostics_enabled)),
                 available_themes=list_themes(),
+                terminal_accessibility_fallback=self._terminal_accessibility_fallback,
                 initial_feedback=feedback_message,
             ),
             on_saved,

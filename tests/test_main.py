@@ -7,7 +7,11 @@ import pytest
 
 import main
 from cyoa.core.theme_loader import ThemeValidationError
-from cyoa.core.user_config import UserConfig, infer_startup_accessibility_recommendation
+from cyoa.core.user_config import (
+    UserConfig,
+    infer_startup_accessibility_recommendation,
+    infer_terminal_accessibility_fallback,
+)
 
 
 def _args(**overrides: str | None) -> argparse.Namespace:
@@ -236,6 +240,36 @@ def test_infer_startup_accessibility_recommendation_skips_dismissed_signature() 
         width=80,
         height=24,
         term="xterm-256color",
+    )
+
+    assert recommendation is None
+
+
+def test_infer_terminal_accessibility_fallback_for_no_color_session() -> None:
+    fallback = infer_terminal_accessibility_fallback(
+        term="xterm-256color",
+        colorterm="truecolor",
+        no_color=True,
+    )
+
+    assert fallback is not None
+    assert fallback.key == "limited_terminal_capability_plaintext"
+    assert fallback.accessibility_preset == "screen_reader_friendly"
+    assert fallback.overrides == {
+        "high_contrast": False,
+        "reduced_motion": True,
+        "screen_reader_mode": True,
+    }
+    assert "NO_COLOR is set" in fallback.reasons[0]
+
+
+def test_infer_startup_accessibility_recommendation_skips_limited_color_only_terminal() -> None:
+    recommendation = infer_startup_accessibility_recommendation(
+        config=UserConfig(setup_completed=True),
+        width=120,
+        height=40,
+        term="vt100",
+        colorterm=None,
     )
 
     assert recommendation is None

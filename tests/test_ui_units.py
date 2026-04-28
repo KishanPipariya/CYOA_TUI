@@ -13,7 +13,11 @@ from textual.widgets import Button, Label, ListView, ProgressBar
 from cyoa.core import constants
 from cyoa.core.models import Choice, ChoiceRequirement, StoryNode
 from cyoa.core.runtime import EnginePhase, EngineTransition
-from cyoa.core.user_config import StartupAccessibilityRecommendation, UserConfigSaveError
+from cyoa.core.user_config import (
+    StartupAccessibilityRecommendation,
+    TerminalAccessibilityFallback,
+    UserConfigSaveError,
+)
 from cyoa.ui.app import BufferedNotification, CYOAApp
 from cyoa.ui.components import (
     AccessibleSummaryScreen,
@@ -432,6 +436,11 @@ def test_typewriter_batch_catchup_consumes_active_chunk_and_queue():
     assert host._current_story.startswith("abc")
     assert host._current_turn_text == host._current_story
     assert host.segment_updates
+
+
+@pytest.fixture(autouse=True)
+def _clear_terminal_fallback_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
 
 
 def _render_text(widget: Label | ThemeSpinner) -> str:
@@ -2003,6 +2012,62 @@ async def test_settings_screen_cycles_and_saves_choices() -> None:
         theme_label = app.screen.query_one("#settings-theme-value", Label)
         assert "saved GGUF" in provider_label.render().plain
         assert "space_explorer" in theme_label.render().plain
+
+
+@pytest.mark.asyncio
+async def test_settings_screen_shows_terminal_fallback_profile_and_advisories() -> None:
+    class FallbackSettingsHarness(App[None]):
+        def __init__(self) -> None:
+            super().__init__()
+            self.screen_ref = SettingsScreen(
+                provider="mock",
+                model_path="",
+                theme="dark_dungeon",
+                dark=True,
+                high_contrast=False,
+                reduced_motion=False,
+                screen_reader_mode=False,
+                cognitive_load_reduction_mode=False,
+                text_scale="standard",
+                line_width="standard",
+                line_spacing="standard",
+                notification_verbosity="standard",
+                scene_recap_verbosity="standard",
+                runtime_metadata_verbosity="detailed",
+                locked_choice_verbosity="standard",
+                keybindings={},
+                typewriter=True,
+                typewriter_speed="normal",
+                diagnostics_enabled=False,
+                available_themes=["dark_dungeon"],
+                terminal_accessibility_fallback=TerminalAccessibilityFallback(
+                    key="limited_terminal_capability_plaintext",
+                    accessibility_preset="screen_reader_friendly",
+                    title="Terminal Capability Fallback Active",
+                    message="Fallback is forcing plain-text rendering and reduced motion.",
+                ),
+            )
+
+        def compose(self) -> ComposeResult:
+            yield Container()
+
+        async def on_mount(self) -> None:
+            self.push_screen(self.screen_ref)
+
+    app = FallbackSettingsHarness()
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.1)
+        summary = _render_text(app.screen.query_one("#settings-accessibility-summary", Label))
+        advisories = _render_text(app.screen.query_one("#settings-accessibility-advisories", Label))
+
+        assert "Active profile: Screen Reader Friendly." in summary
+        assert (
+            "Terminal fallback for this launch forces: Reduced Motion, Screen Reader Friendly."
+            in summary
+        )
+        assert "forcing plain-text rendering and reduced motion" in advisories
+        assert "Typewriter remains enabled" in advisories
 
 
 def test_cyoa_app_requires_first_run_until_setup_completed() -> None:
