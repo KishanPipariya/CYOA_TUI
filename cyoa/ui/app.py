@@ -49,10 +49,12 @@ from cyoa.core.support import reveal_in_file_manager, support_paths
 from cyoa.core.theme_loader import list_themes
 from cyoa.core.user_config import (
     FIRST_RUN_ACCESSIBILITY_PRESET_OPTIONS,
+    StartupAccessibilityRecommendation,
     UserConfig,
     UserConfigSaveError,
     accessibility_preset_overrides,
     infer_accessibility_preset,
+    infer_startup_accessibility_recommendation,
     load_user_config,
     reset_user_config,
     resolve_accessibility_preferences,
@@ -70,6 +72,7 @@ from cyoa.ui.components import (
     JournalListItem,
     ModelDownloadScreen,
     SettingsScreen,
+    StartupAccessibilityRecommendationScreen,
     StatusDisplay,
     ThemeSpinner,
 )
@@ -184,6 +187,7 @@ class CYOAApp(
         )
         self.set_keymap(self._keybinding_overrides)
         self._first_run_setup_pending = self._requires_first_run_setup(self._user_config)
+        self._startup_accessibility_recommendation_handled = False
         self._pending_accessibility_preset = getattr(
             self._user_config, "accessibility_preset", "default"
         )
@@ -290,14 +294,7 @@ class CYOAApp(
 
         self._subscribe_engine_events()
         self._typewriter_worker()
-        if self._first_run_setup_pending:
-            if self.is_headless:
-                self._apply_first_run_selection("mock")
-                self._resume_startup_flow()
-                return
-            self._present_first_run_setup()
-            return
-        self._resume_startup_flow()
+        self._continue_startup_sequence()
 
     def on_resize(self, event: Resize) -> None:
         self._set_compact_layout(event.size.width)
@@ -1168,6 +1165,99 @@ class CYOAApp(
             on_selected,
         )
 
+    def _dismissed_startup_recommendations(self) -> list[str]:
+        dismissed = getattr(self._user_config, "dismissed_startup_recommendations", [])
+        if not isinstance(dismissed, list):
+            return []
+        return [value for value in dismissed if isinstance(value, str) and value]
+
+    def _continue_startup_sequence(self) -> None:
+        if self._present_startup_accessibility_recommendation_if_needed():
+            return
+        if self._first_run_setup_pending:
+            if self.is_headless:
+                self._apply_first_run_selection("mock")
+                self._resume_startup_flow()
+                return
+            self._present_first_run_setup()
+            return
+        self._resume_startup_flow()
+
+    def _build_startup_accessibility_recommendation(
+        self,
+    ) -> StartupAccessibilityRecommendation | None:
+        return infer_startup_accessibility_recommendation(
+            config=self._user_config,
+            width=self.size.width,
+            height=self.size.height,
+            term=os.getenv("TERM"),
+            colorterm=os.getenv("COLORTERM"),
+            no_color="NO_COLOR" in os.environ,
+            overrides=self._startup_accessibility_overrides,
+        )
+
+    def _present_startup_accessibility_recommendation_if_needed(self) -> bool:
+        if (
+            self.is_headless and not self._allow_headless_startup_recovery
+        ) or self._startup_accessibility_recommendation_handled:
+            return False
+        recommendation = self._build_startup_accessibility_recommendation()
+        self._startup_accessibility_recommendation_handled = True
+        if recommendation is None:
+            return False
+        self._push_modal_screen(
+            StartupAccessibilityRecommendationScreen(recommendation),
+            lambda response: self._handle_startup_accessibility_recommendation_response(
+                recommendation,
+                response,
+            ),
+        )
+        return True
+
+    def _apply_startup_accessibility_recommendation(
+        self,
+        recommendation: StartupAccessibilityRecommendation,
+    ) -> None:
+        accessibility_changes = self._first_run_accessibility_changes(
+            recommendation.accessibility_preset
+        )
+        dismissed = [
+            value
+            for value in self._dismissed_startup_recommendations()
+            if value != recommendation.key
+        ]
+        self._user_config = update_user_config(
+            dismissed_startup_recommendations=dismissed,
+            **accessibility_changes,
+        )
+        self._pending_accessibility_preset = str(accessibility_changes["accessibility_preset"])
+        self._apply_live_accessibility_settings(
+            high_contrast=bool(accessibility_changes["high_contrast"]),
+            reduced_motion=bool(accessibility_changes["reduced_motion"]),
+            screen_reader_mode=bool(accessibility_changes["screen_reader_mode"]),
+        )
+
+    def _dismiss_startup_accessibility_recommendation(
+        self,
+        recommendation: StartupAccessibilityRecommendation,
+    ) -> None:
+        dismissed = self._dismissed_startup_recommendations()
+        if recommendation.key not in dismissed:
+            dismissed.append(recommendation.key)
+        self._user_config = update_user_config(dismissed_startup_recommendations=dismissed)
+
+    def _handle_startup_accessibility_recommendation_response(
+        self,
+        recommendation: StartupAccessibilityRecommendation,
+        response: str | None,
+    ) -> None:
+        action = (response or "later").strip().lower()
+        if action == "accept":
+            self._apply_startup_accessibility_recommendation(recommendation)
+        elif action == "dismiss":
+            self._dismiss_startup_accessibility_recommendation(recommendation)
+        self._continue_startup_sequence()
+
     def _present_model_download_setup(self) -> None:
         recommendation = recommend_model_for_current_machine()
         report = check_local_model_preflight(
@@ -1563,6 +1653,14 @@ class CYOAApp(
         if action == "reveal_saves":
             self._reveal_save_folder()
             return
+        if action == "capture_accessibility_snapshot":
+            path = self.export_accessibility_diagnostics_snapshot()
+            self.notify(
+                f"Accessibility diagnostics saved: {path}",
+                severity="information",
+                timeout=5,
+            )
+            return
         if action == "reset_settings":
             self._push_modal_screen(
                 ConfirmScreen("Reset saved settings to safe defaults?"),
@@ -1801,6 +1899,172 @@ class CYOAApp(
             severity="information",
             timeout=5,
         )
+
+    @staticmethod
+    def _region_snapshot(widget: Widget | None) -> dict[str, int] | None:
+        if widget is None:
+            return None
+        region = getattr(widget, "region", None)
+        if region is None:
+            return None
+        return {
+            "x": int(region.x),
+            "y": int(region.y),
+            "width": int(region.width),
+            "height": int(region.height),
+        }
+
+    def _widget_snapshot(self, widget: Widget | None) -> dict[str, Any]:
+        if widget is None:
+            return {
+                "id": None,
+                "type": None,
+                "classes": [],
+                "disabled": False,
+                "can_focus": False,
+                "visible": False,
+                "region": None,
+            }
+        return {
+            "id": widget.id,
+            "type": type(widget).__name__,
+            "classes": sorted(str(name) for name in widget.classes),
+            "disabled": bool(getattr(widget, "disabled", False)),
+            "can_focus": bool(getattr(widget, "can_focus", False)),
+            "visible": bool(widget.visible and widget.display),
+            "region": self._region_snapshot(widget),
+        }
+
+    def collect_accessibility_diagnostics_snapshot(
+        self,
+        *,
+        include_story_content: bool = False,
+    ) -> dict[str, Any]:
+        from cyoa.core.observability import build_accessibility_diagnostics_snapshot
+
+        try:
+            journal_panel = self.query_one("#journal-panel", Container)
+            story_map_panel = self.query_one("#story-map-panel", Container)
+            story_container = self.query_one("#story-container", VerticalScroll)
+            status_display = self.query_one("#status-display", Widget)
+        except Exception:
+            journal_panel = None
+            story_map_panel = None
+            story_container = None
+            status_display = None
+
+        focused = self._focused_widget()
+        current_node = self.engine.state.current_node if self.engine is not None else None
+        story_title = None
+        if self.engine is not None:
+            story_title = self.engine.state.story_title or (
+                current_node.title if current_node is not None else None
+            )
+
+        settings = {
+            "high_contrast": self.high_contrast_mode,
+            "reduced_motion": self.reduced_motion,
+            "screen_reader_mode": self.screen_reader_mode,
+            "cognitive_load_reduction_mode": self.cognitive_load_reduction_mode,
+            "text_scale": self.text_scale,
+            "line_width": self.line_width,
+            "line_spacing": self.line_spacing,
+            "notification_verbosity": self.notification_verbosity,
+            "scene_recap_verbosity": self.scene_recap_verbosity,
+            "runtime_metadata_verbosity": self.runtime_metadata_verbosity,
+            "locked_choice_verbosity": self.locked_choice_verbosity,
+            "typewriter_enabled": self.typewriter_enabled,
+            "typewriter_speed": self.typewriter_speed,
+            "diagnostics_enabled": bool(getattr(self._user_config, "diagnostics_enabled", False)),
+            "accessibility_preset": getattr(self._user_config, "accessibility_preset", "default"),
+        }
+        environment = {
+            "term": os.getenv("TERM"),
+            "colorterm": os.getenv("COLORTERM"),
+            "no_color": "NO_COLOR" in os.environ,
+            "headless": self.is_headless,
+            "terminal_size": {"width": int(self.size.width), "height": int(self.size.height)},
+            "runtime_profile": self._runtime_diagnostics.get("runtime_preset", "custom"),
+            "provider": self._runtime_diagnostics.get("provider", "unknown"),
+            "model": self._runtime_diagnostics.get("model", "unknown"),
+        }
+        layout = {
+            "screen": type(self.screen).__name__,
+            "compact_layout": self.compact_layout,
+            "modal_open": self._has_open_modal_screen(),
+            "journal_panel_collapsed": (
+                journal_panel.has_class("panel-collapsed") if journal_panel is not None else True
+            ),
+            "story_map_panel_collapsed": (
+                story_map_panel.has_class("panel-collapsed")
+                if story_map_panel is not None
+                else True
+            ),
+            "status_display": self._widget_snapshot(status_display),
+            "story_container": self._widget_snapshot(story_container),
+            "choice_count": len(self._available_action_buttons()),
+            "notification_history_count": len(self._notification_history),
+        }
+        focus = {
+            "focused_widget": self._widget_snapshot(focused),
+            "story_scroll_y": (
+                float(getattr(story_container, "scroll_y", 0.0))
+                if story_container is not None
+                else 0.0
+            ),
+            "story_max_scroll_y": (
+                float(getattr(story_container, "max_scroll_y", 0.0))
+                if story_container is not None
+                else 0.0
+            ),
+        }
+        story = {
+            "story_title": story_title,
+            "current_story_text": self._current_story,
+            "current_turn_text": self._current_turn_text,
+            "story_segments": [
+                {
+                    "kind": str(segment.get("kind") or "unknown"),
+                    "text": str(segment.get("text") or ""),
+                }
+                for segment in self._story_segments
+                if isinstance(segment, dict)
+            ],
+        }
+
+        return build_accessibility_diagnostics_snapshot(
+            settings=settings,
+            environment=environment,
+            layout=layout,
+            bindings=effective_keybindings(self._keybinding_overrides),
+            focus=focus,
+            story=story,
+            include_story_content=include_story_content,
+        )
+
+    def export_accessibility_diagnostics_snapshot(
+        self,
+        *,
+        path: str | Path | None = None,
+        include_story_content: bool = False,
+    ) -> Path:
+        from datetime import UTC, datetime
+
+        from cyoa.core.observability import write_accessibility_diagnostics_snapshot
+
+        target = (
+            Path(path)
+            if path is not None
+            else (
+                support_paths()["state_dir"]
+                / "diagnostics"
+                / f"accessibility_snapshot_{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
+            )
+        )
+        snapshot = self.collect_accessibility_diagnostics_snapshot(
+            include_story_content=include_story_content
+        )
+        return write_accessibility_diagnostics_snapshot(snapshot, path=target)
 
     async def _run_backend_connection_test(
         self,

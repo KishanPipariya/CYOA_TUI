@@ -2,10 +2,14 @@ import logging
 import os
 import socket
 import time
+from datetime import UTC, datetime
 from enum import Enum
+from pathlib import Path
 from types import TracebackType
 from typing import Any, Self
 from urllib.parse import urlparse
+
+from cyoa.core.support import open_private_text_file
 
 otel_metrics: Any
 otel_trace: Any
@@ -308,9 +312,7 @@ class DBObservedSession:
         db_latency_histogram.record(
             duration_ms, {"db.type": self.db_type, "db.operation": self.operation}
         )
-        db_operation_counter.add(
-            1, {"db.type": self.db_type, "db.operation": self.operation}
-        )
+        db_operation_counter.add(1, {"db.type": self.db_type, "db.operation": self.operation})
 
         if exc_type:
             db_error_counter.add(
@@ -465,3 +467,63 @@ def record_provider_cache_state_restore(*, hit: bool) -> None:
 
 def record_startup_latency(duration_ms: float, *, status: str) -> None:
     startup_latency_histogram.record(duration_ms, {"status": status})
+
+
+def build_accessibility_diagnostics_snapshot(
+    *,
+    settings: dict[str, Any],
+    environment: dict[str, Any],
+    layout: dict[str, Any],
+    bindings: dict[str, str],
+    focus: dict[str, Any],
+    story: dict[str, Any] | None = None,
+    include_story_content: bool = False,
+) -> dict[str, Any]:
+    snapshot: dict[str, Any] = {
+        "schema_version": 1,
+        "captured_at_utc": datetime.now(UTC).isoformat(),
+        "settings": settings,
+        "environment": environment,
+        "layout": layout,
+        "bindings": bindings,
+        "focus": focus,
+    }
+    if story is not None:
+        segments = story.get("story_segments")
+        if include_story_content:
+            snapshot["story"] = {
+                "included": True,
+                "story_title": story.get("story_title"),
+                "current_story_text": story.get("current_story_text"),
+                "current_turn_text": story.get("current_turn_text"),
+                "story_segments": segments if isinstance(segments, list) else [],
+            }
+        else:
+            segment_list = segments if isinstance(segments, list) else []
+            snapshot["story"] = {
+                "included": False,
+                "story_title": None,
+                "current_story_characters": len(str(story.get("current_story_text") or "")),
+                "current_turn_characters": len(str(story.get("current_turn_text") or "")),
+                "segment_count": len(segment_list),
+                "segment_kinds": [
+                    str(segment.get("kind") or "unknown")
+                    for segment in segment_list
+                    if isinstance(segment, dict)
+                ],
+            }
+    return snapshot
+
+
+def write_accessibility_diagnostics_snapshot(
+    snapshot: dict[str, Any],
+    *,
+    path: str | Path,
+) -> Path:
+    target = Path(path).expanduser()
+    with open_private_text_file(target, "w") as handle:
+        import json
+
+        json.dump(snapshot, handle, indent=2, ensure_ascii=False)
+        handle.write("\n")
+    return target

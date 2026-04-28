@@ -22,6 +22,7 @@ from cyoa.core import constants
 from cyoa.core.model_download import DownloadProgress, ModelRecommendation
 from cyoa.core.user_config import (
     FIRST_RUN_ACCESSIBILITY_PRESET_OPTIONS,
+    StartupAccessibilityRecommendation,
     accessibility_preset_overrides,
 )
 from cyoa.ui.keybindings import (
@@ -74,6 +75,7 @@ __all__ = [
     "SceneListItem",
     "SaveListItem",
     "StatusDisplay",
+    "StartupAccessibilityRecommendationScreen",
 ]
 
 
@@ -977,6 +979,117 @@ class FirstRunSetupScreen(ButtonGroupScreen):
         self._select_accessibility_preset("screen_reader_friendly")
 
 
+class StartupAccessibilityRecommendationScreen(ButtonGroupScreen):
+    """Modal that suggests accessibility defaults for constrained startup environments."""
+
+    DEFAULT_CSS = """
+    StartupAccessibilityRecommendationScreen {
+        align: center middle;
+        background: $background 80%;
+    }
+    #startup-accessibility-dialog {
+        width: 82;
+        max-width: 94%;
+    }
+    #startup-accessibility-actions {
+        width: 100%;
+        margin-top: 1;
+    }
+    #startup-accessibility-actions Button {
+        width: 1fr;
+    }
+    .startup-accessibility-note {
+        color: $text-muted;
+    }
+    """
+
+    BINDINGS = [
+        ("a", "accept", "Accept"),
+        ("d", "dismiss_recommendation", "Dismiss"),
+        ("l", "later", "Later"),
+        ("tab", "focus_next_button", "Next"),
+        ("shift+tab", "focus_previous_button", "Previous"),
+        ("left", "focus_previous_button", "Previous"),
+        ("right", "focus_next_button", "Next"),
+        ("escape", "later", "Later"),
+    ]
+
+    def __init__(self, recommendation: StartupAccessibilityRecommendation, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._recommendation = recommendation
+
+    @staticmethod
+    def _preset_label(preset: str) -> str:
+        return {
+            "high_contrast": "High Contrast",
+            "reduced_motion": "Reduced Motion",
+            "screen_reader_friendly": "Screen Reader Friendly",
+        }.get(preset, "Accessibility Preset")
+
+    def compose(self) -> ComposeResult:
+        preset_label = self._preset_label(self._recommendation.accessibility_preset)
+        with DialogFrame(
+            id="startup-accessibility-dialog",
+            classes="dialog-frame dialog-frame-accent dialog-frame-scroll",
+        ):
+            yield Static("ACCESSIBILITY RECOMMENDATION", id="startup-accessibility-kicker")
+            yield Label(
+                f"[b]{escape(self._recommendation.title)}[/b]",
+                classes="dialog-title",
+            )
+            yield Static(self._recommendation.message, classes="dialog-message")
+            for reason in self._recommendation.reasons:
+                yield Label(reason, classes="startup-accessibility-note")
+            if self._recommendation.rescue_mode_active:
+                yield Label(
+                    "Compact rescue mode will stay active while the terminal remains narrow.",
+                    classes="startup-accessibility-note",
+                )
+            yield Label(
+                "Accept applies the recommendation now. Dismiss hides this suggestion for the same startup condition. Later skips it for this launch.",
+                classes="startup-accessibility-note",
+            )
+            with DialogActions(
+                id="startup-accessibility-actions",
+                classes="dialog-actions",
+            ):
+                yield Button(
+                    f"[b]A[/b]pply {preset_label}",
+                    id="btn-startup-accessibility-accept",
+                    variant="primary",
+                )
+                yield Button(
+                    "[b]D[/b]ismiss",
+                    id="btn-startup-accessibility-dismiss",
+                    variant="default",
+                )
+                yield Button(
+                    "[b]L[/b]ater",
+                    id="btn-startup-accessibility-later",
+                    variant="default",
+                )
+
+    def on_mount(self) -> None:
+        self._focus_first_action_button()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-startup-accessibility-accept":
+            self.dismiss("accept")
+        elif event.button.id == "btn-startup-accessibility-dismiss":
+            self.dismiss("dismiss")
+        elif event.button.id == "btn-startup-accessibility-later":
+            self.dismiss("later")
+
+    def action_accept(self) -> None:
+        self.dismiss("accept")
+
+    def action_dismiss_recommendation(self) -> None:
+        self.dismiss("dismiss")
+
+    def action_later(self) -> None:
+        self.dismiss("later")
+
+
 class ModelDownloadScreen(ButtonGroupScreen):
     """Modal that guides users through downloading a recommended local model."""
 
@@ -1461,11 +1574,12 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             yield Label("Recovery & Support", classes="settings-label")
             with Horizontal(classes="settings-row settings-section"):
                 yield Button("Test Backend", id="btn-settings-test-backend")
+                yield Button("Capture Snapshot", id="btn-settings-capture-snapshot")
                 yield Button("Reveal Saves", id="btn-settings-reveal-saves")
             with Horizontal(classes="settings-row"):
                 yield Button("Reset Settings", id="btn-settings-reset", variant="warning")
             yield Label(
-                "Use these tools to verify your configured backend, open the save folder, or return to safe defaults.",
+                "Use these tools to verify your configured backend, capture a redacted diagnostics snapshot, open the save folder, or return to safe defaults.",
                 classes="settings-value",
             )
             yield Label(
@@ -1663,6 +1777,9 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             if payload is None:
                 return
             self.dismiss({"action": "test_backend", "draft_settings": payload})
+            return
+        if button_id == "btn-settings-capture-snapshot":
+            self.dismiss({"action": "capture_accessibility_snapshot"})
             return
         if button_id == "btn-settings-reveal-saves":
             self.dismiss({"action": "reveal_saves"})

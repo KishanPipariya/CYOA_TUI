@@ -26,6 +26,7 @@ from cyoa.ui.components import (
     NotificationHistoryScreen,
     SceneRecapScreen,
     SettingsScreen,
+    StartupAccessibilityRecommendationScreen,
     StartupChoiceScreen,
     TextPromptScreen,
 )
@@ -1422,6 +1423,70 @@ async def test_story_container_remains_scrollable_in_loading_state(mock_app_depe
 
 
 @pytest.mark.asyncio
+async def test_startup_accessibility_recommendation_appears_on_narrow_terminal(
+    mock_app_dependencies,
+) -> None:
+    saved_config = UserConfig(setup_completed=True).to_dict()
+
+    def fake_update_user_config(**changes: Any) -> UserConfig:
+        saved_config.update(changes)
+        return UserConfig.from_dict(saved_config)
+
+    with (
+        patch("cyoa.ui.app.load_user_config", return_value=UserConfig(setup_completed=True)),
+        patch("cyoa.ui.app.update_user_config", side_effect=fake_update_user_config),
+        patch.object(CYOAApp, "_autosave_path", return_value=None),
+    ):
+        app = CYOAApp(
+            model_path="dummy_path.gguf",
+            allow_headless_startup_recovery=True,
+        )
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: isinstance(app.screen, StartupAccessibilityRecommendationScreen),
+        )
+
+        assert isinstance(app.screen, StartupAccessibilityRecommendationScreen)
+        await pilot.click("#btn-startup-accessibility-accept")
+        await _wait_for_pilot(
+            pilot,
+            lambda: (
+                not isinstance(app.screen, StartupAccessibilityRecommendationScreen)
+                and app.screen_reader_mode
+                and app.reduced_motion
+            ),
+        )
+
+        assert app.screen_reader_mode is True
+        assert app.reduced_motion is True
+
+
+@pytest.mark.asyncio
+async def test_startup_accessibility_recommendation_yields_to_explicit_cli_overrides(
+    mock_app_dependencies,
+) -> None:
+    with (
+        patch("cyoa.ui.app.load_user_config", return_value=UserConfig(setup_completed=True)),
+        patch.object(CYOAApp, "_autosave_path", return_value=None),
+    ):
+        app = CYOAApp(
+            model_path="dummy_path.gguf",
+            startup_accessibility_overrides={"high_contrast": True},
+        )
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+
+        assert not isinstance(app.screen, StartupAccessibilityRecommendationScreen)
+        assert app.high_contrast_mode is True
+
+
+@pytest.mark.asyncio
 async def test_main_game_layout_fits_standard_terminal(mock_app_dependencies) -> None:
     app = CYOAApp(model_path="dummy_path.gguf")
 
@@ -2147,6 +2212,54 @@ async def test_accessibility_matrix_export_supports_combined_mode(
         assert "Current Progress:" in transcript
         assert "**" not in transcript
         assert "---" not in transcript
+
+
+@pytest.mark.asyncio
+async def test_accessibility_diagnostics_snapshot_exports_redacted_runtime_state(
+    mock_app_dependencies,
+    tmp_path,
+) -> None:
+    with (
+        patch(
+            "cyoa.ui.app.load_user_config",
+            return_value=UserConfig(
+                setup_completed=True,
+                screen_reader_mode=True,
+                reduced_motion=True,
+                high_contrast=True,
+                text_scale="xlarge",
+                diagnostics_enabled=True,
+            ),
+        ),
+        patch.object(CYOAApp, "_autosave_path", return_value=None),
+    ):
+        app = CYOAApp(model_path="dummy_path.gguf")
+
+    target = tmp_path / "accessibility_snapshot.json"
+    async with app.run_test(size=(72, 24)) as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+        await _wait_for_pilot(
+            pilot,
+            lambda: len(list(app.query_one("#choices-container", Container).query(Button))) > 0,
+        )
+        first_choice = list(app.query_one("#choices-container", Container).query(Button))[0]
+        first_choice.focus()
+        await pilot.pause(0.1)
+
+        snapshot_path = app.export_accessibility_diagnostics_snapshot(path=target)
+        snapshot = json.loads(target.read_text(encoding="utf-8"))
+
+        assert snapshot_path == target
+        assert snapshot["settings"]["screen_reader_mode"] is True
+        assert snapshot["settings"]["high_contrast"] is True
+        assert snapshot["layout"]["compact_layout"] is True
+        assert snapshot["focus"]["focused_widget"]["type"] == "Button"
+        assert snapshot["bindings"]["show_help"] == "h"
+        assert snapshot["story"]["included"] is False
+        assert "current_story_text" not in snapshot["story"]
 
 
 @pytest.mark.asyncio

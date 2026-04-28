@@ -31,6 +31,17 @@ ACCESSIBILITY_SETTING_KEYS = (
     "reduced_motion",
     "screen_reader_mode",
 )
+STARTUP_RECOMMENDATION_COMPACT_WIDTH = 140
+
+
+@dataclass(slots=True, frozen=True)
+class StartupAccessibilityRecommendation:
+    key: str
+    accessibility_preset: str
+    title: str
+    message: str
+    reasons: tuple[str, ...] = ()
+    rescue_mode_active: bool = False
 
 
 class UserConfigSaveError(RuntimeError):
@@ -51,6 +62,19 @@ def _coerce_accessibility_preset(value: object, default: str = "default") -> str
         if cleaned in ACCESSIBILITY_PRESET_OPTIONS:
             return cleaned
     return default
+
+
+def _coerce_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        cleaned = item.strip().lower().replace(" ", "_")
+        if cleaned and cleaned not in normalized:
+            normalized.append(cleaned)
+    return normalized
 
 
 def accessibility_preset_overrides(preset: str) -> dict[str, bool]:
@@ -123,6 +147,7 @@ class UserConfig:
     runtime_preset: str | None = None
     setup_completed: bool = False
     setup_choice: str | None = None
+    dismissed_startup_recommendations: list[str] = field(default_factory=list)
     extras: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -155,6 +180,7 @@ class UserConfig:
             "runtime_preset",
             "setup_completed",
             "setup_choice",
+            "dismissed_startup_recommendations",
             "version",
         }
         extras = {
@@ -187,6 +213,7 @@ class UserConfig:
         runtime_preset = payload.get("runtime_preset")
         setup_completed = payload.get("setup_completed")
         setup_choice = payload.get("setup_choice")
+        dismissed_startup_recommendations = payload.get("dismissed_startup_recommendations")
 
         parsed_keybindings = (
             {
@@ -253,6 +280,9 @@ class UserConfig:
                 if isinstance(setup_choice, str) and setup_choice.strip()
                 else None
             ),
+            dismissed_startup_recommendations=_coerce_string_list(
+                dismissed_startup_recommendations
+            ),
             extras=extras,
         )
 
@@ -285,6 +315,7 @@ class UserConfig:
                 "runtime_preset": self.runtime_preset,
                 "setup_completed": self.setup_completed,
                 "setup_choice": self.setup_choice,
+                "dismissed_startup_recommendations": self.dismissed_startup_recommendations,
             }
         )
         return payload
@@ -325,6 +356,94 @@ def resolve_accessibility_preferences(
         if isinstance(value, bool):
             resolved[key] = value
     return resolved
+
+
+def _has_limited_color_capability(
+    *,
+    term: str | None,
+    colorterm: str | None,
+    no_color: bool,
+) -> bool:
+    if no_color:
+        return True
+
+    active_term = (term or "").strip().lower()
+    active_color_term = (colorterm or "").strip().lower()
+    if "mono" in active_term:
+        return True
+    if active_term in {"ansi", "vt100", "vt220"} and not active_color_term:
+        return True
+    return False
+
+
+def _recommendation_is_already_satisfied(
+    recommendation: StartupAccessibilityRecommendation,
+    preferences: Mapping[str, bool],
+) -> bool:
+    overrides = accessibility_preset_overrides(recommendation.accessibility_preset)
+    return all(not required or preferences.get(key, False) for key, required in overrides.items())
+
+
+def infer_startup_accessibility_recommendation(
+    *,
+    config: UserConfig,
+    width: int,
+    height: int,
+    term: str | None = None,
+    colorterm: str | None = None,
+    no_color: bool = False,
+    overrides: Mapping[str, object] | None = None,
+) -> StartupAccessibilityRecommendation | None:
+    if overrides and any(bool(overrides.get(key)) for key in ACCESSIBILITY_SETTING_KEYS):
+        return None
+
+    preferences = resolve_accessibility_preferences(config, overrides)
+    limited_color = _has_limited_color_capability(
+        term=term,
+        colorterm=colorterm,
+        no_color=no_color,
+    )
+    narrow_terminal = width < 100 or height < 28
+
+    recommendation: StartupAccessibilityRecommendation | None = None
+    if narrow_terminal:
+        reasons = [f"Current terminal size: {width}x{height}."]
+        if width < STARTUP_RECOMMENDATION_COMPACT_WIDTH:
+            reasons.append("Rescue mode will simplify the layout automatically at this size.")
+        if limited_color:
+            reasons.append(
+                "Color support looks limited, so plain text rendering will be more reliable."
+            )
+        recommendation = StartupAccessibilityRecommendation(
+            key="narrow_terminal_screen_reader",
+            accessibility_preset="screen_reader_friendly",
+            title="Screen Reader Friendly Startup Recommended",
+            message=(
+                "This terminal is tight enough that decorative output and motion can make the "
+                "opening UI harder to follow."
+            ),
+            reasons=tuple(reasons),
+            rescue_mode_active=width < STARTUP_RECOMMENDATION_COMPACT_WIDTH,
+        )
+    elif limited_color:
+        recommendation = StartupAccessibilityRecommendation(
+            key="limited_color_high_contrast",
+            accessibility_preset="high_contrast",
+            title="High Contrast Startup Recommended",
+            message=(
+                "This terminal appears to have limited color support, so stronger contrast "
+                "will keep focus, warning, and error states easier to distinguish."
+            ),
+            reasons=("Detected limited color capability for this terminal session.",),
+        )
+
+    if recommendation is None:
+        return None
+    if recommendation.key in getattr(config, "dismissed_startup_recommendations", []):
+        return None
+    if _recommendation_is_already_satisfied(recommendation, preferences):
+        return None
+    return recommendation
 
 
 def load_user_config() -> UserConfig:

@@ -13,7 +13,7 @@ from textual.widgets import Button, Label, ListView, ProgressBar
 from cyoa.core import constants
 from cyoa.core.models import Choice, ChoiceRequirement, StoryNode
 from cyoa.core.runtime import EnginePhase, EngineTransition
-from cyoa.core.user_config import UserConfigSaveError
+from cyoa.core.user_config import StartupAccessibilityRecommendation, UserConfigSaveError
 from cyoa.ui.app import BufferedNotification, CYOAApp
 from cyoa.ui.components import (
     AccessibleSummaryScreen,
@@ -25,6 +25,7 @@ from cyoa.ui.components import (
     NotificationHistoryScreen,
     SceneRecapScreen,
     SettingsScreen,
+    StartupAccessibilityRecommendationScreen,
     StartupChoiceScreen,
     StatusDisplay,
     ThemeSpinner,
@@ -355,6 +356,27 @@ class FirstRunScreenHarness(App[None]):
         super().__init__()
         self.screen_ref = FirstRunSetupScreen(
             general_notes=general_notes,
+        )
+
+    def compose(self) -> ComposeResult:
+        yield Container()
+
+    async def on_mount(self) -> None:
+        self.push_screen(self.screen_ref)
+
+
+class StartupAccessibilityRecommendationHarness(App[None]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.screen_ref = StartupAccessibilityRecommendationScreen(
+            StartupAccessibilityRecommendation(
+                key="narrow_terminal_screen_reader",
+                accessibility_preset="screen_reader_friendly",
+                title="Screen Reader Friendly Startup Recommended",
+                message="This terminal is tight enough that decorative output can slow reading.",
+                reasons=("Current terminal size: 80x24.",),
+                rescue_mode_active=True,
+            )
         )
 
     def compose(self) -> ComposeResult:
@@ -971,6 +993,24 @@ async def test_first_run_screen_updates_selected_accessibility_preset_summary() 
 
 
 @pytest.mark.asyncio
+async def test_startup_accessibility_recommendation_screen_exposes_actions() -> None:
+    app = StartupAccessibilityRecommendationHarness()
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.1)
+        accept = app.screen.query_one("#btn-startup-accessibility-accept", Button)
+        dismiss = app.screen.query_one("#btn-startup-accessibility-dismiss", Button)
+        later = app.screen.query_one("#btn-startup-accessibility-later", Button)
+        labels = [label.render().plain for label in app.screen.query(Label)]
+
+        assert accept.disabled is False
+        assert dismiss.disabled is False
+        assert later.disabled is False
+        assert any("Current terminal size: 80x24." in text for text in labels)
+        assert any("rescue mode" in text.lower() for text in labels)
+
+
+@pytest.mark.asyncio
 async def test_status_display_watchers_and_spinner_tick() -> None:
     app = StatusDisplayHarness()
     async with app.run_test() as pilot:
@@ -1150,6 +1190,39 @@ def test_first_run_setup_screen_dismisses_expected_values():
     ]
 
 
+def test_startup_accessibility_recommendation_screen_dismisses_expected_values():
+    screen = StartupAccessibilityRecommendationScreen(
+        StartupAccessibilityRecommendation(
+            key="limited_color_high_contrast",
+            accessibility_preset="high_contrast",
+            title="High Contrast Startup Recommended",
+            message="Color support is limited.",
+        )
+    )
+    screen.dismiss = MagicMock()
+    screen.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-startup-accessibility-accept"))
+    )
+    screen.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-startup-accessibility-dismiss"))
+    )
+    screen.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-startup-accessibility-later"))
+    )
+    screen.action_accept()
+    screen.action_dismiss_recommendation()
+    screen.action_later()
+
+    assert screen.dismiss.call_args_list == [
+        call("accept"),
+        call("dismiss"),
+        call("later"),
+        call("accept"),
+        call("dismiss"),
+        call("later"),
+    ]
+
+
 def test_settings_screen_dismisses_saved_payload(tmp_path) -> None:
     model_path = tmp_path / "demo.gguf"
     model_path.write_text("stub", encoding="utf-8")
@@ -1312,6 +1385,9 @@ def test_settings_screen_support_actions_dismiss_expected_payloads():
         SimpleNamespace(button=SimpleNamespace(id="btn-settings-test-backend"))
     )
     settings.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-settings-capture-snapshot"))
+    )
+    settings.on_button_pressed(
         SimpleNamespace(button=SimpleNamespace(id="btn-settings-reveal-saves"))
     )
     settings.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-settings-reset")))
@@ -1321,6 +1397,7 @@ def test_settings_screen_support_actions_dismiss_expected_payloads():
     assert test_backend_payload["draft_settings"]["provider"] == "mock"
     assert test_backend_payload["draft_settings"]["model_path"] is None
     assert settings.dismiss.call_args_list[1:] == [
+        call({"action": "capture_accessibility_snapshot"}),
         call({"action": "reveal_saves"}),
         call({"action": "reset_settings"}),
     ]
@@ -1452,6 +1529,64 @@ def test_cyoa_app_first_run_selection_updates_runtime_and_config(monkeypatch: py
     assert saved["setup_choice"] == "mock"
     assert saved["runtime_preset"] == "mock-smoke"
     app._sync_runtime_status.assert_called_once_with()
+
+
+def test_cyoa_app_accepts_startup_accessibility_recommendation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = CYOAApp(model_path="")
+    app._continue_startup_sequence = MagicMock()
+    saved: dict[str, object] = {}
+    monkeypatch.setattr(
+        "cyoa.ui.app.update_user_config",
+        lambda **changes: saved.update(changes) or SimpleNamespace(**changes),
+    )
+    recommendation = StartupAccessibilityRecommendation(
+        key="narrow_terminal_screen_reader",
+        accessibility_preset="screen_reader_friendly",
+        title="Screen Reader Friendly Startup Recommended",
+        message="Use screen reader friendly mode.",
+    )
+
+    app._handle_startup_accessibility_recommendation_response(recommendation, "accept")
+
+    assert app.screen_reader_mode is True
+    assert app.reduced_motion is True
+    assert app.high_contrast_mode is False
+    assert saved["accessibility_preset"] == "screen_reader_friendly"
+    assert saved["screen_reader_mode"] is True
+    assert saved["reduced_motion"] is True
+    assert saved["dismissed_startup_recommendations"] == []
+    app._continue_startup_sequence.assert_called_once_with()
+
+
+def test_cyoa_app_dismisses_startup_accessibility_recommendation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = CYOAApp(model_path="")
+    app._continue_startup_sequence = MagicMock()
+    saved: dict[str, object] = {}
+    app._user_config = SimpleNamespace(dismissed_startup_recommendations=[])
+    monkeypatch.setattr(
+        "cyoa.ui.app.update_user_config",
+        lambda **changes: (
+            saved.update(changes)
+            or SimpleNamespace(
+                dismissed_startup_recommendations=changes["dismissed_startup_recommendations"]
+            )
+        ),
+    )
+    recommendation = StartupAccessibilityRecommendation(
+        key="limited_color_high_contrast",
+        accessibility_preset="high_contrast",
+        title="High Contrast Startup Recommended",
+        message="Use high contrast mode.",
+    )
+
+    app._handle_startup_accessibility_recommendation_response(recommendation, "dismiss")
+
+    assert saved["dismissed_startup_recommendations"] == ["limited_color_high_contrast"]
+    app._continue_startup_sequence.assert_called_once_with()
 
 
 def test_cyoa_app_downloaded_model_selection_updates_runtime_and_config(
@@ -1603,14 +1738,19 @@ def test_cyoa_app_handle_settings_action_routes_requests() -> None:
     app = CYOAApp(model_path="")
     app.run_worker = MagicMock(side_effect=lambda coro, **_kwargs: coro.close())
     app._reveal_save_folder = MagicMock()
+    app.export_accessibility_diagnostics_snapshot = MagicMock(return_value="/tmp/a11y.json")
+    app.notify = MagicMock()
     app.push_screen = MagicMock()
 
     app._handle_settings_action("test_backend", {"draft_settings": {"provider": "mock"}})
+    app._handle_settings_action("capture_accessibility_snapshot")
     app._handle_settings_action("reveal_saves")
     app._handle_settings_action("reset_settings")
 
     app.run_worker.assert_called_once()
     app._reveal_save_folder.assert_called_once_with()
+    app.export_accessibility_diagnostics_snapshot.assert_called_once_with()
+    app.notify.assert_called_once()
     app.push_screen.assert_called_once()
 
 

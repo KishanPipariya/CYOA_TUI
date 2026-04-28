@@ -120,12 +120,8 @@ def test_db_observed_session_records_success_path(
     operations = fake_telemetry["db_operation_counter"]
     tracer = fake_telemetry["tracer"]
 
-    assert latency.records == [
-        (250.0, {"db.type": "neo4j", "db.operation": "save_scene"})
-    ]
-    assert operations.adds == [
-        (1, {"db.type": "neo4j", "db.operation": "save_scene"})
-    ]
+    assert latency.records == [(250.0, {"db.type": "neo4j", "db.operation": "save_scene"})]
+    assert operations.adds == [(1, {"db.type": "neo4j", "db.operation": "save_scene"})]
     assert tracer.spans[0].ended is True
 
 
@@ -186,9 +182,7 @@ def test_engine_observed_session_tracks_process_turn_success(
     assert len(durations.records) == 1
     assert durations.records[0][0] == pytest.approx(150.0)
     assert durations.records[0][1] == {}
-    assert events.adds == [
-        (1, {"engine.operation": "process_turn", "success": "True"})
-    ]
+    assert events.adds == [(1, {"engine.operation": "process_turn", "success": "True"})]
 
 
 def test_engine_observed_session_warns_when_elapsed_is_checked_before_enter(
@@ -226,9 +220,7 @@ def test_llm_observed_session_records_success_metrics(
     assert len(tps.records) == 1
     assert tps.records[0][0] == pytest.approx(20.0)
     assert tps.records[0][1] == {"llm.model": "mock-model", "llm.task": "generation"}
-    assert success.adds == [
-        (1, {"llm.model": "mock-model", "llm.task": "generation"})
-    ]
+    assert success.adds == [(1, {"llm.model": "mock-model", "llm.task": "generation"})]
     assert len(span.events) == 1
     assert span.events[0][0] == "first_token"
     assert span.events[0][1]["ttft_ms"] == pytest.approx(100.0)
@@ -252,9 +244,7 @@ def test_llm_observed_session_records_failure_metrics(
     tracer = fake_telemetry["tracer"]
     span = tracer.spans[0]
 
-    assert failure.adds == [
-        (1, {"llm.model": "mock-model", "llm.task": "repair"})
-    ]
+    assert failure.adds == [(1, {"llm.model": "mock-model", "llm.task": "repair"})]
     assert success.adds == []
     assert tps.records == []
     assert span.attributes["llm.tokens"] == 0
@@ -325,9 +315,7 @@ def test_extended_observability_helpers_record_metrics(fake_telemetry: FakeTelem
         (1, {"operation": "save", "hit": "True"}),
         (1, {"operation": "restore", "hit": "False"}),
     ]
-    assert fake_telemetry["startup_latency_histogram"].records == [
-        (123.0, {"status": "success"})
-    ]
+    assert fake_telemetry["startup_latency_histogram"].records == [(123.0, {"status": "success"})]
 
 
 def test_setup_observability_without_otlp_endpoint(
@@ -507,3 +495,50 @@ def test_setup_observability_with_unreachable_otlp_endpoint(
     set_tracer_provider.assert_called_once_with(tracer_provider)
     set_meter_provider.assert_called_once_with(meter_provider)
     assert "OTLP endpoint configured but unavailable; tracing will stay local." in caplog.text
+
+
+def test_build_accessibility_diagnostics_snapshot_redacts_story_by_default() -> None:
+    snapshot = obs.build_accessibility_diagnostics_snapshot(
+        settings={"screen_reader_mode": True},
+        environment={"term": "xterm-256color"},
+        layout={"compact_layout": True},
+        bindings={"show_help": "h"},
+        focus={"focused_widget": {"id": "choice-1"}},
+        story={
+            "story_title": "Hidden Temple",
+            "current_story_text": "Secret narrative text.",
+            "current_turn_text": "Secret turn text.",
+            "story_segments": [
+                {"kind": "story_turn", "text": "Secret narrative text."},
+                {"kind": "player_choice", "text": "Take the torch"},
+            ],
+        },
+    )
+
+    assert snapshot["story"]["included"] is False
+    assert snapshot["story"]["story_title"] is None
+    assert "current_story_text" not in snapshot["story"]
+    assert snapshot["story"]["segment_count"] == 2
+    assert snapshot["story"]["segment_kinds"] == ["story_turn", "player_choice"]
+
+
+def test_build_accessibility_diagnostics_snapshot_can_include_story_content() -> None:
+    snapshot = obs.build_accessibility_diagnostics_snapshot(
+        settings={"high_contrast": True},
+        environment={"term": "xterm-256color"},
+        layout={"compact_layout": False},
+        bindings={"show_help": "h"},
+        focus={"focused_widget": {"id": "story-container"}},
+        story={
+            "story_title": "Visible Tale",
+            "current_story_text": "Visible narrative text.",
+            "current_turn_text": "Visible turn text.",
+            "story_segments": [{"kind": "story_turn", "text": "Visible narrative text."}],
+        },
+        include_story_content=True,
+    )
+
+    assert snapshot["story"]["included"] is True
+    assert snapshot["story"]["story_title"] == "Visible Tale"
+    assert snapshot["story"]["current_story_text"] == "Visible narrative text."
+    assert snapshot["story"]["story_segments"][0]["text"] == "Visible narrative text."

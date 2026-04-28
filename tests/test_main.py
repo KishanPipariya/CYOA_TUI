@@ -7,7 +7,7 @@ import pytest
 
 import main
 from cyoa.core.theme_loader import ThemeValidationError
-from cyoa.core.user_config import UserConfig
+from cyoa.core.user_config import UserConfig, infer_startup_accessibility_recommendation
 
 
 def _args(**overrides: str | None) -> argparse.Namespace:
@@ -199,6 +199,46 @@ def test_validate_startup_config_collects_startup_accessibility_flags(
         "high_contrast": True,
         "reduced_motion": True,
     }
+
+
+def test_infer_startup_accessibility_recommendation_for_narrow_terminal() -> None:
+    recommendation = infer_startup_accessibility_recommendation(
+        config=UserConfig(setup_completed=True),
+        width=80,
+        height=24,
+        term="xterm-256color",
+    )
+
+    assert recommendation is not None
+    assert recommendation.key == "narrow_terminal_screen_reader"
+    assert recommendation.accessibility_preset == "screen_reader_friendly"
+    assert recommendation.rescue_mode_active is True
+
+
+def test_infer_startup_accessibility_recommendation_skips_when_cli_override_is_explicit() -> None:
+    recommendation = infer_startup_accessibility_recommendation(
+        config=UserConfig(setup_completed=True),
+        width=80,
+        height=24,
+        term="xterm-256color",
+        overrides={"screen_reader_mode": True},
+    )
+
+    assert recommendation is None
+
+
+def test_infer_startup_accessibility_recommendation_skips_dismissed_signature() -> None:
+    recommendation = infer_startup_accessibility_recommendation(
+        config=UserConfig(
+            setup_completed=True,
+            dismissed_startup_recommendations=["narrow_terminal_screen_reader"],
+        ),
+        width=80,
+        height=24,
+        term="xterm-256color",
+    )
+
+    assert recommendation is None
 
 
 def test_validate_startup_config_cli_model_overrides_mock_provider_env(
