@@ -162,6 +162,12 @@ class ActionPanel(Container):
 
     def compose(self) -> ComposeResult:
         yield StatusBar(spinner_frames=self._spinner_frames, id="status-bar")
+        with Vertical(id="action-dock"):
+            with Horizontal(classes="action-dock-row"):
+                yield Button("Journal", id="btn-compact-journal")
+                yield Button("Map", id="btn-compact-map")
+                yield Button("Notices", id="btn-compact-messages")
+                yield Button("Recap", id="btn-compact-recap")
         yield ChoicePanel(id="choices-container")
 
 

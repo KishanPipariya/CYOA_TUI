@@ -267,6 +267,7 @@ Toast.-error {
     height: 1fr;
     background: $background;
     layout: horizontal;
+    overflow: hidden;
 }
 
 #main-container {
@@ -293,6 +294,12 @@ Toast.-error {
     display: none;
 }
 
+.action-dock-row {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+}
+
 #journal-panel, #story-map-panel {
     width: 34;
     border-left: solid $secondary 20%;
@@ -306,15 +313,24 @@ Toast.-error {
 }
 
 /* Narrow terminals: prioritize readable story width. */
+.compact-layout #workspace {
+    layout: vertical;
+}
+
 .compact-layout #main-container {
     width: 1fr;
+    height: 1fr;
     min-width: 0;
     padding: 1 0 0 0;
 }
 
 .compact-layout #journal-panel, .compact-layout #story-map-panel {
-    width: 28;
-    padding: 1 0 1 1;
+    width: 1fr;
+    height: 10;
+    min-height: 7;
+    padding: 0 1 1 1;
+    border-left: none;
+    border-top: solid $secondary 20%;
 }
 
 .side-panel-shell {
@@ -930,6 +946,7 @@ Footer > .footer--highlight {
 }
 
 .compact-layout #story-container {
+    min-height: 6;
     padding: 1 0 0 0;
 }
 
@@ -948,22 +965,63 @@ Footer > .footer--highlight {
 }
 
 .compact-layout #action-panel {
+    height: 11;
+    min-height: 7;
+    margin-top: 0;
     padding-left: 0;
     padding-right: 0;
+    overflow-y: auto;
 }
 
 .compact-layout #action-dock {
-    display: none;
+    display: block;
+    width: 100%;
+    margin: 0 1 1 1;
+}
+
+.compact-layout #action-dock Button {
+    width: 1fr;
+    min-height: 3;
+    margin: 0 1 1 0;
+    background: $surface 82%;
+    border: round $secondary 32%;
+}
+
+.compact-layout #action-dock Button:last-child {
+    margin-right: 0;
+}
+
+.compact-layout #action-dock Button:focus {
+    background: $accent 18%;
+    border: round $accent;
+    tint: $accent 6%;
+}
+
+.compact-layout #action-dock Button > .textual-button--label {
+    text-align: center;
+    padding: 0 1;
 }
 
 .compact-layout #status-bar {
+    height: auto;
     width: 100%;
+    min-height: 4;
+    max-height: 6;
     padding-right: 0;
+    overflow-y: auto;
 }
 
 .compact-layout #choices-container {
-    max-height: 14;
+    height: 4;
+    min-height: 4;
+    max-height: 4;
     padding: 0 1;
+    overflow-y: auto;
+}
+
+.compact-layout.text-scale-large #action-panel,
+.compact-layout.text-scale-xlarge #action-panel {
+    height: 12;
 }
 
 /* ── Reading Preferences ───────────────────────────────────── */

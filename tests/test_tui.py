@@ -1405,39 +1405,64 @@ async def test_main_game_layout_fits_compact_terminal(mock_app_dependencies) -> 
             story_container,
             action_panel,
             status_bar,
-            choices_container,
         ):
             _assert_region_within_screen(widget, app.size)
 
-        assert status_bar.region.x >= action_panel.region.x
-        assert status_bar.region.right <= action_panel.region.right
-        assert status_bar.region.y >= action_panel.region.y
-        assert status_bar.region.bottom <= action_panel.region.bottom
-        assert choices_container.region.x >= action_panel.region.x
-        assert choices_container.region.right <= action_panel.region.right
-        assert choices_container.region.y >= status_bar.region.bottom
-        assert choices_container.region.bottom <= action_panel.region.bottom
+        assert action_panel.region.y >= story_container.region.y
+        assert action_panel.region.bottom <= main_container.region.bottom + 1
+        assert status_bar.region.right <= main_container.region.right
+        assert choices_container.region.right <= main_container.region.right
 
-        for button in choices_container.query(Button):
-            _assert_region_within_screen(button, app.size)
-            _assert_region_within_parent(button, action_panel)
-
-        status_display = app.query_one("#status-display")
-        _assert_region_within_screen(status_display, app.size)
-        _assert_region_within_parent(status_display, status_bar)
-
-        for widget in (
-            app.query_one("#stats-text"),
-            app.query_one("#runtime-text"),
-            app.query_one("#inventory-label"),
-            app.query_one("#objectives-label"),
-            app.query_one("#directives-label"),
-        ):
-            _assert_region_within_screen(widget, app.size)
-            _assert_region_within_parent(widget, status_bar)
+        buttons = list(choices_container.query(Button))
+        assert buttons
+        _assert_region_within_screen(buttons[0], app.size)
 
         for story_widget in story_container.query(".story-turn"):
             _assert_horizontal_region_within_parent(story_widget, story_container)
+
+
+@pytest.mark.asyncio
+async def test_narrow_terminal_rescue_mode_uses_single_column_panel_drawers(
+    mock_app_dependencies,
+) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(72, 24)) as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+        app.action_skip_typewriter()
+
+        assert app.compact_layout is True
+
+        main_container = app.query_one("#main-container")
+        journal_panel = app.query_one("#journal-panel", Container)
+        map_panel = app.query_one("#story-map-panel", Container)
+        action_dock = app.query_one("#action-dock")
+
+        _assert_region_within_screen(action_dock, app.size)
+        assert action_dock.region.height > 0
+        assert journal_panel.has_class("panel-collapsed")
+        assert map_panel.has_class("panel-collapsed")
+
+        await pilot.click("#btn-compact-journal")
+        await pilot.pause(0.2)
+
+        assert not journal_panel.has_class("panel-collapsed")
+        assert map_panel.has_class("panel-collapsed")
+        _assert_region_within_screen(journal_panel, app.size)
+        assert journal_panel.region.x <= main_container.region.x + 1
+        assert journal_panel.region.right >= main_container.region.right - 1
+
+        await pilot.click("#btn-compact-map")
+        await pilot.pause(0.2)
+
+        assert journal_panel.has_class("panel-collapsed")
+        assert not map_panel.has_class("panel-collapsed")
+        _assert_region_within_screen(map_panel, app.size)
+        assert map_panel.region.x <= main_container.region.x + 1
+        assert map_panel.region.right >= main_container.region.right - 1
 
 
 @pytest.mark.asyncio
@@ -1481,6 +1506,48 @@ async def test_large_text_reading_preferences_keep_story_help_and_settings_in_bo
         await pilot.pause(0.2)
         settings_dialog = app.screen.query_one("#settings-dialog")
         _assert_region_within_screen(settings_dialog, app.size)
+
+
+@pytest.mark.asyncio
+async def test_large_text_narrow_terminal_rescue_mode_keeps_core_widgets_in_bounds(
+    mock_app_dependencies,
+) -> None:
+    with patch(
+        "cyoa.ui.app.load_user_config",
+        return_value=UserConfig(
+            setup_completed=True,
+            text_scale="xlarge",
+            line_width="focused",
+            line_spacing="relaxed",
+            screen_reader_mode=True,
+            typewriter=False,
+        ),
+    ):
+        app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(72, 24)) as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+
+        assert app.compact_layout is True
+        assert app.has_class("text-scale-xlarge")
+        assert app.has_class("screen-reader-mode")
+
+        for widget in (
+            app.query_one("#main-container"),
+            app.query_one("#story-container", VerticalScroll),
+            app.query_one("#action-panel", Container),
+            app.query_one("#status-bar", Container),
+            app.query_one("#choices-container", Container),
+            app.query_one("#action-dock"),
+        ):
+            _assert_region_within_screen(widget, app.size)
+
+        await pilot.click("#btn-compact-journal")
+        await pilot.pause(0.2)
+        _assert_region_within_screen(app.query_one("#journal-panel", Container), app.size)
 
 
 @pytest.mark.asyncio

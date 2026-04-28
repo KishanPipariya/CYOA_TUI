@@ -500,8 +500,26 @@ class CYOAApp(
     def _set_compact_layout(self, width: int) -> None:
         """Enable compact mode on narrow terminals to preserve story readability."""
         is_compact = width < 140
+        was_compact = bool(self.compact_layout)
         self.compact_layout = is_compact
         self.set_class(is_compact, "compact-layout")
+        if is_compact and not was_compact:
+            self._collapse_side_panels_for_compact_layout()
+
+    def _collapse_side_panels_for_compact_layout(self) -> None:
+        """Reset side panels when entering rescue mode so story flow keeps priority."""
+        try:
+            journal_panel = self.query_one("#journal-panel", Container)
+            story_map_panel = self.query_one("#story-map-panel", Container)
+        except Exception:
+            return
+
+        journal_panel.add_class("panel-collapsed")
+        story_map_panel.add_class("panel-collapsed")
+
+        focused = self._focused_widget()
+        if focused is not None and not self._widget_can_receive_focus(focused):
+            self._restore_focus_target(None, fallback="choices")
 
     def action_repeat_latest_status(self) -> None:
         if not self._latest_status_message:
@@ -1754,6 +1772,22 @@ class CYOAApp(
             logger.debug("Click handler failed: %s", e)
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-compact-journal":
+            self.action_toggle_journal()
+            return
+
+        if event.button.id == "btn-compact-map":
+            self.action_toggle_story_map()
+            return
+
+        if event.button.id == "btn-compact-messages":
+            self.action_show_notification_history()
+            return
+
+        if event.button.id == "btn-compact-recap":
+            self.action_show_scene_recap()
+            return
+
         if event.button.id == "btn-new-adventure":
             self.run_worker(self.action_restart(), exclusive=True)
             return
