@@ -12,7 +12,7 @@ from textual.widgets._toast import Toast
 from textual.worker import WorkerFailed
 
 from cyoa.core.events import EventBus, EventDispatchError, Events, bus
-from cyoa.core.models import Choice, ChoiceRequirement, StoryNode
+from cyoa.core.models import Choice, ChoiceRequirement, LoreEntry, StoryNode
 from cyoa.core.theme_loader import load_theme
 from cyoa.core.user_config import UserConfig
 from cyoa.ui.app import CYOAApp
@@ -23,6 +23,7 @@ from cyoa.ui.components import (
     CommandPaletteScreen,
     ConfirmScreen,
     HelpScreen,
+    InventoryInspectorScreen,
     LoadGameScreen,
     LoreCodexScreen,
     NotificationHistoryScreen,
@@ -936,6 +937,73 @@ async def test_lore_codex_modal_opens_and_reflects_discovered_entries(mock_app_d
 
 
 @pytest.mark.asyncio
+async def test_inventory_inspector_modal_opens_and_surfaces_item_lore_and_choice_hooks(
+    mock_app_dependencies,
+):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(100, 34)) as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+        assert app.engine is not None
+
+        app.engine.state.inventory = ["Torch", "Silver Key"]
+        app.engine.state.lore_entries = [
+            LoreEntry(
+                category="item",
+                name="Silver Key",
+                summary="A key etched with the guild crest.",
+                discovered_turn=3,
+            )
+        ]
+        app.engine.state.current_node = StoryNode(
+            narrative="The archive door waits in silence.",
+            choices=[
+                Choice(
+                    text="Open the warded archive",
+                    requirements=ChoiceRequirement(items=["Silver Key"]),
+                ),
+                Choice(text="Wait"),
+            ],
+            items_gained=["Silver Key"],
+            title="Test Adventure",
+        )
+
+        await _wait_for_pilot(
+            pilot,
+            lambda: len(list(app.query_one("#choices-container", Container).query(Button))) >= 2,
+        )
+        choices = list(app.query_one("#choices-container", Container).query(Button))
+        assert app.focused is choices[0]
+
+        await pilot.press("i")
+        await pilot.pause(0.2)
+
+        assert isinstance(app.screen, InventoryInspectorScreen)
+        assert (
+            "Inventory Inspector"
+            in app.screen.query_one("#inventory-inspector-title", Label).render().plain
+        )
+        detail_text = app.screen.query_one("#inventory-inspector-text", Markdown)._markdown
+        assert "Torch" in detail_text
+
+        await pilot.press("down")
+        await pilot.pause(0.2)
+        detail_text = app.screen.query_one("#inventory-inspector-text", Markdown)._markdown
+        assert "Silver Key" in detail_text
+        assert "A key etched with the guild crest." in detail_text
+        assert "Open the warded archive" in detail_text
+        assert "Newly acquired this turn" in detail_text
+
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert app.screen.id == "_default"
+        assert app.focused is choices[0]
+
+
+@pytest.mark.asyncio
 async def test_game_over_state_and_restart(mock_app_dependencies):
     """Test the game over state ends the choices and 'r' restarts the app."""
     app = CYOAApp(model_path="dummy_path.gguf")
@@ -1272,7 +1340,7 @@ async def test_scene_recap_screen_opens_during_live_play(mock_app_dependencies):
             lambda: app.engine is not None and app.engine.state.current_node is not None,
         )
 
-        await pilot.press("i")
+        await pilot.press("shift+r")
         await pilot.pause(0.2)
 
         assert isinstance(app.screen, SceneRecapScreen)
@@ -1866,7 +1934,12 @@ async def test_story_entries_and_player_choice_borders_stay_inside_story_pane(
     "theme_name",
     ["dark_dungeon", "space_explorer", "haunted_observatory"],
 )
-async def test_shipped_themes_render_stable_layouts(theme_name: str, mock_app_dependencies) -> None:
+@pytest.mark.parametrize("size", [(140, 38), (100, 34)])
+async def test_shipped_themes_render_stable_layouts(
+    theme_name: str,
+    size: tuple[int, int],
+    mock_app_dependencies,
+) -> None:
     theme = load_theme(theme_name)
     app = CYOAApp(
         model_path="dummy_path.gguf",
@@ -1875,7 +1948,7 @@ async def test_shipped_themes_render_stable_layouts(theme_name: str, mock_app_de
         ui_theme=theme["ui"],
     )
 
-    async with app.run_test(size=(140, 38)) as pilot:
+    async with app.run_test(size=size) as pilot:
         await _wait_for_pilot(
             pilot,
             lambda: "You awaken in a test dungeon" in app._current_story,
@@ -1907,6 +1980,16 @@ async def test_modal_dialog_borders_do_not_clip_on_small_terminals(mock_app_depe
         dialogs = [
             (HelpScreen(), "#help-dialog"),
             (ConfirmScreen("Confirm a risky action?"), "#confirm-dialog"),
+            (
+                InventoryInspectorScreen(
+                    story_title="Vault Run",
+                    turn_count=4,
+                    inventory=["Silver Key"],
+                    lore_entries=[],
+                    choices=[],
+                ),
+                "#inventory-inspector-dialog",
+            ),
             (LoadGameScreen(["autosave_slot_1.json"]), "#load-dialog"),
             (StartupChoiceScreen("Resume your last session?"), "#startup-dialog"),
             (TextPromptScreen("Rename bookmark", value="turn-3"), "#text-prompt-dialog"),

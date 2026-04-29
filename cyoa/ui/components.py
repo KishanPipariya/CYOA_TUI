@@ -38,6 +38,9 @@ from cyoa.ui.keybindings import (
 from cyoa.ui.presenters import (
     build_branch_preview,
     build_help_text,
+    build_inventory_empty_summary,
+    build_inventory_inspector_entries,
+    build_inventory_item_summary,
     format_directives_label,
     format_inventory_label,
     format_objectives_label,
@@ -74,6 +77,7 @@ __all__ = [
     "TextPromptScreen",
     "JournalListItem",
     "LoreCodexScreen",
+    "InventoryInspectorScreen",
     "SceneRecapScreen",
     "AccessibleSummaryScreen",
     "SceneListItem",
@@ -113,6 +117,29 @@ class CommandPaletteListItem(ListItem):
     def __init__(self, *args: Any, action_value: str = "", **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.action_value = action_value
+
+
+class InventoryListItem(ListItem):
+    """List item that carries an inventory entry payload."""
+
+    def __init__(
+        self,
+        *args: Any,
+        item_name: str = "",
+        item_summary: str = "",
+        discovered_turn: int | None = None,
+        related_choices: list[str] | None = None,
+        recently_gained: bool = False,
+        has_lore: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.item_name = item_name
+        self.item_summary = item_summary
+        self.discovered_turn = discovered_turn
+        self.related_choices = list(related_choices or [])
+        self.recently_gained = recently_gained
+        self.has_lore = has_lore
 
 
 class JournalListItem(ListItem):
@@ -1983,6 +2010,145 @@ class SceneRecapScreen(ModalScreen[None]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-scene-recap-close":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class InventoryInspectorScreen(ModalScreen[None]):
+    """Modal screen for item-first inventory inspection and discovered item lore."""
+
+    DEFAULT_CSS = """
+    InventoryInspectorScreen {
+        align: center middle;
+        background: $background 80%;
+    }
+    #inventory-inspector-dialog {
+        width: 78;
+        height: 80%;
+        max-width: 96%;
+    }
+    #inventory-inspector-list {
+        height: 9;
+        margin: 1 0;
+    }
+    #inventory-inspector-text {
+        height: 1fr;
+    }
+    #btn-inventory-inspector-close {
+        width: 100%;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS = [("escape", "close", "Close")]
+
+    def __init__(
+        self,
+        *,
+        story_title: str | None,
+        turn_count: int,
+        inventory: list[str],
+        lore_entries: list[Any],
+        choices: list[Any],
+        items_gained: list[str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._story_title = story_title
+        self._turn_count = turn_count
+        self._entries = build_inventory_inspector_entries(
+            inventory=inventory,
+            lore_entries=lore_entries,
+            choices=choices,
+            items_gained=items_gained,
+        )
+
+    def compose(self) -> ComposeResult:
+        with DialogFrame(
+            id="inventory-inspector-dialog",
+            classes="dialog-frame dialog-frame-scroll dialog-frame-accent",
+        ):
+            yield Label(
+                "[b]Inventory Inspector[/b]",
+                id="inventory-inspector-title",
+                classes="dialog-title",
+            )
+            yield Label(
+                "Inspect carried items for discovered lore and current choice hooks.",
+                id="inventory-inspector-kicker",
+                classes="dialog-entry",
+            )
+            if self._entries:
+                yield ListView(id="inventory-inspector-list", classes="dialog-list")
+            with Container(id="inventory-inspector-content", classes="dialog-content"):
+                yield Markdown("", id="inventory-inspector-text")
+            yield Button(
+                "Close [b](Esc)[/b]", id="btn-inventory-inspector-close", variant="primary"
+            )
+
+    def on_mount(self) -> None:
+        detail = self.query_one("#inventory-inspector-text", Markdown)
+        if not self._entries:
+            detail.update(
+                build_inventory_empty_summary(
+                    story_title=self._story_title,
+                    turn_count=self._turn_count,
+                )
+            )
+            self.query_one("#btn-inventory-inspector-close", Button).focus()
+            return
+
+        list_view = self.query_one("#inventory-inspector-list", ListView)
+        for entry in self._entries:
+            suffixes: list[str] = []
+            if entry["has_lore"]:
+                suffixes.append("lore")
+            if entry["related_choices"]:
+                suffixes.append("hook")
+            if entry["recently_gained"]:
+                suffixes.append("new")
+            label = entry["name"]
+            if suffixes:
+                label = f"{label} [{' | '.join(suffixes)}]"
+            list_view.append(
+                InventoryListItem(
+                    Label(escape(label), classes="dialog-entry"),
+                    item_name=entry["name"],
+                    item_summary=entry["summary"],
+                    discovered_turn=cast(int | None, entry["discovered_turn"]),
+                    related_choices=cast(list[str], entry["related_choices"]),
+                    recently_gained=bool(entry["recently_gained"]),
+                    has_lore=bool(entry["has_lore"]),
+                )
+            )
+        list_view.index = 0
+        first_item = next(iter(list_view.query(InventoryListItem)), None)
+        if first_item is not None:
+            self._update_selected_item(first_item)
+        self.call_after_refresh(list_view.focus)
+
+    def _update_selected_item(self, item: InventoryListItem) -> None:
+        self.query_one("#inventory-inspector-text", Markdown).update(
+            build_inventory_item_summary(
+                story_title=self._story_title,
+                turn_count=self._turn_count,
+                item_name=item.item_name,
+                item_summary=item.item_summary,
+                discovered_turn=item.discovered_turn,
+                related_choices=item.related_choices,
+                recently_gained=item.recently_gained,
+                has_lore=item.has_lore,
+            )
+        )
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        if isinstance(event.item, InventoryListItem):
+            self._update_selected_item(event.item)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-inventory-inspector-close":
             self.dismiss(None)
 
     def action_close(self) -> None:

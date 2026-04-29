@@ -14,6 +14,7 @@ from cyoa.ui.components import (
     CharacterSheetScreen,
     ConfirmScreen,
     HelpScreen,
+    InventoryInspectorScreen,
     JournalListItem,
     LoreCodexScreen,
     NotificationHistoryScreen,
@@ -204,6 +205,35 @@ class NavigationMixin:
         """Show a structured recap of the current scene and player state."""
         app = as_textual_app(self)
         cast(Any, app)._push_modal_screen(SceneRecapScreen(cast(Any, self).get_scene_recap_text()))
+
+    def action_show_inventory_inspector(self) -> None:
+        """Show item-first inventory details, discovered lore, and current choice hooks."""
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        if host.engine is None:
+            cast(Any, app)._push_modal_screen(
+                InventoryInspectorScreen(
+                    story_title=None,
+                    turn_count=1,
+                    inventory=[],
+                    lore_entries=[],
+                    choices=[],
+                )
+            )
+            return
+
+        state = host.engine.state
+        node = state.current_node
+        cast(Any, app)._push_modal_screen(
+            InventoryInspectorScreen(
+                story_title=state.story_title or (node.title if node is not None else None),
+                turn_count=state.turn_count,
+                inventory=state.inventory,
+                lore_entries=state.lore_entries,
+                choices=node.choices if node is not None else [],
+                items_gained=node.items_gained if node is not None else [],
+            )
+        )
 
     def action_show_world_state(self) -> None:
         """Show a dedicated character sheet for persistent player and world state."""

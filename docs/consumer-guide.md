@@ -120,7 +120,7 @@ Dark mode and typewriter changes apply immediately. Provider, runtime profile, m
 - `h` opens help and `ctrl+shift+p` opens the command palette for searchable action discovery.
 - `o` opens Settings, where you can change provider, theme, keybindings, verbosity, and accessibility options.
 - `j` and `m` toggle the journal and story map side panels.
-- `i` opens the scene recap, `c` opens the character sheet, and `z` opens the lore codex.
+- `i` opens the inventory inspector, `shift+r` opens the scene recap, `c` opens the character sheet, and `z` opens the lore codex.
 - `[` opens the journal summary and `]` opens the story-map summary in a text-first review format.
 - `n` repeats the latest status update and `shift+n` opens notification history.
 - `s` saves, `l` loads, and `e` exports the current run as markdown, accessible markdown, and JSON.

@@ -25,6 +25,7 @@ from cyoa.ui.components import (
     CharacterSheetScreen,
     CommandPaletteScreen,
     FirstRunSetupScreen,
+    InventoryInspectorScreen,
     LoadGameScreen,
     LoreCodexScreen,
     ModelDownloadScreen,
@@ -51,6 +52,9 @@ from cyoa.ui.presenters import (
     build_accessible_export,
     build_choice_label,
     build_help_text,
+    build_inventory_empty_summary,
+    build_inventory_inspector_entries,
+    build_inventory_item_summary,
     build_journal_summary,
     build_lore_codex_summary,
     build_scene_recap,
@@ -708,6 +712,61 @@ def test_build_lore_codex_summary_groups_entries_by_category() -> None:
     assert "- Silver Key (Turn 3): A key etched with the guild crest." in summary
 
 
+def test_build_inventory_inspector_entries_and_item_summary_surface_lore_and_choice_hooks() -> None:
+    entries = build_inventory_inspector_entries(
+        inventory=["Torch", "Silver Key"],
+        lore_entries=[
+            LoreEntry(
+                category="item",
+                name="Silver Key",
+                summary="A key etched with the guild crest.",
+                discovered_turn=3,
+            )
+        ],
+        choices=[
+            Choice(
+                text="Open the warded archive",
+                requirements=ChoiceRequirement(items=["Silver Key"]),
+            ),
+            Choice(text="Wait"),
+        ],
+        items_gained=["Silver Key"],
+    )
+
+    assert [entry["name"] for entry in entries] == ["Torch", "Silver Key"]
+    assert entries[0]["has_lore"] is False
+    assert entries[1]["has_lore"] is True
+    assert entries[1]["related_choices"] == ["Open the warded archive"]
+    assert entries[1]["recently_gained"] is True
+
+    summary = build_inventory_item_summary(
+        story_title="Vault Run",
+        turn_count=4,
+        item_name="Silver Key",
+        item_summary=entries[1]["summary"],
+        discovered_turn=entries[1]["discovered_turn"],
+        related_choices=entries[1]["related_choices"],
+        recently_gained=entries[1]["recently_gained"],
+        has_lore=entries[1]["has_lore"],
+    )
+
+    assert "- Name: Silver Key" in summary
+    assert "- Lore discovered: Yes" in summary
+    assert "- First recorded: Turn 3" in summary
+    assert "- Status: Newly acquired this turn" in summary
+    assert "## Hidden Lore" in summary
+    assert "A key etched with the guild crest." in summary
+    assert "## Current Uses" in summary
+    assert "- Open the warded archive" in summary
+
+
+def test_build_inventory_empty_summary_reports_no_items() -> None:
+    summary = build_inventory_empty_summary(story_title="Vault Run", turn_count=4)
+
+    assert "- Items carried: 0" in summary
+    assert "No items are currently in your inventory." in summary
+
+
 def test_build_accessible_export_uses_plain_text_reading_order() -> None:
     transcript = build_accessible_export(
         story_title="Vault Run",
@@ -1289,6 +1348,20 @@ def test_startup_choice_screen_dismisses_expected_values():
     )
     recap_screen.action_close()
     assert recap_screen.dismiss.call_args_list == [call(None), call(None)]
+
+    inventory_screen = InventoryInspectorScreen(
+        story_title="Vault Run",
+        turn_count=4,
+        inventory=["Silver Key"],
+        lore_entries=[],
+        choices=[],
+    )
+    inventory_screen.dismiss = MagicMock()
+    inventory_screen.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-inventory-inspector-close"))
+    )
+    inventory_screen.action_close()
+    assert inventory_screen.dismiss.call_args_list == [call(None), call(None)]
 
     character_sheet = CharacterSheetScreen("## Stats\n- Health: 100")
     character_sheet.dismiss = MagicMock()

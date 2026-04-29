@@ -152,8 +152,16 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Panels And Help",
     ),
     AppBindingSpec(
-        "show_scene_recap",
+        "show_inventory_inspector",
         "i",
+        "show_inventory_inspector",
+        "Inventory",
+        "Open inventory inspector",
+        "Panels And Help",
+    ),
+    AppBindingSpec(
+        "show_scene_recap",
+        "shift+r",
         "show_scene_recap",
         "Recap",
         "Open scene recap",
