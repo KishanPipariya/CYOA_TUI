@@ -49,12 +49,94 @@ class ChoiceRequirement(BaseModel):
     )
 
 
+class ChoiceCheck(BaseModel):
+    stat: str = Field(description="The player stat tested by this risky choice.")
+    difficulty: int = Field(
+        ge=1,
+        description="Target number the final roll must meet or exceed.",
+    )
+    stakes: str | None = Field(
+        default=None,
+        description="What is at risk if the player fails this check.",
+    )
+
+    @model_validator(mode="after")
+    def normalize_text_fields(self) -> "ChoiceCheck":
+        self.stat = self.stat.strip()
+        if not self.stat:
+            raise ValueError("Choice check stat cannot be empty.")
+        if self.stakes is not None:
+            normalized_stakes = self.stakes.strip()
+            self.stakes = normalized_stakes or None
+        return self
+
+
+class ResolvedChoiceCheck(BaseModel):
+    stat: str = Field(description="The player stat tested by the resolved choice.")
+    stat_value: int = Field(description="The stat value used for the roll.")
+    difficulty: int = Field(
+        ge=1,
+        description="The target number the player needed to meet or exceed.",
+    )
+    roll: int = Field(
+        ge=1,
+        description="The random roll applied during resolution.",
+    )
+    total: int = Field(description="The final total compared against the difficulty.")
+    success: bool = Field(description="Whether the resolved check succeeded.")
+    stakes: str | None = Field(
+        default=None,
+        description="What was at risk when the check was attempted.",
+    )
+
+    @model_validator(mode="after")
+    def normalize_text_fields(self) -> "ResolvedChoiceCheck":
+        self.stat = self.stat.strip()
+        if not self.stat:
+            raise ValueError("Resolved choice check stat cannot be empty.")
+        if self.stakes is not None:
+            normalized_stakes = self.stakes.strip()
+            self.stakes = normalized_stakes or None
+        return self
+
+    def stat_label(self) -> str:
+        return self.stat.replace("_", " ")
+
+    def summary_lines(self) -> list[str]:
+        result = "passed" if self.success else "failed"
+        lines = [
+            (
+                f"Last check: {self.stat_label()} {result} "
+                f"({self.roll} + {self.stat_value} = {self.total} vs {self.difficulty})"
+            )
+        ]
+        if self.stakes:
+            lines.append(f"Stakes: {self.stakes}")
+        return lines
+
+
 class Choice(BaseModel):
     text: str = Field(description="The description of the action the user can take.")
     requirements: ChoiceRequirement = Field(
         default_factory=ChoiceRequirement,
         description="Optional requirements gating this choice.",
     )
+    check: ChoiceCheck | None = Field(
+        default=None,
+        description=(
+            "Optional risky skill check for this choice. Use this for uncertain actions "
+            "that should stay available but resolve through a roll."
+        ),
+    )
+
+    def check_summary(self) -> list[str]:
+        if self.check is None:
+            return []
+        stat_label = self.check.stat.replace("_", " ")
+        lines = [f"Check: {stat_label} vs difficulty {self.check.difficulty}"]
+        if self.check.stakes:
+            lines.append(f"Stakes: {self.check.stakes}")
+        return lines
 
     def availability_reason(
         self,

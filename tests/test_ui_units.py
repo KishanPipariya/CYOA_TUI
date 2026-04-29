@@ -11,7 +11,14 @@ from textual.theme import Theme
 from textual.widgets import Button, Label, ListView, ProgressBar
 
 from cyoa.core import constants
-from cyoa.core.models import Choice, ChoiceRequirement, LoreEntry, StoryNode
+from cyoa.core.models import (
+    Choice,
+    ChoiceCheck,
+    ChoiceRequirement,
+    LoreEntry,
+    ResolvedChoiceCheck,
+    StoryNode,
+)
 from cyoa.core.runtime import EnginePhase, EngineTransition
 from cyoa.core.user_config import (
     StartupAccessibilityRecommendation,
@@ -558,6 +565,15 @@ def test_presenters_return_plain_text_variants_for_screen_reader_mode():
         )
         == "1. Open the gate\nUnavailable"
     )
+    assert (
+        build_choice_label(
+            0,
+            "Leap the gap",
+            screen_reader_mode=True,
+            hint_lines=["Check: agility vs difficulty 12", "Stakes: You fall into the ravine."],
+        )
+        == "1. Leap the gap\nCheck: agility vs difficulty 12\nStakes: You fall into the ravine."
+    )
 
 
 def test_build_scene_recap_includes_visible_choices_progress_and_recent_changes() -> None:
@@ -568,7 +584,14 @@ def test_build_scene_recap_includes_visible_choices_progress_and_recent_changes(
                 text="Open the sigil door",
                 requirements=ChoiceRequirement(flags=["sigil_unlocked"]),
             ),
-            Choice(text="Wait and listen"),
+            Choice(
+                text="Force the vault seal",
+                check=ChoiceCheck(
+                    stat="reputation",
+                    difficulty=12,
+                    stakes="The ward lashes back.",
+                ),
+            ),
         ],
         items_gained=["Ancient Coin"],
         stat_updates={"health": -10, "gold": 5},
@@ -602,7 +625,7 @@ def test_build_scene_recap_includes_visible_choices_progress_and_recent_changes(
     assert "Vault Run | Turn 2" in recap
     assert "## Scene" in recap
     assert "1. Open the sigil door (Unavailable: Missing event: sigil_unlocked)" in recap
-    assert "2. Wait and listen" in recap
+    assert "2. Force the vault seal (Check: reputation vs difficulty 12)" in recap
     assert "## Objectives" in recap
     assert "- Escape the vault" in recap
     assert "- Stats: Health 90 | Gold 5 | Reputation 0" in recap
@@ -626,11 +649,22 @@ def test_build_scene_recap_is_more_explicit_in_screen_reader_mode() -> None:
         locked_choice_verbosity="detailed",
         story_title="Bridge Watch",
         last_choice_text="Light the beacon",
+        last_resolved_choice_check=ResolvedChoiceCheck(
+            stat="reputation",
+            stat_value=2,
+            difficulty=12,
+            roll=9,
+            total=11,
+            success=False,
+            stakes="The beacon draws hostile eyes.",
+        ),
         story_flags=[],
     )
 
     assert "Bridge Watch | Turn 4" in recap
     assert "Last choice: Light the beacon" in recap
+    assert "Last check: reputation failed (9 + 2 = 11 vs 12)" in recap
+    assert "Stakes: The beacon draws hostile eyes." in recap
     assert "- Health: 100" in recap
     assert "- Gold: 0" in recap
     assert "- Reputation: 2" in recap
@@ -652,6 +686,15 @@ def test_build_world_state_summary_groups_objectives_and_relationships() -> None
         npc_affinity={"Steward Hale": 1},
         story_flags={"vault_seen", "guild_trusted"},
         last_choice_text="Open the lower gate",
+        last_resolved_choice_check=ResolvedChoiceCheck(
+            stat="reputation",
+            stat_value=3,
+            difficulty=10,
+            roll=8,
+            total=11,
+            success=True,
+            stakes="The ward snaps shut.",
+        ),
         current_scene_id="scene-4",
     )
 
@@ -660,6 +703,8 @@ def test_build_world_state_summary_groups_objectives_and_relationships() -> None
     assert "- Turn: 4" in summary
     assert "- Scene ID: scene-4" in summary
     assert "- Last choice: Open the lower gate" in summary
+    assert "- Last check: reputation passed (8 + 3 = 11 vs 10)" in summary
+    assert "- Stakes: The ward snaps shut." in summary
     assert "## Inventory" in summary
     assert "- Torch" in summary
     assert "- Silver Key" in summary
@@ -788,6 +833,16 @@ def test_build_accessible_export_uses_plain_text_reading_order() -> None:
         inventory=["Torch", "Ancient Coin"],
         player_stats={"health": 90, "gold": 5, "reputation": 1},
         objectives=[{"id": "escape", "text": "Escape the vault", "status": "active"}],
+        last_choice_text="Force the vault seal",
+        last_resolved_choice_check=ResolvedChoiceCheck(
+            stat="reputation",
+            stat_value=1,
+            difficulty=12,
+            roll=12,
+            total=13,
+            success=True,
+            stakes="The ward detonates.",
+        ),
     )
 
     assert "Title: Vault Run" in transcript
@@ -800,6 +855,8 @@ def test_build_accessible_export_uses_plain_text_reading_order() -> None:
     assert "Current Progress:" in transcript
     assert "- Inventory: Torch, Ancient Coin" in transcript
     assert "- Objectives: Escape the vault" in transcript
+    assert "- Last choice: Force the vault seal" in transcript
+    assert "- Last check: reputation passed (12 + 1 = 13 vs 12)" in transcript
     assert "---" not in transcript
 
 
@@ -834,6 +891,16 @@ def test_build_scene_recap_minimal_and_export_detailed_respect_verbosity() -> No
         inventory=["Torch"],
         player_stats={"health": 80, "gold": 3, "reputation": 1},
         objectives=[{"id": "seal", "text": "Find the key", "status": "active"}],
+        last_choice_text="Break the seal",
+        last_resolved_choice_check=ResolvedChoiceCheck(
+            stat="reputation",
+            stat_value=1,
+            difficulty=8,
+            roll=6,
+            total=7,
+            success=False,
+            stakes="The atrium alarms flare.",
+        ),
         verbosity="detailed",
     )
 
@@ -841,6 +908,8 @@ def test_build_scene_recap_minimal_and_export_detailed_respect_verbosity() -> No
     assert "1. Break the seal (Unavailable)" in recap
     assert "- Inventory: 1 item(s)" in recap
     assert "Saved At: 2026-04-28T09:30:00Z" in transcript
+    assert "- Last choice: Break the seal" in transcript
+    assert "- Last check: reputation failed (6 + 1 = 7 vs 8)" in transcript
     assert "Objective Details:" in transcript
     assert "- Find the key" in transcript
 
@@ -975,6 +1044,15 @@ def test_archive_presenters_surface_endings_flags_and_divergence_points() -> Non
             "ending_label": "Escape",
             "ending_narrative": "You opened the door and escaped!",
             "last_choice_text": "Open Door",
+            "last_resolved_choice_check": {
+                "stat": "reputation",
+                "stat_value": 2,
+                "difficulty": 9,
+                "roll": 8,
+                "total": 10,
+                "success": True,
+                "stakes": "The gate slams shut.",
+            },
             "story_flags": ["saw_signal", "trusted_mira"],
             "divergence_points": [2],
             "inventory": ["Broken Sword", "Health Potion"],
@@ -989,6 +1067,7 @@ def test_archive_presenters_surface_endings_flags_and_divergence_points() -> Non
     assert "Completed runs: 1" in endings_summary
     assert "Latest divergence points: Turn 2" in endings_summary
     assert "Final choice: Open Door" in archive_summary
+    assert "Last check: reputation passed (8 + 2 = 10 vs 9)" in archive_summary
     assert "Flags: saw_signal, trusted_mira" in archive_summary
 
 
@@ -2501,6 +2580,30 @@ def test_rendering_show_loading_and_mount_choice_buttons_cover_states():
     assert mounted_button.disabled is True
     assert "Unavailable:" in str(mounted_button.label)
     assert "Missing item: key" in str(mounted_button.label)
+
+    checked_container = DummyChoiceContainer()
+    host._mount_choice_buttons(
+        StoryNode(
+            narrative="The ravine howls below.",
+            choices=[
+                Choice(
+                    text="Leap the gap",
+                    check=ChoiceCheck(
+                        stat="reputation",
+                        difficulty=12,
+                        stakes="You plunge into the ravine.",
+                    ),
+                ),
+                Choice(text="Retreat"),
+            ],
+        ),
+        checked_container,
+        is_error=False,
+    )
+    checked_button = checked_container.mounted[0]
+    assert checked_button.disabled is False
+    assert "Check: reputation vs difficulty 12" in str(checked_button.label)
+    assert "Stakes: You plunge into the ravine." in str(checked_button.label)
 
 
 def test_typewriter_settings_actions_persist_preferences(monkeypatch: pytest.MonkeyPatch):

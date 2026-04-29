@@ -595,6 +595,11 @@ class PersistenceMixin:
             "turn_count": state.turn_count,
             "current_scene_id": state.current_scene_id,
             "last_choice_text": state.last_choice_text,
+            "last_resolved_choice_check": (
+                state.last_resolved_choice_check.model_dump()
+                if state.last_resolved_choice_check is not None
+                else None
+            ),
             "ending_type": ending_type,
             "ending_label": format_ending_type_label(ending_type),
             "ending_narrative": ending_narrative,
@@ -839,6 +844,12 @@ class PersistenceMixin:
             inventory=inventory if isinstance(inventory, list) else [],
             player_stats=player_stats if isinstance(player_stats, dict) else {},
             objectives=objectives if isinstance(objectives, list) else [],
+            last_choice_text=(
+                payload.get("last_choice_text")
+                if isinstance(payload.get("last_choice_text"), str)
+                else None
+            ),
+            last_resolved_choice_check=payload.get("last_resolved_choice_check"),
             verbosity=getattr(self, "scene_recap_verbosity", "standard"),
         )
 

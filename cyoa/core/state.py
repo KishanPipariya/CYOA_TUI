@@ -4,7 +4,7 @@ from typing import Any, ClassVar
 
 from cyoa.core.events import Events, bus
 from cyoa.core.mementos import GameStateSnapshot, StoryContextMemento
-from cyoa.core.models import LoreEntry, Objective, StoryNode
+from cyoa.core.models import LoreEntry, Objective, ResolvedChoiceCheck, StoryNode
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,8 @@ class GameState:
         self.story_title: str | None = None
         self.current_scene_id: str | None = None
         self.last_choice_text: str | None = None
+        self.last_choice_submission: str | None = None
+        self.last_resolved_choice_check: ResolvedChoiceCheck | None = None
         self.timeline_metadata: list[dict[str, Any]] = []
         self.objectives: list[Objective] = []
         self.faction_reputation: dict[str, int] = {}
@@ -55,6 +57,8 @@ class GameState:
         self.story_title = None
         self.current_scene_id = None
         self.last_choice_text = None
+        self.last_choice_submission = None
+        self.last_resolved_choice_check = None
         self.timeline_metadata = []
         self.objectives = []
         self.faction_reputation = {}
@@ -185,6 +189,12 @@ class GameState:
             "current_node": self.current_node.model_dump() if self.current_node else None,
             "current_scene_id": self.current_scene_id,
             "last_choice_text": self.last_choice_text,
+            "last_choice_submission": self.last_choice_submission,
+            "last_resolved_choice_check": (
+                self.last_resolved_choice_check.model_dump()
+                if self.last_resolved_choice_check is not None
+                else None
+            ),
             "timeline_metadata": [entry.copy() for entry in self.timeline_metadata],
             "objectives": [objective.model_dump() for objective in self.objectives],
             "faction_reputation": dict(self.faction_reputation),
@@ -211,6 +221,14 @@ class GameState:
         )
         self.last_choice_text = (
             data.get("last_choice_text") if isinstance(data.get("last_choice_text"), str) else None
+        )
+        self.last_choice_submission = (
+            data.get("last_choice_submission")
+            if isinstance(data.get("last_choice_submission"), str)
+            else self.last_choice_text
+        )
+        self.last_resolved_choice_check = self._coerce_resolved_choice_check(
+            data.get("last_resolved_choice_check")
         )
         self.timeline_metadata = self._coerce_timeline_metadata(data.get("timeline_metadata"))
         self.objectives = self._coerce_objectives(data.get("objectives"))
@@ -474,6 +492,14 @@ class GameState:
                 continue
         return entries
 
+    def _coerce_resolved_choice_check(self, value: Any) -> ResolvedChoiceCheck | None:
+        if not isinstance(value, dict):
+            return None
+        try:
+            return ResolvedChoiceCheck(**value)
+        except Exception:
+            return None
+
     def _coerce_snapshot_list(self, value: Any) -> list[GameStateSnapshot]:
         """Normalize saved undo/redo stacks."""
         if not isinstance(value, list):
@@ -525,6 +551,16 @@ class GameState:
             last_choice_text=value.get("last_choice_text")
             if isinstance(value.get("last_choice_text"), str)
             else None,
+            last_choice_submission=value.get("last_choice_submission")
+            if isinstance(value.get("last_choice_submission"), str)
+            else (
+                value.get("last_choice_text")
+                if isinstance(value.get("last_choice_text"), str)
+                else None
+            ),
+            last_resolved_choice_check=self._coerce_resolved_choice_check(
+                value.get("last_resolved_choice_check")
+            ),
             timeline_metadata=self._coerce_timeline_metadata(value.get("timeline_metadata")),
             objectives=self._coerce_objectives(value.get("objectives")),
             faction_reputation=self._coerce_relationships(value.get("faction_reputation")),

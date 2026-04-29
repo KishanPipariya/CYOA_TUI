@@ -183,6 +183,53 @@ def _locked_reason_lines(
     return reason_lines or [reason]
 
 
+def _choice_check_lines(choice: Any) -> list[str]:
+    summary_builder = getattr(choice, "check_summary", None)
+    if callable(summary_builder):
+        summary = summary_builder()
+        if isinstance(summary, list):
+            return [line for line in summary if isinstance(line, str) and line.strip()]
+    return []
+
+
+def _resolved_choice_check_lines(value: Any) -> list[str]:
+    if isinstance(value, dict):
+        summary_builder = value.get("summary_lines")
+        if callable(summary_builder):
+            summary = summary_builder()
+        else:
+            stat = value.get("stat")
+            stat_value = value.get("stat_value")
+            difficulty = value.get("difficulty")
+            roll = value.get("roll")
+            total = value.get("total")
+            success = value.get("success")
+            stakes = value.get("stakes")
+            if not isinstance(stat, str) or not isinstance(success, bool):
+                return []
+            if not all(isinstance(part, int) for part in (stat_value, difficulty, roll, total)):
+                return []
+            outcome = "passed" if success else "failed"
+            lines = [
+                (
+                    f"Last check: {stat.replace('_', ' ')} {outcome} "
+                    f"({roll} + {stat_value} = {total} vs {difficulty})"
+                )
+            ]
+            if isinstance(stakes, str) and stakes.strip():
+                lines.append(f"Stakes: {stakes.strip()}")
+            return lines
+    else:
+        summary_builder = getattr(value, "summary_lines", None)
+        if callable(summary_builder):
+            summary = summary_builder()
+        else:
+            summary = None
+    if isinstance(summary, list):
+        return [line for line in summary if isinstance(line, str) and line.strip()]
+    return []
+
+
 def build_choice_label(
     index: int,
     choice_text: str,
@@ -190,6 +237,7 @@ def build_choice_label(
     *,
     screen_reader_mode: bool = False,
     verbosity: str = "standard",
+    hint_lines: list[str] | None = None,
 ) -> str:
     label = (
         f"{index + 1}. {choice_text}"
@@ -212,6 +260,12 @@ def build_choice_label(
         if screen_reader_mode:
             return f"{label}\nUnavailable:\n{detail_lines}"
         return f"{label}\n[dim]Unavailable:[/dim]\n[dim]{detail_lines}[/dim]"
+    if hint_lines:
+        cleaned_lines = [line.strip() for line in hint_lines if line.strip()]
+        if cleaned_lines:
+            if screen_reader_mode:
+                return f"{label}\n" + "\n".join(cleaned_lines)
+            return f"{label}\n" + "\n".join(f"[dim]{line}[/dim]" for line in cleaned_lines)
     return label
 
 
@@ -347,6 +401,42 @@ def _choice_export_text(text: str) -> str:
     return cleaned
 
 
+def _build_accessible_progress_lines(
+    *,
+    inventory: list[str],
+    player_stats: dict[str, int],
+    objectives: list[Any],
+    last_choice_text: str | None,
+    last_resolved_choice_check: Any,
+    verbosity: str,
+) -> list[str]:
+    objective_texts = _active_objective_texts(objectives)
+    lines = ["Current Progress:"]
+    if verbosity == "minimal":
+        lines.append(
+            "- Stats: "
+            f"Health {player_stats.get('health', 100)} | "
+            f"Gold {player_stats.get('gold', 0)} | "
+            f"Reputation {player_stats.get('reputation', 0)}"
+        )
+        lines.append(f"- Inventory: {len(inventory)} item(s)")
+        lines.append(f"- Objectives: {len(objective_texts)} active")
+        return lines
+
+    lines.append(f"- Health: {player_stats.get('health', 100)}")
+    lines.append(f"- Gold: {player_stats.get('gold', 0)}")
+    lines.append(f"- Reputation: {player_stats.get('reputation', 0)}")
+    lines.append(f"- Inventory: {', '.join(inventory) if inventory else 'Empty'}")
+    lines.append(f"- Objectives: {' | '.join(objective_texts) if objective_texts else 'None'}")
+    if last_choice_text:
+        lines.append(f"- Last choice: {last_choice_text}")
+    lines.extend(f"- {line}" for line in _resolved_choice_check_lines(last_resolved_choice_check))
+    if verbosity == "detailed" and objective_texts:
+        lines.append("Objective Details:")
+        lines.extend(f"- {objective}" for objective in objective_texts)
+    return lines
+
+
 def build_accessible_export(
     *,
     story_title: str | None,
@@ -358,6 +448,8 @@ def build_accessible_export(
     inventory: list[str],
     player_stats: dict[str, int],
     objectives: list[Any],
+    last_choice_text: str | None = None,
+    last_resolved_choice_check: Any = None,
     verbosity: str = "standard",
 ) -> str:
     resolved_verbosity = normalize_verbosity(verbosity)
@@ -393,26 +485,16 @@ def build_accessible_export(
             lines.append(_clean_export_text(text))
         lines.append("")
 
-    objective_texts = _active_objective_texts(objectives)
-    lines.append("Current Progress:")
-    if resolved_verbosity == "minimal":
-        lines.append(
-            "- Stats: "
-            f"Health {player_stats.get('health', 100)} | "
-            f"Gold {player_stats.get('gold', 0)} | "
-            f"Reputation {player_stats.get('reputation', 0)}"
+    lines.extend(
+        _build_accessible_progress_lines(
+            inventory=inventory,
+            player_stats=player_stats,
+            objectives=objectives,
+            last_choice_text=last_choice_text,
+            last_resolved_choice_check=last_resolved_choice_check,
+            verbosity=resolved_verbosity,
         )
-        lines.append(f"- Inventory: {len(inventory)} item(s)")
-        lines.append(f"- Objectives: {len(objective_texts)} active")
-    else:
-        lines.append(f"- Health: {player_stats.get('health', 100)}")
-        lines.append(f"- Gold: {player_stats.get('gold', 0)}")
-        lines.append(f"- Reputation: {player_stats.get('reputation', 0)}")
-        lines.append(f"- Inventory: {', '.join(inventory) if inventory else 'Empty'}")
-        lines.append(f"- Objectives: {' | '.join(objective_texts) if objective_texts else 'None'}")
-        if resolved_verbosity == "detailed" and objective_texts:
-            lines.append("Objective Details:")
-            lines.extend(f"- {objective}" for objective in objective_texts)
+    )
     return "\n".join(lines).strip() + "\n"
 
 
@@ -429,6 +511,7 @@ def build_scene_recap(  # noqa: C901
     locked_choice_verbosity: str = "standard",
     story_title: str | None = None,
     last_choice_text: str | None = None,
+    last_resolved_choice_check: Any = None,
     story_flags: set[str] | list[str] | None = None,
     items_gained: list[str] | None = None,
     items_lost: list[str] | None = None,
@@ -446,6 +529,9 @@ def build_scene_recap(  # noqa: C901
         recap_lines[0] = f"{story_title} | Turn {turn_count}"
     if last_choice_text and (screen_reader_mode or resolved_recap_verbosity == "detailed"):
         recap_lines.append(f"Last choice: {last_choice_text}")
+    resolved_check_lines = _resolved_choice_check_lines(last_resolved_choice_check)
+    if resolved_check_lines and (screen_reader_mode or resolved_recap_verbosity == "detailed"):
+        recap_lines.extend(resolved_check_lines)
 
     recap_lines.extend(
         [
@@ -484,7 +570,15 @@ def build_scene_recap(  # noqa: C901
                 else:
                     recap_lines.append(f"{index}. {choice_text} (Unavailable: {reason_lines[0]})")
             else:
-                recap_lines.append(f"{index}. {choice_text}")
+                check_lines = _choice_check_lines(choice)
+                if check_lines and (screen_reader_mode or resolved_recap_verbosity == "detailed"):
+                    recap_lines.append(f"{index}. {choice_text}")
+                    for line in check_lines:
+                        recap_lines.append(f"   {line}")
+                elif check_lines:
+                    recap_lines.append(f"{index}. {choice_text} ({check_lines[0]})")
+                else:
+                    recap_lines.append(f"{index}. {choice_text}")
     else:
         recap_lines.append("No further choices. This scene is an ending.")
 
@@ -600,6 +694,7 @@ def build_world_state_summary(  # noqa: C901
     npc_affinity: dict[str, int],
     story_flags: set[str] | list[str] | None,
     last_choice_text: str | None = None,
+    last_resolved_choice_check: Any = None,
     current_scene_id: str | None = None,
 ) -> str:
     def _normalize_objective(objective: Any) -> tuple[str, str] | None:
@@ -621,6 +716,8 @@ def build_world_state_summary(  # noqa: C901
         lines.append(f"- Scene ID: {current_scene_id}")
     if last_choice_text:
         lines.append(f"- Last choice: {last_choice_text}")
+    for detail in _resolved_choice_check_lines(last_resolved_choice_check):
+        lines.append(f"- {detail}")
 
     lines.extend(
         [
@@ -998,6 +1095,8 @@ def build_run_archive_summary(archive_entries: list[Any]) -> str:
         last_choice_text = entry.get("last_choice_text")
         if isinstance(last_choice_text, str) and last_choice_text.strip():
             lines.append(f"- Final choice: {last_choice_text.strip()}")
+        resolved_check_lines = _resolved_choice_check_lines(entry.get("last_resolved_choice_check"))
+        lines.extend(f"- {detail}" for detail in resolved_check_lines)
         divergence_points = entry.get("divergence_points")
         if isinstance(divergence_points, list) and divergence_points:
             turns = [f"Turn {turn}" for turn in divergence_points if isinstance(turn, int)]

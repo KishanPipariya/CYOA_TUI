@@ -288,6 +288,7 @@ class RenderingMixin:
                     disabled_reason,
                     screen_reader_mode=host.screen_reader_mode,
                     verbosity=getattr(host, "locked_choice_verbosity", "standard"),
+                    hint_lines=choice.check_summary() if disabled_reason is None else None,
                 )
                 btn = Button(
                     label, id=btn_id, variant="primary", disabled=disabled_reason is not None

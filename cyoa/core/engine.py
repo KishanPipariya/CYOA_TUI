@@ -1,10 +1,11 @@
 import asyncio
 import logging
+import random
 import uuid
 from typing import Any
 
 from cyoa.core.events import Events, bus
-from cyoa.core.models import Choice, LoreEntry, Objective, StoryNode
+from cyoa.core.models import Choice, LoreEntry, Objective, ResolvedChoiceCheck, StoryNode
 from cyoa.core.observability import (
     EngineObservedSession,
     record_provider_cache_state_restore,
@@ -154,22 +155,48 @@ class StoryEngine:
 
             self._emit_runtime_event(Events.CHOICE_MADE, choice_text=choice_text)
 
+            choice_submission = choice_text
+            choice_definition = self._find_choice_definition(choice_text)
+            resolved_check = self._resolve_choice_check(choice_definition)
+            self.state.last_resolved_choice_check = (
+                resolved_check.model_copy() if resolved_check is not None else None
+            )
+            if resolved_check is not None:
+                self._emit_choice_check_feedback(resolved_check)
+                choice_submission = self._format_choice_submission(choice_text, resolved_check)
+
             # Update the LLM context (history and state)
             self.story_context.add_turn(
                 self.state.current_node.narrative,
-                choice_text,
+                choice_submission,
                 self.state.inventory,
                 self.state.player_stats,
             )
 
             self.state.last_choice_text = choice_text
+            self.state.last_choice_submission = choice_submission
             self.state.turn_count += 1
-            await self._generate_next(choice_text=choice_text)
+            if choice_submission == choice_text:
+                await self._generate_next(choice_text=choice_text)
+            else:
+                await self._generate_next(
+                    choice_text=choice_submission,
+                    persisted_choice_text=choice_text,
+                )
 
     async def retry(self) -> None:
         """Re-run generation for the current context without advancing the turn."""
         with EngineObservedSession("retry"):
-            await self._generate_next(choice_text=self.state.last_choice_text)
+            choice_submission = self.state.last_choice_submission or self.state.last_choice_text
+            if choice_submission is None:
+                await self._generate_next()
+            elif self.state.last_choice_submission and self.state.last_choice_text:
+                await self._generate_next(
+                    choice_text=choice_submission,
+                    persisted_choice_text=self.state.last_choice_text,
+                )
+            else:
+                await self._generate_next(choice_text=choice_submission)
 
     async def _prepare_generation_context(self) -> None:
         """Refresh retrieved memories and trigger non-blocking summarization when needed."""
@@ -271,7 +298,12 @@ class StoryEngine:
         if node.is_ending:
             self._emit_runtime_event(Events.ENDING_REACHED, node=node)
 
-    async def _generate_next(self, choice_text: str | None = None) -> None:
+    async def _generate_next(
+        self,
+        choice_text: str | None = None,
+        *,
+        persisted_choice_text: str | None = None,
+    ) -> None:
         """Orchestrate the generation of the next story node, including RAG and DB saving."""
         if not self.story_context:
             return
@@ -286,7 +318,10 @@ class StoryEngine:
         try:
             with EngineObservedSession("process_turn") as session:
                 node = await self._resolve_next_node(choice_text, on_token, session)
-                await self._persist_generated_node(node, choice_text)
+                await self._persist_generated_node(
+                    node,
+                    persisted_choice_text if persisted_choice_text is not None else choice_text,
+                )
                 self._emit_generation_events(node)
                 self._transition_phase(
                     EnginePhase.READY, "generation_completed", scene_id=self.state.current_scene_id
@@ -461,6 +496,8 @@ class StoryEngine:
         target_scene = history["scenes"][idx]
         self.state.current_scene_id = target_scene["id"]
         self.state.last_choice_text = history["choices"][idx - 1] if idx > 0 else None
+        self.state.last_choice_submission = self.state.last_choice_text
+        self.state.last_resolved_choice_check = None
         self.state.turn_count = idx + 1
         self.state.inventory = list(target_scene.get("inventory", []))
         self.state.player_stats = dict(
@@ -578,3 +615,65 @@ class StoryEngine:
             story_flags=self.state.story_flags,
             lore_entries=self.state.lore_entries,
         )
+
+    def _find_choice_definition(self, choice_text: str) -> Choice | None:
+        current_node = self.state.current_node
+        if current_node is None:
+            return None
+        for choice in current_node.choices:
+            if choice.text == choice_text:
+                return choice
+        return None
+
+    def _resolve_choice_check(self, choice: Choice | None) -> ResolvedChoiceCheck | None:
+        if choice is None or choice.check is None:
+            return None
+
+        stat_key = choice.check.stat
+        stat_value = self.state.player_stats.get(stat_key, 0)
+        roll = random.randint(1, 20)
+        total = stat_value + roll
+        return ResolvedChoiceCheck(
+            stat=stat_key,
+            stat_value=stat_value,
+            difficulty=choice.check.difficulty,
+            roll=roll,
+            total=total,
+            success=total >= choice.check.difficulty,
+            stakes=choice.check.stakes,
+        )
+
+    def _emit_choice_check_feedback(self, resolved: ResolvedChoiceCheck) -> None:
+        stat_label = resolved.stat_label()
+        self._emit_runtime_event(
+            Events.STATUS_MESSAGE,
+            message=f"🎲 Testing {stat_label} against difficulty {resolved.difficulty}...",
+        )
+        outcome = "passed" if resolved.success else "failed"
+        message = (
+            f"{'✅' if resolved.success else '⚠️'} {stat_label} check {outcome}: "
+            f"{resolved.roll} + {resolved.stat_value} = {resolved.total} vs {resolved.difficulty}"
+        )
+        if resolved.stakes and not resolved.success:
+            message = f"{message}. Stakes triggered: {resolved.stakes}"
+        elif resolved.stakes and resolved.success:
+            message = f"{message}. Stakes avoided: {resolved.stakes}"
+        self._emit_runtime_event(Events.STATUS_MESSAGE, message=message)
+
+    @staticmethod
+    def _format_choice_submission(choice_text: str, resolved: ResolvedChoiceCheck) -> str:
+        outcome = "success" if resolved.success else "failure"
+        lines = [
+            choice_text,
+            "",
+            "[Resolved skill check]",
+            f"Stat tested: {resolved.stat_label()}",
+            f"Current stat value: {resolved.stat_value}",
+            f"Roll: {resolved.roll}",
+            f"Total: {resolved.total}",
+            f"Difficulty: {resolved.difficulty}",
+            f"Outcome: {outcome}",
+        ]
+        if resolved.stakes:
+            lines.append(f"Stakes: {resolved.stakes}")
+        return "\n".join(lines)

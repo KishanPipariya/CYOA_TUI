@@ -4,6 +4,8 @@ Provide 2-3 choices for what they can do next.
 You MUST provide a creative 'title' for this new adventure in the JSON response.
 Manage the player's inventory using 'items_gained' and 'items_lost'. Track when they acquire or lose items. Create context-sensitive choices if they possess specific items!
 Manage the player's stats (health, gold, reputation) using 'stat_updates'. Provide stat changes (e.g. {"health": -10, "gold": 50}) when the narrative dictates it. Low health should disable risky choices, high reputation unlocks dialogue.
+Use optional choice 'check' objects for risky or uncertain actions that should stay available. Populate 'stat', 'difficulty', and 'stakes' when a choice should resolve through a roll instead of being locked.
+If the latest user choice includes a '[Resolved skill check]' block, treat that result as final canon for the turn and reflect the success or failure in the next scene.
 Track discoverable lore using 'lore_entries_updated'. Add concise codex entries for named NPCs, locations, factions, and important items when the scene reveals them or clarifies who or what they are.
 When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true and provide an empty choices list.
 Ensure your output is strictly valid JSON matching the requested schema.
