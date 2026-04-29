@@ -716,6 +716,25 @@ def build_help_text(
 
 ---
 
+# Play Loop
+
+- Use number keys or arrow keys to choose, then press Enter to confirm.
+- Branch rewinds from an older turn without deleting manual saves or bookmarks.
+- Save and load manage full runs, while bookmarks create fast named restore points.
+- Export writes markdown, accessible markdown, and JSON copies of the current adventure.
+- Generation preset cycling and directive editing let you tune the active run mid-session.
+
+---
+
+# Panels And Reference Views
+
+- Help, Settings, and the command palette expose the full action surface without leaving the keyboard.
+- Scene Recap summarizes the current turn, Character shows persistent state, and Codex lists discovered lore.
+- Journal Summary and Story Map Summary provide text-first review modes for long sessions.
+- Repeat Status and notification history make transient status messages reviewable.
+
+---
+
 # Accessibility
 
 - Screen Reader Friendly mode removes ASCII art, uses plainer labels, and keeps the latest status message in the status panel.
@@ -737,6 +756,25 @@ def build_help_text(
 |:---:|:-------|
 {key_rows}
 | [b][reverse]ENTER[/reverse][/b] | Confirm focused choice |
+
+---
+
+# 🧭 Adventure Flow
+
+- Choose with number keys or arrow keys, then confirm with Enter.
+- Branch lets you revisit an earlier scene without deleting your manual saves or bookmarks.
+- Save and load manage full runs; bookmarks give you fast named checkpoints.
+- Export writes markdown, accessible markdown, and JSON copies of the current story.
+- `g` cycles generation presets and `x` edits run-specific directives while you play.
+
+---
+
+# 🗂️ Reference Views
+
+- `h`, `o`, and the command palette keep help, settings, and action discovery close at hand.
+- Recap, Character, and Codex help you review the current scene, persistent stats, and discovered lore.
+- Journal Summary and Story Map Summary turn long runs into readable linear summaries.
+- `n` repeats the latest status and notification history keeps recent messages reviewable.
 
 ---
 

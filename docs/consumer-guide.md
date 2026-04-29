@@ -46,6 +46,22 @@ uv sync --extra local-llm
 uv run cyoa-tui
 ```
 
+## Quick Start Recipes
+
+Use one of these depending on how you want to play:
+
+```bash
+uv run cyoa-tui --runtime-preset mock-smoke
+uv run cyoa-tui --runtime-preset local-fast
+uv run cyoa-tui --runtime-preset local-quality
+```
+
+- `mock-smoke` starts the lightweight demo runtime.
+- `local-fast` prefers the local llama.cpp provider with a balanced preset.
+- `local-quality` prefers the local llama.cpp provider with a more deliberate preset.
+
+If no working local model is configured, the app falls back safely instead of failing during normal startup.
+
 ## Startup Accessibility Flags
 
 If you need an accessible startup mode before the full UI appears, launch with one or more of these flags:
@@ -57,6 +73,14 @@ uv run cyoa-tui --reduced-motion
 ```
 
 You can combine them. These flags apply immediately for the current session and do not change your saved config unless you later save the same values from Settings.
+
+## Launch Options You May Actually Use
+
+- `--runtime-preset ...` applies a saved startup profile such as `mock-smoke`, `local-fast`, or `local-quality`.
+- `--theme ...` starts with a specific story theme from the installed theme pack.
+- `--prompt ...` bypasses the theme prompt and starts from your custom opening prompt.
+- `--preset ...` selects the generation preset directly at launch.
+- `--model /path/to/model.gguf` points the local runtime at a specific GGUF file for this launch.
 
 ## First Launch
 
@@ -74,33 +98,38 @@ Press `o` in the app to open Settings.
 Available settings include:
 
 - runtime provider
+- runtime preset and generation preset
 - local model path
 - theme pack
+- customizable keybindings
 - dark or light mode
 - typewriter on or off
 - typewriter speed
+- notification, recap, runtime, and locked-choice verbosity
 - diagnostics toggle
 - backend test
 - reveal save folder
 - reset settings to safe defaults
 
-Dark mode and typewriter changes apply immediately. Provider, model path, theme pack, and diagnostics apply after restart.
+Dark mode and typewriter changes apply immediately. Provider, runtime profile, model path, theme pack, keybindings, and diagnostics are reflected by the app once the new settings are applied or the app is restarted, depending on the control.
 
 ## Controls
 
-- `1-4`: choose an option
-- `up` / `down`: move between choices
-- `enter`: confirm the focused choice
-- `space`: skip typewriter animation
-- `t`: toggle typewriter
-- `v`: cycle typewriter speed
-- `o`: open settings
-- `s` / `l`: save or load
-- `u` / `y`: undo or redo
-- `j` / `m`: toggle journal or story map
-- `i`: open a structured recap of the current scene, choices, and progress
-- `e`: export story
-- `q`: quit
+- `1-4`, `up` / `down`, and `enter` handle your main choice selection loop.
+- `space` skips the current typewriter animation, while `t` and `v` toggle or speed-cycle narrated text.
+- `h` opens help and `ctrl+shift+p` opens the command palette for searchable action discovery.
+- `o` opens Settings, where you can change provider, theme, keybindings, verbosity, and accessibility options.
+- `j` and `m` toggle the journal and story map side panels.
+- `i` opens the scene recap, `c` opens the character sheet, and `z` opens the lore codex.
+- `[` opens the journal summary and `]` opens the story-map summary in a text-first review format.
+- `n` repeats the latest status update and `shift+n` opens notification history.
+- `s` saves, `l` loads, and `e` exports the current run as markdown, accessible markdown, and JSON.
+- `u` and `y` undo or redo the latest turn change.
+- `b` branches from a past scene, `k` creates a bookmark, and `p` restores a bookmark.
+- `g` cycles the active generation preset and `x` edits comma-separated directives for the current run.
+- `r` restarts the adventure and `q` quits with confirmation.
+
+All keybindings can be changed in Settings. The footer hints, help sheet, and command palette follow your saved bindings.
 
 ## Where Your Data Lives
 
@@ -127,7 +156,7 @@ The app stores your files in standard per-user locations instead of the reposito
 
 ### The app starts in demo mode
 
-That usually means no usable local model is configured. Open Settings with `o`, switch to `Local Model`, and set a valid `.gguf` path, or use the first-run download flow.
+That usually means no usable local model is configured. Open Settings with `o`, switch to the local model configuration, and set a valid `.gguf` path, use the first-run download flow, or start explicitly with `--runtime-preset mock-smoke`.
 
 ### The terminal layout looks cramped
 

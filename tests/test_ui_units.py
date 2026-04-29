@@ -50,6 +50,7 @@ from cyoa.ui.mixins.typewriter import TypewriterMixin
 from cyoa.ui.presenters import (
     build_accessible_export,
     build_choice_label,
+    build_help_text,
     build_journal_summary,
     build_lore_codex_summary,
     build_scene_recap,
@@ -894,6 +895,25 @@ def test_command_palette_search_matches_labels_actions_and_fuzzy_queries() -> No
     fuzzy_results = search_command_palette(entries, "stngs")
     assert fuzzy_results
     assert fuzzy_results[0].id == "show_settings"
+
+
+def test_help_text_covers_branching_exports_and_review_panels() -> None:
+    help_text = build_help_text(
+        screen_reader_mode=False,
+        current_bindings={"show_help": "f1", "show_settings": "f2"},
+    )
+    screen_reader_help = build_help_text(
+        screen_reader_mode=True,
+        current_bindings={"show_help": "f1", "show_settings": "f2"},
+    )
+
+    assert "Adventure Flow" in help_text
+    assert "Branch lets you revisit an earlier scene" in help_text
+    assert "Export writes markdown, accessible markdown, and JSON copies" in help_text
+    assert "Journal Summary and Story Map Summary" in help_text
+    assert "Play Loop" in screen_reader_help
+    assert "Repeat Status and notification history" in screen_reader_help
+    assert "Key bindings can be customized in Settings." in screen_reader_help
 
 
 def test_sync_narrative_replaces_finalized_streamed_turn():

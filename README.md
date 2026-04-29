@@ -17,6 +17,21 @@ uv sync
 uv run cyoa-tui
 ```
 
+If you want local GGUF support from source, install the optional extra first:
+
+```bash
+uv sync --extra local-llm
+uv run cyoa-tui --runtime-preset local-fast
+```
+
+Useful startup profiles:
+
+```bash
+uv run cyoa-tui --runtime-preset mock-smoke
+uv run cyoa-tui --runtime-preset local-fast
+uv run cyoa-tui --runtime-preset local-quality
+```
+
 You can force critical accessibility modes before the full UI renders:
 
 ```bash
@@ -37,11 +52,14 @@ If you already have a packaged release build, unpack it and run `./cyoa-tui` fro
 
 - streams narrative turns in a terminal-first UI
 - presents branching choices with keyboard-first navigation
-- supports saves, load, undo/redo, bookmarks, exports, journal, and story map
+- supports saves, load, undo/redo, restart, bookmarks, exports, journal, and story map
+- lets you branch from past scenes without deleting your current save history
+- includes recap, character sheet, lore codex, command palette, and notification review flows
 - runs safely on fresh machines without forcing a local model at startup
+- supports runtime presets, startup accessibility flags, and customizable keybindings
 - stores config, saves, models, and logs in standard user app-data directories
 
-Press `o` in the app to open Settings for provider choice, local model path, theme pack, typewriter speed, and diagnostics.
+Press `h` for the in-app help overlay, `ctrl+shift+p` for the command palette, and `o` for Settings. Settings covers provider choice, local model path, theme pack, keybindings, verbosity, typewriter behavior, and diagnostics.
 
 ## Consumer Docs
 
