@@ -778,6 +778,7 @@ class CYOAApp(
             inventory=state.inventory,
             player_stats=state.player_stats,
             objectives=state.objectives,
+            companions=state.companions,
             screen_reader_mode=self.screen_reader_mode,
             turn_count=state.turn_count,
             scene_recap_verbosity=self.scene_recap_verbosity,
@@ -794,6 +795,7 @@ class CYOAApp(
             npc_affinity_updates=node.npc_affinity_updates,
             story_flags_set=node.story_flags_set,
             story_flags_cleared=node.story_flags_cleared,
+            companions_updated=node.companions_updated,
         )
 
     def get_world_state_text(self) -> str:
@@ -804,6 +806,7 @@ class CYOAApp(
                 player_stats={},
                 inventory=[],
                 objectives=[],
+                companions=[],
                 faction_reputation={},
                 npc_affinity={},
                 story_flags=[],
@@ -816,6 +819,7 @@ class CYOAApp(
             player_stats=state.player_stats,
             inventory=state.inventory,
             objectives=state.objectives,
+            companions=state.companions,
             faction_reputation=state.faction_reputation,
             npc_affinity=state.npc_affinity,
             story_flags=state.story_flags,

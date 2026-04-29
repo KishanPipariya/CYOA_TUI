@@ -281,6 +281,7 @@ class RenderingMixin:
                         host.engine.state.inventory,
                         host.engine.state.player_stats,
                         host.engine.state.story_flags,
+                        getattr(host.engine.state, "companions", []),
                     )
                 label = build_choice_label(
                     i,
@@ -330,6 +331,7 @@ class RenderingMixin:
             host.engine.state.inventory,
             host.engine.state.player_stats,
             host.engine.state.story_flags,
+            getattr(host.engine.state, "companions", []),
         )
         if disabled_reason:
             app.notify(disabled_reason, severity="warning", timeout=2)

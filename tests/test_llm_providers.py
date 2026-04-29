@@ -41,23 +41,25 @@ class _AppendComponent(PromptComponent):
     def transform(self, context, messages):
         return messages + [{"role": self.role, "content": self.content}]
 
+
 # ── LlamaCppProvider Tests ───────────────────────────────────────────────────
+
 
 @pytest.fixture
 def mock_llama():
     with patch("cyoa.llm.providers.Llama") as mock:
         instance = mock.return_value
-        instance.tokenize.return_value = [1, 2, 3] # 3 tokens
+        instance.tokenize.return_value = [1, 2, 3]  # 3 tokens
 
         def mock_cc(*args, **kwargs):
             if kwargs.get("stream"):
                 return [{"choices": [{"delta": {"content": '{"narrative": "Test"}'}}]}]
-            return {
-                "choices": [{"message": {"content": '{"narrative": "Test"}'}}]
-            }
+            return {"choices": [{"message": {"content": '{"narrative": "Test"}'}}]}
+
         instance.create_chat_completion.side_effect = mock_cc
 
         yield mock
+
 
 def test_llama_cpp_token_count(mock_llama):
     provider = LlamaCppProvider(model_path="dummy.gguf")
@@ -76,7 +78,9 @@ def test_mock_provider_count_tokens_in_messages_uses_base_helper() -> None:
 
     provider = MockProvider()
     messages = [{"role": "user", "content": "abcd1234"}]
-    assert provider.count_tokens_in_messages(messages) == (len("user") // 4) + (len("abcd1234") // 4)
+    assert provider.count_tokens_in_messages(messages) == (len("user") // 4) + (
+        len("abcd1234") // 4
+    )
 
 
 def test_llama_cpp_token_count_returns_zero_for_empty_text(mock_llama) -> None:
@@ -127,7 +131,9 @@ def test_llama_cpp_build_json_repair_messages_appends_instruction(mock_llama) ->
     assert '"required":["narrative"]' in repaired[-1]["content"]
 
 
-def test_llama_cpp_stream_completion_retries_without_response_format_on_runtime_error(mock_llama) -> None:
+def test_llama_cpp_stream_completion_retries_without_response_format_on_runtime_error(
+    mock_llama,
+) -> None:
     provider = LlamaCppProvider(model_path="dummy.gguf")
     cancel_event = threading.Event()
     schema = {"type": "object"}
@@ -170,6 +176,7 @@ def test_provider_capabilities_are_normalized(mock_llama) -> None:
     assert llama.capabilities().streaming_json is True
     assert mock.capabilities().structured_json is True
 
+
 @pytest.mark.asyncio
 async def test_llama_cpp_generate_json(mock_llama):
     provider = LlamaCppProvider(model_path="dummy.gguf")
@@ -183,15 +190,16 @@ async def test_llama_cpp_generate_json(mock_llama):
     # In generate_json, it actually calls stream and joins
     mock_llama.return_value.create_chat_completion.assert_called()
 
+
 @pytest.mark.asyncio
 async def test_llama_cpp_stream_json(mock_llama):
     provider = LlamaCppProvider(model_path="dummy.gguf")
 
     # Mock streaming output
     mock_stream = [
-        {"choices": [{"delta": {"content": '{"narr'}}] },
-        {"choices": [{"delta": {"content": 'ative": "Test"'}}] },
-        {"choices": [{"delta": {"content": "}"}}] }
+        {"choices": [{"delta": {"content": '{"narr'}}]},
+        {"choices": [{"delta": {"content": 'ative": "Test"'}}]},
+        {"choices": [{"delta": {"content": "}"}}]},
     ]
     mock_llama.return_value.create_chat_completion.side_effect = None
     mock_llama.return_value.create_chat_completion.return_value = mock_stream
@@ -207,12 +215,16 @@ async def test_llama_cpp_stream_json(mock_llama):
 @pytest.mark.asyncio
 async def test_llama_cpp_generate_text(mock_llama) -> None:
     provider = LlamaCppProvider(model_path="dummy.gguf")
-    text = await provider.generate_text([{"role": "user", "content": "hi"}], max_tokens=10, temperature=0.2)
+    text = await provider.generate_text(
+        [{"role": "user", "content": "hi"}], max_tokens=10, temperature=0.2
+    )
     assert text == '{"narrative": "Test"}'
 
 
 @pytest.mark.asyncio
-async def test_llama_cpp_streaming_uses_daemon_thread(mock_llama, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_llama_cpp_streaming_uses_daemon_thread(
+    mock_llama, monkeypatch: pytest.MonkeyPatch
+) -> None:
     captured: dict[str, object] = {}
 
     class FakeThread:
@@ -319,6 +331,7 @@ async def test_llama_cpp_close_waits_for_cancelled_stream_cleanup(mock_llama) ->
 
     assert not hasattr(provider, "llm")
 
+
 # ── MockProvider Tests ───────────────────────────────────────────────────────
 
 
@@ -327,7 +340,9 @@ async def test_mock_provider_generate_text_summary_branch() -> None:
     from cyoa.llm.providers import MockProvider
 
     provider = MockProvider()
-    result = await provider.generate_text([{"role": "user", "content": "Please summarize this arc"}])
+    result = await provider.generate_text(
+        [{"role": "user", "content": "Please summarize this arc"}]
+    )
     assert "digital mists" in result
 
 
@@ -473,6 +488,26 @@ def test_player_sheet_component_renders_empty_inventory_and_stats() -> None:
     messages = PlayerSheetComponent().transform(context, [])
     assert "Current Inventory: Empty" in messages[0]["content"]
     assert '"gold": 7' in messages[0]["content"]
+
+
+def test_player_sheet_component_renders_companion_context() -> None:
+    context = SimpleNamespace(
+        inventory=["Map"],
+        player_stats={"gold": 7},
+        companions=[
+            SimpleNamespace(
+                name="Mira",
+                status="active",
+                affinity=4,
+                effect="Warns about ambushes.",
+            )
+        ],
+    )
+    messages = PlayerSheetComponent().transform(context, [])
+
+    assert "Companions:" in messages[0]["content"]
+    assert "Mira (active, affinity 4)" in messages[0]["content"]
+    assert "Effect: Warns about ambushes." in messages[0]["content"]
 
 
 def test_memory_component_formats_multiple_memories_and_noop_on_empty() -> None:

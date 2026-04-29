@@ -7,6 +7,7 @@ Manage the player's stats (health, gold, reputation) using 'stat_updates'. Provi
 Use optional choice 'check' objects for risky or uncertain actions that should stay available. Populate 'stat', 'difficulty', and 'stakes' when a choice should resolve through a roll instead of being locked.
 If the latest user choice includes a '[Resolved skill check]' block, treat that result as final canon for the turn and reflect the success or failure in the next scene.
 Track discoverable lore using 'lore_entries_updated'. Add concise codex entries for named NPCs, locations, factions, and important items when the scene reveals them or clarifies who or what they are.
+Use 'companions_updated' when recruitable allies join, become active, are lost, or change affinity/effect.
 When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true and provide an empty choices list.
 Ensure your output is strictly valid JSON matching the requested schema.
 
@@ -18,6 +19,12 @@ Current Inventory: Empty
 {% endif %}
 {% if stats %}
 Current Stats: {{ stats | tojson }}
+{% endif %}
+{% if companions %}
+Active Companions:
+{% for companion in companions if companion.status == "active" %}
+- {{ companion.name }} (affinity {{ companion.affinity }}){% if companion.effect %}: {{ companion.effect }}{% endif %}
+{% endfor %}
 {% endif %}
 </player_sheet>
 {% if memories %}

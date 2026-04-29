@@ -18,7 +18,15 @@ from cyoa.core.constants import (
     DEFAULT_LLM_SUMMARY_MAX_TOKENS,
     DEFAULT_LLM_SUMMARY_THRESHOLD,
 )
-from cyoa.core.models import Choice, ExtractionNode, LoreEntry, NarratorNode, Objective, StoryNode
+from cyoa.core.models import (
+    Choice,
+    Companion,
+    ExtractionNode,
+    LoreEntry,
+    NarratorNode,
+    Objective,
+    StoryNode,
+)
 from cyoa.core.observability import (
     EngineObservedSession,
     record_fallback_node,
@@ -118,6 +126,7 @@ class StoryContext:
         self.npc_affinity: dict[str, int] = {}
         self.story_flags: set[str] = set()
         self.lore_entries: list[LoreEntry] = []
+        self.companions: list[Companion] = []
         # Hierarchy tracking
         self._scene_turn_count: int = 0
         self._chapter_scene_count: int = 0
@@ -224,6 +233,7 @@ class StoryContext:
         npc_affinity: dict[str, int] | None = None,
         story_flags: set[str] | None = None,
         lore_entries: list[LoreEntry] | None = None,
+        companions: list[Companion] | None = None,
     ) -> None:
         """Keep prompt state aligned with the engine's long-lived world state."""
         if inventory is not None:
@@ -240,6 +250,8 @@ class StoryContext:
             self.story_flags = set(story_flags)
         if lore_entries is not None:
             self.lore_entries = [entry.model_copy() for entry in lore_entries]
+        if companions is not None:
+            self.companions = [companion.model_copy() for companion in companions]
 
     def set_hierarchical_summary(
         self,
@@ -313,6 +325,7 @@ class StoryContext:
         new_ctx.npc_affinity = dict(self.npc_affinity)
         new_ctx.story_flags = set(self.story_flags)
         new_ctx.lore_entries = [entry.model_copy() for entry in self.lore_entries]
+        new_ctx.companions = [companion.model_copy() for companion in self.companions]
         new_ctx._scene_turn_count = self._scene_turn_count
         new_ctx._chapter_scene_count = self._chapter_scene_count
         # Reuse the same pipeline (shallow copy of list is fine if components are stateless or handled)
@@ -688,6 +701,7 @@ class ModelBroker:
             story_flags_set=extraction_node.story_flags_set,
             story_flags_cleared=extraction_node.story_flags_cleared,
             lore_entries_updated=extraction_node.lore_entries_updated,
+            companions_updated=extraction_node.companions_updated,
         )
 
     async def _run_unified_generation(

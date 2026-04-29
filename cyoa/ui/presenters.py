@@ -505,6 +505,7 @@ def build_scene_recap(  # noqa: C901
     inventory: list[str],
     player_stats: dict[str, int],
     objectives: list[Any],
+    companions: list[Any] | None,
     screen_reader_mode: bool,
     turn_count: int,
     scene_recap_verbosity: str = "standard",
@@ -521,6 +522,7 @@ def build_scene_recap(  # noqa: C901
     npc_affinity_updates: dict[str, int] | None = None,
     story_flags_set: list[str] | None = None,
     story_flags_cleared: list[str] | None = None,
+    companions_updated: list[Any] | None = None,
 ) -> str:
     resolved_recap_verbosity = normalize_verbosity(scene_recap_verbosity)
     resolved_locked_choice_verbosity = normalize_verbosity(locked_choice_verbosity)
@@ -554,6 +556,7 @@ def build_scene_recap(  # noqa: C901
                     inventory,
                     player_stats,
                     normalized_flags,
+                    companions,
                 )
             if availability_reason:
                 reason_lines = _locked_reason_lines(
@@ -593,6 +596,22 @@ def build_scene_recap(  # noqa: C901
     gold = player_stats.get("gold", 0)
     reputation = player_stats.get("reputation", 0)
     inventory_text = ", ".join(inventory) if inventory else "Empty"
+    active_companions: list[str] = []
+    for companion in companions or []:
+        if isinstance(companion, dict):
+            name = companion.get("name")
+            status = companion.get("status")
+            effect = companion.get("effect")
+        else:
+            name = getattr(companion, "name", None)
+            status = getattr(companion, "status", None)
+            effect = getattr(companion, "effect", None)
+        if not isinstance(name, str) or not name.strip() or status != "active":
+            continue
+        if isinstance(effect, str) and effect.strip():
+            active_companions.append(f"{name.strip()} ({effect.strip()})")
+        else:
+            active_companions.append(name.strip())
 
     recap_lines.extend(["", "## Progress"])
     if resolved_recap_verbosity == "minimal":
@@ -601,6 +620,7 @@ def build_scene_recap(  # noqa: C901
                 f"- Stats: Health {health} | Gold {gold} | Reputation {reputation}",
                 f"- Inventory: {len(inventory)} item(s)",
                 f"- Objectives: {len(active_objectives)} active",
+                f"- Companions: {len(active_companions)} active",
             ]
         )
     elif screen_reader_mode or resolved_recap_verbosity == "detailed":
@@ -610,6 +630,8 @@ def build_scene_recap(  # noqa: C901
                 f"- Gold: {gold}",
                 f"- Reputation: {reputation}",
                 f"- Inventory: {inventory_text}",
+                "- Active companions: "
+                + (", ".join(active_companions) if active_companions else "None"),
             ]
         )
     else:
@@ -617,6 +639,8 @@ def build_scene_recap(  # noqa: C901
             [
                 f"- Stats: Health {health} | Gold {gold} | Reputation {reputation}",
                 f"- Inventory: {inventory_text}",
+                "- Active companions: "
+                + (", ".join(active_companions) if active_companions else "None"),
             ]
         )
 
@@ -672,6 +696,27 @@ def build_scene_recap(  # noqa: C901
         recent_changes.append("Flags set: " + ", ".join(story_flags_set))
     if story_flags_cleared:
         recent_changes.append("Flags cleared: " + ", ".join(story_flags_cleared))
+    if companions_updated:
+        companion_parts: list[str] = []
+        for companion in companions_updated:
+            if isinstance(companion, dict):
+                name = companion.get("name")
+                status = companion.get("status", "available")
+                affinity = companion.get("affinity", 0)
+                effect = companion.get("effect")
+            else:
+                name = getattr(companion, "name", None)
+                status = getattr(companion, "status", "available")
+                affinity = getattr(companion, "affinity", 0)
+                effect = getattr(companion, "effect", None)
+            if not isinstance(name, str) or not name.strip():
+                continue
+            detail = f"{name.strip()} ({status}, affinity {affinity})"
+            if isinstance(effect, str) and effect.strip():
+                detail = f"{detail}: {effect.strip()}"
+            companion_parts.append(detail)
+        if companion_parts:
+            recent_changes.append("Companion updates: " + "; ".join(companion_parts))
 
     if resolved_recap_verbosity != "minimal":
         recap_lines.extend(["", "## Recent Changes"])
@@ -690,6 +735,7 @@ def build_world_state_summary(  # noqa: C901
     player_stats: dict[str, int],
     inventory: list[str],
     objectives: list[Any],
+    companions: list[Any] | None,
     faction_reputation: dict[str, int],
     npc_affinity: dict[str, int],
     story_flags: set[str] | list[str] | None,
@@ -708,6 +754,29 @@ def build_world_state_summary(  # noqa: C901
             return None
         normalized_status = status if isinstance(status, str) and status.strip() else "active"
         return text.strip(), normalized_status.strip().lower()
+
+    def _normalize_companion(companion: Any) -> dict[str, Any] | None:
+        if isinstance(companion, dict):
+            name = companion.get("name")
+            status = companion.get("status", "available")
+            affinity = companion.get("affinity", 0)
+            summary = companion.get("summary")
+            effect = companion.get("effect")
+        else:
+            name = getattr(companion, "name", None)
+            status = getattr(companion, "status", "available")
+            affinity = getattr(companion, "affinity", 0)
+            summary = getattr(companion, "summary", None)
+            effect = getattr(companion, "effect", None)
+        if not isinstance(name, str) or not name.strip():
+            return None
+        return {
+            "name": name.strip(),
+            "status": status if isinstance(status, str) and status.strip() else "available",
+            "affinity": affinity if isinstance(affinity, int) else 0,
+            "summary": summary.strip() if isinstance(summary, str) and summary.strip() else None,
+            "effect": effect.strip() if isinstance(effect, str) and effect.strip() else None,
+        }
 
     lines = ["## Overview"]
     lines.append(f"- Adventure: {story_title or 'Untitled Adventure'}")
@@ -779,6 +848,40 @@ def build_world_state_summary(  # noqa: C901
             lines.append(f"- {name}: {value}")
     else:
         lines.append("- None")
+
+    companion_buckets: dict[str, list[dict[str, Any]]] = {
+        "active": [],
+        "available": [],
+        "lost": [],
+        "other": [],
+    }
+    for companion in companions or []:
+        normalized_companion = _normalize_companion(companion)
+        if normalized_companion is None:
+            continue
+        status = str(normalized_companion["status"]).lower()
+        companion_buckets.get(status, companion_buckets["other"]).append(normalized_companion)
+
+    lines.extend(["", "## Companions"])
+    if not any(companion_buckets.values()):
+        lines.append("- None")
+    else:
+        for heading, items in (
+            ("Active", companion_buckets["active"]),
+            ("Available", companion_buckets["available"]),
+            ("Lost", companion_buckets["lost"]),
+            ("Other", companion_buckets["other"]),
+        ):
+            if not items:
+                continue
+            lines.append(f"### {heading}")
+            for companion in sorted(items, key=lambda item: str(item["name"]).casefold()):
+                line = f"- {companion['name']} (Affinity {companion['affinity']})"
+                if companion["effect"]:
+                    line = f"{line}: {companion['effect']}"
+                lines.append(line)
+                if companion["summary"]:
+                    lines.append(f"  {companion['summary']}")
 
     lines.extend(["", "## Story Flags"])
     normalized_flags = sorted(

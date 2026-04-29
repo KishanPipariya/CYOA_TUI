@@ -329,6 +329,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "inventory": theme.get("opening_inventory", []),
                 "player_stats": theme.get("opening_stats", {}),
                 "objectives": theme.get("opening_objectives", []),
+                "companions": theme.get("opening_companions", []),
                 "faction_reputation": theme.get("faction_reputation", {}),
                 "npc_affinity": theme.get("npc_affinity", {}),
                 "story_flags": theme.get("story_flags", []),

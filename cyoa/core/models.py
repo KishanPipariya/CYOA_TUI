@@ -34,6 +34,36 @@ class LoreEntry(BaseModel):
         return self
 
 
+class Companion(BaseModel):
+    name: str = Field(description="Display name for the companion.")
+    status: Literal["available", "active", "lost"] = Field(
+        default="available",
+        description="Current companion roster status.",
+    )
+    affinity: int = Field(default=0, description="Relationship strength with this companion.")
+    summary: str | None = Field(
+        default=None,
+        description="Short player-facing description of who this companion is.",
+    )
+    effect: str | None = Field(
+        default=None,
+        description="Short note describing the current support this companion provides.",
+    )
+
+    @model_validator(mode="after")
+    def normalize_text_fields(self) -> "Companion":
+        self.name = self.name.strip()
+        if not self.name:
+            raise ValueError("Companion name cannot be empty.")
+        if self.summary is not None:
+            normalized_summary = self.summary.strip()
+            self.summary = normalized_summary or None
+        if self.effect is not None:
+            normalized_effect = self.effect.strip()
+            self.effect = normalized_effect or None
+        return self
+
+
 class ChoiceRequirement(BaseModel):
     items: list[str] = Field(
         default_factory=list,
@@ -46,6 +76,14 @@ class ChoiceRequirement(BaseModel):
     flags: list[str] = Field(
         default_factory=list,
         description="Story flags that must already be present before this choice is available.",
+    )
+    companions: dict[str, Literal["available", "active", "lost"]] = Field(
+        default_factory=dict,
+        description="Companion roster states required before this choice is available.",
+    )
+    companion_affinity: dict[str, int] = Field(
+        default_factory=dict,
+        description="Minimum companion affinity thresholds required before this choice is available.",
     )
 
 
@@ -143,8 +181,9 @@ class Choice(BaseModel):
         inventory: list[str],
         stats: dict[str, int],
         flags: set[str],
+        companions: list[Companion] | None = None,
     ) -> str | None:
-        missing_requirements = self.unmet_requirements(inventory, stats, flags)
+        missing_requirements = self.unmet_requirements(inventory, stats, flags, companions)
         if not missing_requirements:
             return None
         return " | ".join(missing_requirements)
@@ -154,26 +193,80 @@ class Choice(BaseModel):
         inventory: list[str],
         stats: dict[str, int],
         flags: set[str],
+        companions: list[Companion] | None = None,
     ) -> list[str]:
-        missing_requirements: list[str] = []
+        companion_index = self._normalize_companion_index(companions)
+        return [
+            *self._missing_item_requirements(inventory),
+            *self._missing_stat_requirements(stats),
+            *self._missing_flag_requirements(flags),
+            *self._missing_companion_requirements(companion_index),
+        ]
 
+    @staticmethod
+    def _normalize_companion_index(
+        companions: list[Companion] | None,
+    ) -> dict[str, Companion]:
+        companion_index: dict[str, Companion] = {}
+        for raw_companion in companions or []:
+            if isinstance(raw_companion, Companion):
+                companion = raw_companion
+            elif isinstance(raw_companion, dict):
+                try:
+                    companion = Companion(**raw_companion)
+                except Exception:
+                    continue
+            else:
+                continue
+            if companion.name.strip():
+                companion_index[companion.name.casefold()] = companion
+        return companion_index
+
+    def _missing_item_requirements(self, inventory: list[str]) -> list[str]:
         missing_items = [item for item in self.requirements.items if item not in inventory]
-        if missing_items:
-            item_label = "item" if len(missing_items) == 1 else "items"
-            missing_requirements.append(f"Missing {item_label}: {', '.join(missing_items)}")
+        if not missing_items:
+            return []
+        item_label = "item" if len(missing_items) == 1 else "items"
+        return [f"Missing {item_label}: {', '.join(missing_items)}"]
 
+    def _missing_stat_requirements(self, stats: dict[str, int]) -> list[str]:
+        missing_requirements: list[str] = []
         for stat, minimum in self.requirements.stats.items():
             current = stats.get(stat, 0)
             if current < minimum:
                 missing_requirements.append(
                     f"Need {stat.replace('_', ' ')} {minimum}+ (current: {current})"
                 )
+        return missing_requirements
 
+    def _missing_flag_requirements(self, flags: set[str]) -> list[str]:
         missing_flags = [flag for flag in self.requirements.flags if flag not in flags]
-        if missing_flags:
-            flag_label = "event" if len(missing_flags) == 1 else "events"
-            missing_requirements.append(f"Missing {flag_label}: {', '.join(missing_flags)}")
+        if not missing_flags:
+            return []
+        flag_label = "event" if len(missing_flags) == 1 else "events"
+        return [f"Missing {flag_label}: {', '.join(missing_flags)}"]
 
+    def _missing_companion_requirements(
+        self,
+        companion_index: dict[str, Companion],
+    ) -> list[str]:
+        missing_requirements: list[str] = []
+        for companion_name, required_status in self.requirements.companions.items():
+            companion = companion_index.get(companion_name.casefold())
+            if companion is None:
+                missing_requirements.append(f"Need {required_status} companion: {companion_name}")
+            elif companion.status != required_status:
+                missing_requirements.append(
+                    f"Need {companion_name} to be {required_status} (current: {companion.status})"
+                )
+
+        for companion_name, minimum in self.requirements.companion_affinity.items():
+            companion = companion_index.get(companion_name.casefold())
+            current_affinity = companion.affinity if companion is not None else 0
+            if current_affinity < minimum:
+                missing_requirements.append(
+                    f"Need {companion_name} affinity {minimum}+ (current: {current_affinity})"
+                )
         return missing_requirements
 
 
@@ -238,6 +331,13 @@ class StoryNode(BaseModel):
         description=(
             "Lore or codex entries discovered or clarified this turn. "
             "Use categories npc, location, faction, or item."
+        ),
+    )
+    companions_updated: list[Companion] = Field(
+        default_factory=list,
+        description=(
+            "Companion roster updates for recruitable allies. "
+            "Use status values available, active, or lost."
         ),
     )
 
@@ -320,4 +420,8 @@ class ExtractionNode(BaseModel):
             "Lore or codex entries discovered or clarified by the narrative. "
             "Use categories npc, location, faction, or item."
         ),
+    )
+    companions_updated: list[Companion] = Field(
+        default_factory=list,
+        description="Companion roster updates derived from the narrative.",
     )

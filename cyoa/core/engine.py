@@ -5,7 +5,7 @@ import uuid
 from typing import Any
 
 from cyoa.core.events import Events, bus
-from cyoa.core.models import Choice, LoreEntry, Objective, ResolvedChoiceCheck, StoryNode
+from cyoa.core.models import Choice, Companion, LoreEntry, Objective, ResolvedChoiceCheck, StoryNode
 from cyoa.core.observability import (
     EngineObservedSession,
     record_provider_cache_state_restore,
@@ -579,11 +579,27 @@ class StoryEngine:
                     continue
         return lore_entries
 
+    @staticmethod
+    def _coerce_companion_seed(raw_values: object) -> list[Companion]:
+        companions: list[Companion] = []
+        if not isinstance(raw_values, list):
+            return companions
+        for raw in raw_values:
+            if isinstance(raw, Companion):
+                companions.append(raw)
+            elif isinstance(raw, dict):
+                try:
+                    companions.append(Companion(**raw))
+                except Exception:
+                    continue
+        return companions
+
     def _apply_initial_state(self) -> None:
         self.state.seed_world_state(
             inventory=self.initial_world_state.get("inventory"),
             player_stats=self.initial_world_state.get("player_stats"),
             objectives=self._coerce_objective_seed(self.initial_world_state.get("objectives")),
+            companions=self._coerce_companion_seed(self.initial_world_state.get("companions")),
             faction_reputation=self.initial_world_state.get("faction_reputation"),
             npc_affinity=self.initial_world_state.get("npc_affinity"),
             story_flags=set(self.initial_world_state.get("story_flags", [])),
@@ -614,6 +630,7 @@ class StoryEngine:
             npc_affinity=self.state.npc_affinity,
             story_flags=self.state.story_flags,
             lore_entries=self.state.lore_entries,
+            companions=self.state.companions,
         )
 
     def _find_choice_definition(self, choice_text: str) -> Choice | None:

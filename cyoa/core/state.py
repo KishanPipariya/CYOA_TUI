@@ -4,7 +4,7 @@ from typing import Any, ClassVar
 
 from cyoa.core.events import Events, bus
 from cyoa.core.mementos import GameStateSnapshot, StoryContextMemento
-from cyoa.core.models import LoreEntry, Objective, ResolvedChoiceCheck, StoryNode
+from cyoa.core.models import Companion, LoreEntry, Objective, ResolvedChoiceCheck, StoryNode
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ class GameState:
         self.npc_affinity: dict[str, int] = {}
         self.story_flags: set[str] = set()
         self.lore_entries: list[LoreEntry] = []
+        self.companions: list[Companion] = []
         self._undo_history: deque[GameStateSnapshot] = deque(maxlen=MAX_HISTORY_DEPTH)
         self._redo_history: deque[GameStateSnapshot] = deque(maxlen=MAX_HISTORY_DEPTH)
         self._bookmarks: dict[str, GameStateSnapshot] = {}
@@ -65,6 +66,7 @@ class GameState:
         self.npc_affinity = {}
         self.story_flags = set()
         self.lore_entries = []
+        self.companions = []
         self._undo_history.clear()
         self._redo_history.clear()
         self._bookmarks = {}
@@ -201,6 +203,7 @@ class GameState:
             "npc_affinity": dict(self.npc_affinity),
             "story_flags": sorted(self.story_flags),
             "lore_entries": [entry.model_dump() for entry in self.lore_entries],
+            "companions": [companion.model_dump() for companion in self.companions],
             "undo_history": [snapshot.to_payload() for snapshot in self._undo_history],
             "redo_history": [snapshot.to_payload() for snapshot in self._redo_history],
             "bookmarks": {
@@ -236,6 +239,7 @@ class GameState:
         self.npc_affinity = self._coerce_relationships(data.get("npc_affinity"))
         self.story_flags = self._coerce_story_flags(data.get("story_flags"))
         self.lore_entries = self._coerce_lore_entries(data.get("lore_entries"))
+        self.companions = self._coerce_companions(data.get("companions"))
         self._undo_history = deque(
             self._coerce_snapshot_list(data.get("undo_history")), maxlen=MAX_HISTORY_DEPTH
         )
@@ -349,6 +353,7 @@ class GameState:
             "npc_affinity": dict(self.npc_affinity),
             "story_flags": sorted(self.story_flags),
             "lore_entries": [entry.model_dump() for entry in self.lore_entries],
+            "companions": [companion.model_dump() for companion in self.companions],
         }
 
     def seed_world_state(
@@ -361,6 +366,7 @@ class GameState:
         npc_affinity: dict[str, int] | None = None,
         story_flags: set[str] | None = None,
         lore_entries: list[LoreEntry] | None = None,
+        companions: list[Companion] | None = None,
     ) -> None:
         """Apply initial state from a theme or imported save payload."""
         if inventory is not None:
@@ -377,6 +383,8 @@ class GameState:
             self.story_flags = set(story_flags)
         if lore_entries is not None:
             self.lore_entries = [entry.model_copy() for entry in lore_entries]
+        if companions is not None:
+            self.companions = [companion.model_copy() for companion in companions]
 
     def _apply_objective_updates(self, objectives_updated: list[Objective]) -> bool:
         changed = False
@@ -456,6 +464,34 @@ class GameState:
                 changed = True
         return changed
 
+    def _apply_companion_updates(self, companions_updated: list[Companion]) -> bool:
+        changed = False
+        companion_index = {
+            companion.name.casefold(): idx for idx, companion in enumerate(self.companions)
+        }
+        for companion in companions_updated:
+            existing_idx = companion_index.get(companion.name.casefold())
+            if existing_idx is None:
+                self.companions.append(companion.model_copy())
+                companion_index[companion.name.casefold()] = len(self.companions) - 1
+                changed = True
+                continue
+            existing = self.companions[existing_idx]
+            merged = existing.model_copy(
+                update={
+                    "status": companion.status,
+                    "affinity": companion.affinity,
+                    "summary": companion.summary
+                    if companion.summary is not None
+                    else existing.summary,
+                    "effect": companion.effect if companion.effect is not None else existing.effect,
+                }
+            )
+            if merged != existing:
+                self.companions[existing_idx] = merged
+                changed = True
+        return changed
+
     def _apply_world_updates(self, node: StoryNode) -> bool:
         changed = self._apply_objective_updates(node.objectives_updated)
         changed = self._apply_delta_map(self.faction_reputation, node.faction_updates) or changed
@@ -464,6 +500,7 @@ class GameState:
             self._apply_flag_updates(node.story_flags_set, node.story_flags_cleared) or changed
         )
         changed = self._apply_lore_entry_updates(node.lore_entries_updated) or changed
+        changed = self._apply_companion_updates(node.companions_updated) or changed
         return changed
 
     def _coerce_objectives(self, value: Any) -> list[Objective]:
@@ -491,6 +528,19 @@ class GameState:
             except Exception:
                 continue
         return entries
+
+    def _coerce_companions(self, value: Any) -> list[Companion]:
+        if not isinstance(value, list):
+            return []
+        companions: list[Companion] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            try:
+                companions.append(Companion(**item))
+            except Exception:
+                continue
+        return companions
 
     def _coerce_resolved_choice_check(self, value: Any) -> ResolvedChoiceCheck | None:
         if not isinstance(value, dict):
@@ -567,6 +617,7 @@ class GameState:
             npc_affinity=self._coerce_relationships(value.get("npc_affinity")),
             story_flags=self._coerce_story_flags(value.get("story_flags")),
             lore_entries=self._coerce_lore_entries(value.get("lore_entries")),
+            companions=self._coerce_companions(value.get("companions")),
             story_context=StoryContextMemento.from_payload(value.get("story_context_history")),
         )
 

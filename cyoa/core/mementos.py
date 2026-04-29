@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from cyoa.core.models import LoreEntry, Objective, ResolvedChoiceCheck, StoryNode
+from cyoa.core.models import Companion, LoreEntry, Objective, ResolvedChoiceCheck, StoryNode
 
 if TYPE_CHECKING:
     from cyoa.core.state import GameState
@@ -53,6 +53,7 @@ class GameStateSnapshot:
     npc_affinity: dict[str, int]
     story_flags: set[str]
     lore_entries: list[LoreEntry]
+    companions: list[Companion]
     story_context: StoryContextMemento = field(default_factory=StoryContextMemento)
 
     @classmethod
@@ -85,6 +86,7 @@ class GameStateSnapshot:
             npc_affinity=dict(state.npc_affinity),
             story_flags=set(state.story_flags),
             lore_entries=[entry.model_copy() for entry in state.lore_entries],
+            companions=[companion.model_copy() for companion in state.companions],
             story_context=StoryContextMemento.from_payload(story_context_history),
         )
 
@@ -109,6 +111,7 @@ class GameStateSnapshot:
             npc_affinity=dict(self.npc_affinity),
             story_flags=set(self.story_flags),
             lore_entries=[entry.model_copy() for entry in self.lore_entries],
+            companions=[companion.model_copy() for companion in self.companions],
             story_context=StoryContextMemento(history=self.story_context.to_payload()),
         )
 
@@ -135,6 +138,7 @@ class GameStateSnapshot:
         state.npc_affinity = dict(self.npc_affinity)
         state.story_flags = set(self.story_flags)
         state.lore_entries = [entry.model_copy() for entry in self.lore_entries]
+        state.companions = [companion.model_copy() for companion in self.companions]
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -157,5 +161,6 @@ class GameStateSnapshot:
             "npc_affinity": dict(self.npc_affinity),
             "story_flags": sorted(self.story_flags),
             "lore_entries": [entry.model_dump() for entry in self.lore_entries],
+            "companions": [companion.model_dump() for companion in self.companions],
             "story_context_history": self.story_context.to_payload(),
         }

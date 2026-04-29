@@ -44,6 +44,9 @@ def test_load_theme_returns_validated_theme(theme_name: str):
     if "opening_objectives" in theme:
         assert theme["opening_objectives"][0]["id"]
         assert theme["opening_objectives"][0]["text"]
+    if "opening_companions" in theme:
+        assert theme["opening_companions"][0]["name"]
+        assert theme["opening_companions"][0]["status"] in {"available", "active", "lost"}
 
 
 def test_validate_theme_rejects_missing_required_field():
@@ -149,6 +152,7 @@ def test_validate_theme_accepts_richer_content_bundle():
     theme = validate_theme(_load_theme_fixture("passing", "valid_theme.toml"), "fixture_valid")
 
     assert theme["opening_stats"] == {"focus": 3}
+    assert theme["opening_companions"][0]["name"] == "Ada"
     assert theme["faction_reputation"] == {"Archivists": 1}
     assert theme["opening_objectives"][0]["id"] == "signal"
     assert theme["ui"]["choice_surface"] == "#20303d"

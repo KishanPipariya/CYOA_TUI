@@ -172,6 +172,49 @@ def _validate_opening_objectives(
     validated["opening_objectives"] = normalized_objectives
 
 
+def _validate_opening_companions(
+    theme: dict[str, Any],
+    source: str,
+    validated: dict[str, Any],
+) -> None:
+    companions = theme.get("opening_companions")
+    if companions is None:
+        return
+    if not isinstance(companions, list) or not companions:
+        raise ThemeValidationError(f"{source}: opening_companions must be a non-empty list.")
+    normalized_companions: list[dict[str, Any]] = []
+    for companion in companions:
+        if not isinstance(companion, dict):
+            raise ThemeValidationError(f"{source}: opening_companions entries must be objects.")
+        status = _require_non_empty_string(companion.get("status", "available"), "status", source)
+        if status not in {"available", "active", "lost"}:
+            raise ThemeValidationError(
+                f"{source}: opening_companions status must be one of available, active, or lost."
+            )
+        affinity = companion.get("affinity", 0)
+        if isinstance(affinity, bool):
+            raise ThemeValidationError(f"{source}: opening_companions affinity must be an integer.")
+        try:
+            normalized_affinity = int(affinity)
+        except (TypeError, ValueError) as exc:
+            raise ThemeValidationError(
+                f"{source}: opening_companions affinity must be an integer."
+            ) from exc
+        normalized_companion: dict[str, Any] = {
+            "name": _require_non_empty_string(companion.get("name"), "name", source),
+            "status": status,
+            "affinity": normalized_affinity,
+        }
+        summary = companion.get("summary")
+        if summary is not None:
+            normalized_companion["summary"] = _require_non_empty_string(summary, "summary", source)
+        effect = companion.get("effect")
+        if effect is not None:
+            normalized_companion["effect"] = _require_non_empty_string(effect, "effect", source)
+        normalized_companions.append(normalized_companion)
+    validated["opening_companions"] = normalized_companions
+
+
 def _validate_required_ui_theme(
     theme: dict[str, Any],
     source: str,
@@ -220,6 +263,7 @@ def validate_theme(theme: dict[str, Any], theme_name: str) -> dict[str, Any]:
     _validate_optional_string_lists(theme, source, validated)
     _validate_optional_mappings(theme, source, validated)
     _validate_opening_objectives(theme, source, validated)
+    _validate_opening_companions(theme, source, validated)
     _validate_required_ui_theme(theme, source, validated)
     return validated
 

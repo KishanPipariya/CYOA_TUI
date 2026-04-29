@@ -19,6 +19,13 @@ Archivists = 1
 [npc_affinity]
 Ada = 2
 
+[[opening_companions]]
+name = "Ada"
+status = "active"
+affinity = 2
+summary = "A field operative who trusts your instincts."
+effect = "Highlights hidden routes through archive ruins."
+
 [[opening_objectives]]
 id = "signal"
 text = "Investigate the strange signal"

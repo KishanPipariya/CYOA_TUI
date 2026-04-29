@@ -9,6 +9,7 @@ from cyoa.core.events import Events, bus
 from cyoa.core.models import (
     Choice,
     ChoiceCheck,
+    Companion,
     LoreEntry,
     Objective,
     ResolvedChoiceCheck,
@@ -578,6 +579,14 @@ def test_engine_save_and_load_roundtrip_preserves_extended_world_state():
             "inventory": ["Torch"],
             "player_stats": {"health": 95, "gold": 3, "reputation": 1},
             "objectives": [{"id": "escape", "text": "Escape", "status": "active"}],
+            "companions": [
+                {
+                    "name": "Mira",
+                    "status": "active",
+                    "affinity": 3,
+                    "effect": "Warns you before ambushes.",
+                }
+            ],
             "faction_reputation": {"Wardens": -2},
             "npc_affinity": {"Mira": 2},
             "story_flags": ["cell_opened"],
@@ -605,6 +614,14 @@ def test_engine_save_and_load_roundtrip_preserves_extended_world_state():
     loaded.load_save_data(data)
 
     assert loaded.state.objectives == [Objective(id="escape", text="Escape", status="active")]
+    assert loaded.state.companions == [
+        Companion(
+            name="Mira",
+            status="active",
+            affinity=3,
+            effect="Warns you before ambushes.",
+        )
+    ]
     assert loaded.state.faction_reputation == {"Wardens": -2}
     assert loaded.state.npc_affinity == {"Mira": 2}
     assert loaded.state.story_flags == {"cell_opened"}
@@ -763,21 +780,27 @@ def test_game_state_load_save_data_emits_title_and_node_events():
 def test_game_state_seed_world_state_deduplicates_and_copies_models():
     state = GameState()
     objective = Objective(id="escape", text="Escape", status="active")
+    companion = Companion(name="Mira", status="active", affinity=2, effect="Scout's warning")
 
     state.seed_world_state(
         inventory=["Torch", "Torch", "Key"],
         player_stats={"health": "88", "gold": 4, "reputation": 2},
         objectives=[objective],
+        companions=[companion],
         faction_reputation={"Guild": 3},
         npc_affinity={"Mira": 5},
         story_flags={"met_mira"},
     )
 
     objective.status = "completed"
+    companion.effect = "Changed"
 
     assert state.inventory == ["Torch", "Key"]
     assert state.player_stats == {"health": 88, "gold": 4, "reputation": 2}
     assert state.objectives == [Objective(id="escape", text="Escape", status="active")]
+    assert state.companions == [
+        Companion(name="Mira", status="active", affinity=2, effect="Scout's warning")
+    ]
     assert state.faction_reputation == {"Guild": 3}
     assert state.npc_affinity == {"Mira": 5}
     assert state.story_flags == {"met_mira"}
@@ -800,6 +823,14 @@ def test_game_state_apply_node_updates_emits_world_state_for_objectives_relation
                 summary="A wary scout who knows the flooded tunnels.",
             )
         ],
+        companions_updated=[
+            Companion(
+                name="Mira",
+                status="active",
+                affinity=4,
+                effect="Spots movement in the dark.",
+            )
+        ],
     )
 
     world_events: list[dict[str, object]] = []
@@ -817,6 +848,14 @@ def test_game_state_apply_node_updates_emits_world_state_for_objectives_relation
             name="Mira",
             summary="A wary scout who knows the flooded tunnels.",
             discovered_turn=1,
+        )
+    ]
+    assert state.companions == [
+        Companion(
+            name="Mira",
+            status="active",
+            affinity=4,
+            effect="Spots movement in the dark.",
         )
     ]
     assert world_events == [state.get_world_state()]
@@ -838,6 +877,10 @@ def test_game_state_load_save_data_coerces_extended_world_fields():
             "objectives": [
                 {"id": "escape", "text": "Escape", "status": "active"},
                 {"id": "broken"},
+            ],
+            "companions": [
+                {"name": "Mira", "status": "active", "affinity": "4"},
+                {"name": "", "status": "missing"},
             ],
             "faction_reputation": {"Guild": "4", "Broken": True},
             "npc_affinity": {"Mira": 2.2, "Broken": object()},
@@ -866,6 +909,7 @@ def test_game_state_load_save_data_coerces_extended_world_fields():
         }
     ]
     assert state.objectives == [Objective(id="escape", text="Escape", status="active")]
+    assert state.companions == [Companion(name="Mira", status="active", affinity=4)]
     assert state.faction_reputation == {"Guild": 4}
     assert state.npc_affinity == {"Mira": 2}
     assert state.story_flags == {"met_mira"}

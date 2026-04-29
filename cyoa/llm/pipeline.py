@@ -53,6 +53,7 @@ class SystemMessageComponent(PromptComponent):
             content = template.render(
                 inventory=getattr(context, "inventory", []),
                 stats=getattr(context, "player_stats", {}),
+                companions=getattr(context, "companions", []),
                 memories=getattr(context, "memories", []),
                 scene_summary=getattr(context, "scene_summary", None),
                 chapter_summary=getattr(context, "chapter_summary", None),
@@ -107,9 +108,10 @@ class PersonaComponent(PromptComponent, PromptComponentMixin):
             "3. You MUST provide a creative 'title' for this new adventure in the JSON response on the first turn.\n"
             "4. Describe changes to the player's inventory and stats (health, gold, reputation) directly in the narrative prose.\n"
             "5. Track discoverable lore with 'lore_entries_updated' for named NPCs, locations, factions, and important items.\n"
-            "6. Set 'mood' to an atmospheric keyword (e.g. 'mysterious', 'heroic', 'combat', 'ethereal', 'dark', 'grimy').\n"
-            "7. When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true.\n"
-            "8. Ensure your output is strictly valid JSON matching the requested schema."
+            "6. Use 'companions_updated' when recruitable allies join, become active, are lost, or change affinity/effect.\n"
+            "7. Set 'mood' to an atmospheric keyword (e.g. 'mysterious', 'heroic', 'combat', 'ethereal', 'dark', 'grimy').\n"
+            "8. When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true.\n"
+            "9. Ensure your output is strictly valid JSON matching the requested schema."
         )
 
     def transform(self, context: Any, messages: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -147,6 +149,10 @@ class PlayerSheetComponent(PromptComponent, PromptComponentMixin):
             import json
 
             lines.append(f"NPC Affinity: {json.dumps(npc_affinity)}")
+        companion_lines = self._compact_companion_lines(getattr(context, "companions", []))
+        if companion_lines:
+            lines.append("Companions:")
+            lines.extend(companion_lines)
         story_flags = sorted(getattr(context, "story_flags", set()))
         if story_flags:
             lines.append(f"Unlocked Story Flags: {', '.join(story_flags)}")
@@ -182,6 +188,33 @@ class PlayerSheetComponent(PromptComponent, PromptComponentMixin):
         lines: list[str] = []
         for category in ("npc", "location", "faction", "item"):
             lines.extend(grouped[category])
+        return lines
+
+    @staticmethod
+    def _compact_companion_lines(companions: list[object], *, max_entries: int = 8) -> list[str]:
+        normalized_companions = sorted(
+            companions,
+            key=lambda companion: (
+                {"active": 0, "available": 1, "lost": 2}.get(
+                    getattr(companion, "status", "available"), 3
+                ),
+                getattr(companion, "name", "").casefold(),
+            ),
+        )
+        lines: list[str] = []
+        for companion in normalized_companions[:max_entries]:
+            name = str(getattr(companion, "name", "")).strip()
+            status = str(getattr(companion, "status", "available")).strip()
+            if not name:
+                continue
+            affinity = getattr(companion, "affinity", 0)
+            if not isinstance(affinity, int):
+                affinity = 0
+            effect = str(getattr(companion, "effect", "") or "").strip()
+            line = f"- {name} ({status}, affinity {affinity})"
+            if effect:
+                line = f"{line} - Effect: {effect}"
+            lines.append(line)
         return lines
 
 

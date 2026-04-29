@@ -606,6 +606,14 @@ def test_build_scene_recap_includes_visible_choices_progress_and_recent_changes(
         inventory=["Torch", "Ancient Coin"],
         player_stats={"health": 90, "gold": 5, "reputation": 0},
         objectives=[{"id": "escape", "text": "Escape the vault", "status": "active"}],
+        companions=[
+            {
+                "name": "Mira",
+                "status": "active",
+                "affinity": 3,
+                "effect": "Warns you before wards trigger.",
+            }
+        ],
         screen_reader_mode=False,
         turn_count=2,
         scene_recap_verbosity="standard",
@@ -620,6 +628,14 @@ def test_build_scene_recap_includes_visible_choices_progress_and_recent_changes(
         npc_affinity_updates=node.npc_affinity_updates,
         story_flags_set=node.story_flags_set,
         story_flags_cleared=node.story_flags_cleared,
+        companions_updated=[
+            {
+                "name": "Mira",
+                "status": "active",
+                "affinity": 3,
+                "effect": "Warns you before wards trigger.",
+            }
+        ],
     )
 
     assert "Vault Run | Turn 2" in recap
@@ -630,6 +646,7 @@ def test_build_scene_recap_includes_visible_choices_progress_and_recent_changes(
     assert "- Escape the vault" in recap
     assert "- Stats: Health 90 | Gold 5 | Reputation 0" in recap
     assert "- Inventory: Torch, Ancient Coin" in recap
+    assert "- Active companions: Mira (Warns you before wards trigger.)" in recap
     assert "- Items gained: Ancient Coin" in recap
     assert "- Stats changed: Health -10; Gold +5" in recap
     assert "- Faction changes: guild +1" in recap
@@ -643,6 +660,7 @@ def test_build_scene_recap_is_more_explicit_in_screen_reader_mode() -> None:
         inventory=[],
         player_stats={"health": 100, "gold": 0, "reputation": 2},
         objectives=[],
+        companions=[],
         screen_reader_mode=True,
         turn_count=4,
         scene_recap_verbosity="detailed",
@@ -682,6 +700,15 @@ def test_build_world_state_summary_groups_objectives_and_relationships() -> None
             {"id": "seal", "text": "Seal the breach", "status": "completed"},
             {"id": "warn", "text": "Warn the guild", "status": "failed"},
         ],
+        companions=[
+            {
+                "name": "Steward Hale",
+                "status": "active",
+                "affinity": 2,
+                "effect": "Can negotiate guild rites.",
+                "summary": "The archive steward who owes you a favor.",
+            }
+        ],
         faction_reputation={"Guild": 2},
         npc_affinity={"Steward Hale": 1},
         story_flags={"vault_seen", "guild_trusted"},
@@ -718,6 +745,9 @@ def test_build_world_state_summary_groups_objectives_and_relationships() -> None
     assert "- Guild: 2" in summary
     assert "## NPC Affinity" in summary
     assert "- Steward Hale: 1" in summary
+    assert "## Companions" in summary
+    assert "### Active" in summary
+    assert "- Steward Hale (Affinity 2): Can negotiate guild rites." in summary
     assert "## Story Flags" in summary
     assert "- guild_trusted" in summary
     assert "- vault_seen" in summary
@@ -872,6 +902,7 @@ def test_build_scene_recap_minimal_and_export_detailed_respect_verbosity() -> No
         inventory=["Torch"],
         player_stats={"health": 80, "gold": 3, "reputation": 1},
         objectives=[{"id": "seal", "text": "Find the key", "status": "active"}],
+        companions=[],
         screen_reader_mode=False,
         turn_count=5,
         scene_recap_verbosity="minimal",

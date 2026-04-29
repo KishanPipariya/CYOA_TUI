@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from cyoa.core.models import Choice, ChoiceRequirement, LoreEntry, Objective, StoryNode
+from cyoa.core.models import Choice, ChoiceRequirement, Companion, LoreEntry, Objective, StoryNode
 
 
 def test_choice_basic_valid():
@@ -124,6 +124,38 @@ def test_choice_unmet_requirements_lists_all_missing_gates() -> None:
     ]
 
 
+def test_choice_availability_reason_handles_companion_status_and_affinity() -> None:
+    choice = Choice(
+        text="Ask Mira to cover the retreat",
+        requirements=ChoiceRequirement(
+            companions={"Mira": "active"},
+            companion_affinity={"Mira": 3},
+        ),
+    )
+
+    assert choice.availability_reason([], {}, set(), []) == (
+        "Need active companion: Mira | Need Mira affinity 3+ (current: 0)"
+    )
+    assert (
+        choice.availability_reason(
+            [],
+            {},
+            set(),
+            [Companion(name="Mira", status="available", affinity=2)],
+        )
+        == "Need Mira to be active (current: available) | Need Mira affinity 3+ (current: 2)"
+    )
+    assert (
+        choice.availability_reason(
+            [],
+            {},
+            set(),
+            [Companion(name="Mira", status="active", affinity=3)],
+        )
+        is None
+    )
+
+
 def test_story_node_accepts_extended_gameplay_updates():
     node = StoryNode(
         narrative="The guild grants you passage.",
@@ -141,6 +173,14 @@ def test_story_node_accepts_extended_gameplay_updates():
                 summary="The archive guild controls access to the lower stacks.",
             )
         ],
+        companions_updated=[
+            Companion(
+                name="Steward Hale",
+                status="available",
+                affinity=1,
+                effect="Can smooth over guild protocol.",
+            )
+        ],
     )
 
     assert node.objectives_updated[0].id == "enter_archive"
@@ -148,6 +188,7 @@ def test_story_node_accepts_extended_gameplay_updates():
     assert node.npc_affinity_updates["Steward Hale"] == 1
     assert node.story_flags_set == ["guild_trusted"]
     assert node.lore_entries_updated[0].category == "faction"
+    assert node.companions_updated[0].effect == "Can smooth over guild protocol."
 
 
 def test_lore_entry_requires_non_empty_name_and_summary() -> None:
