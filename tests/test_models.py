@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from cyoa.core.models import Choice, ChoiceRequirement, Objective, StoryNode
+from cyoa.core.models import Choice, ChoiceRequirement, LoreEntry, Objective, StoryNode
 
 
 def test_choice_basic_valid():
@@ -134,9 +134,25 @@ def test_story_node_accepts_extended_gameplay_updates():
         faction_updates={"Guild": 2},
         npc_affinity_updates={"Steward Hale": 1},
         story_flags_set=["guild_trusted"],
+        lore_entries_updated=[
+            LoreEntry(
+                category="faction",
+                name="Guild",
+                summary="The archive guild controls access to the lower stacks.",
+            )
+        ],
     )
 
     assert node.objectives_updated[0].id == "enter_archive"
     assert node.faction_updates["Guild"] == 2
     assert node.npc_affinity_updates["Steward Hale"] == 1
     assert node.story_flags_set == ["guild_trusted"]
+    assert node.lore_entries_updated[0].category == "faction"
+
+
+def test_lore_entry_requires_non_empty_name_and_summary() -> None:
+    with pytest.raises(ValidationError):
+        LoreEntry(category="npc", name=" ", summary="A scout.")
+
+    with pytest.raises(ValidationError):
+        LoreEntry(category="npc", name="Mira", summary=" ")

@@ -629,6 +629,70 @@ def build_world_state_summary(  # noqa: C901
     return "\n".join(lines)
 
 
+def build_lore_codex_summary(
+    *,
+    story_title: str | None,
+    turn_count: int,
+    lore_entries: list[Any],
+) -> str:
+    grouped: dict[str, list[tuple[str, str, int | None]]] = {
+        "npc": [],
+        "location": [],
+        "faction": [],
+        "item": [],
+    }
+
+    for entry in lore_entries:
+        if isinstance(entry, dict):
+            category = entry.get("category")
+            name = entry.get("name")
+            summary = entry.get("summary")
+            discovered_turn = entry.get("discovered_turn")
+        else:
+            category = getattr(entry, "category", None)
+            name = getattr(entry, "name", None)
+            summary = getattr(entry, "summary", None)
+            discovered_turn = getattr(entry, "discovered_turn", None)
+
+        if category not in grouped or not isinstance(name, str) or not isinstance(summary, str):
+            continue
+        normalized_name = name.strip()
+        normalized_summary = summary.strip()
+        if not normalized_name or not normalized_summary:
+            continue
+        grouped[category].append(
+            (
+                normalized_name,
+                normalized_summary,
+                discovered_turn if isinstance(discovered_turn, int) else None,
+            )
+        )
+
+    lines = [
+        "## Overview",
+        f"- Adventure: {story_title or 'Untitled Adventure'}",
+        f"- Turn: {turn_count}",
+        f"- Entries discovered: {sum(len(items) for items in grouped.values())}",
+    ]
+
+    for title, key in (
+        ("NPCs", "npc"),
+        ("Locations", "location"),
+        ("Factions", "faction"),
+        ("Items", "item"),
+    ):
+        lines.extend(["", f"## {title}"])
+        entries = sorted(grouped[key], key=lambda item: (item[0].casefold(), item[2] or 0))
+        if not entries:
+            lines.append("- None discovered")
+            continue
+        for name, summary, discovered_turn in entries:
+            suffix = f" (Turn {discovered_turn})" if discovered_turn is not None else ""
+            lines.append(f"- {name}{suffix}: {summary}")
+
+    return "\n".join(lines)
+
+
 def build_help_text(
     *,
     screen_reader_mode: bool,

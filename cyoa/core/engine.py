@@ -4,7 +4,7 @@ import uuid
 from typing import Any
 
 from cyoa.core.events import Events, bus
-from cyoa.core.models import Choice, Objective, StoryNode
+from cyoa.core.models import Choice, LoreEntry, Objective, StoryNode
 from cyoa.core.observability import (
     EngineObservedSession,
     record_provider_cache_state_restore,
@@ -148,9 +148,9 @@ class StoryEngine:
                 session.span.set_attribute("choice.length", len(choice_text))
 
             # Snapshot for undo BEFORE making changes, including history because it belongs to story_context
-            self.state.create_undo_snapshot({
-                "story_context_history": [msg.copy() for msg in self.story_context.history]
-            })
+            self.state.create_undo_snapshot(
+                {"story_context_history": [msg.copy() for msg in self.story_context.history]}
+            )
 
             self._emit_runtime_event(Events.CHOICE_MADE, choice_text=choice_text)
 
@@ -199,7 +199,9 @@ class StoryEngine:
         """Use speculative cache when available, otherwise generate a fresh node."""
         cached_node = self._get_cached_node(choice_text)
         if cached_node:
-            self._emit_runtime_event(Events.STATUS_MESSAGE, message="✨ Recalling future memories...")
+            self._emit_runtime_event(
+                Events.STATUS_MESSAGE, message="✨ Recalling future memories..."
+            )
             await asyncio.sleep(0.1)
             if session.span:
                 session.span.set_attribute("engine.cache_hit", True)
@@ -210,9 +212,7 @@ class StoryEngine:
         if story_context is None:
             raise RuntimeError("Story context is not initialized.")
 
-        node = await self.broker.generate_next_node_async(
-            story_context, on_token_chunk=on_token
-        )
+        node = await self.broker.generate_next_node_async(story_context, on_token_chunk=on_token)
         if session.span:
             session.span.set_attribute("engine.cache_hit", False)
         record_provider_cache_state_restore(hit=False)
@@ -259,6 +259,7 @@ class StoryEngine:
                 player_stats=self.state.player_stats,
                 inventory=self.state.inventory,
                 mood=node.mood,
+                lore_entries=[entry.model_dump() for entry in self.state.lore_entries],
             )
             return
 
@@ -287,7 +288,9 @@ class StoryEngine:
                 node = await self._resolve_next_node(choice_text, on_token, session)
                 await self._persist_generated_node(node, choice_text)
                 self._emit_generation_events(node)
-                self._transition_phase(EnginePhase.READY, "generation_completed", scene_id=self.state.current_scene_id)
+                self._transition_phase(
+                    EnginePhase.READY, "generation_completed", scene_id=self.state.current_scene_id
+                )
 
         except Exception as e:
             logger.error(f"Story Engine error: {e}", exc_info=True)
@@ -365,7 +368,9 @@ class StoryEngine:
             return False
         return self.state.create_bookmark(
             name,
-            extra_data={"story_context_history": [msg.copy() for msg in self.story_context.history]},
+            extra_data={
+                "story_context_history": [msg.copy() for msg in self.story_context.history]
+            },
         )
 
     def restore_bookmark(self, name: str) -> bool:
@@ -433,7 +438,9 @@ class StoryEngine:
                     directive for directive in directives if isinstance(directive, str)
                 ]
         self._sync_story_context_state()
-        self._transition_phase(EnginePhase.READY, "load_completed", scene_id=self.state.current_scene_id)
+        self._transition_phase(
+            EnginePhase.READY, "load_completed", scene_id=self.state.current_scene_id
+        )
 
     async def branch_to_scene(self, idx: int, history: dict[str, Any]) -> None:
         """Restore the engine state to a specific scene from the history."""
@@ -459,6 +466,15 @@ class StoryEngine:
         self.state.player_stats = dict(
             target_scene.get("player_stats", {"health": 100, "gold": 0, "reputation": 0})
         )
+        lore_entries: list[LoreEntry] = []
+        for raw in target_scene.get("lore_entries", []):
+            if not isinstance(raw, dict):
+                continue
+            try:
+                lore_entries.append(LoreEntry(**raw))
+            except Exception:
+                continue
+        self.state.seed_world_state(lore_entries=lore_entries)
         self.state.timeline_metadata.append(
             {
                 "kind": "branch_restore",
@@ -492,11 +508,16 @@ class StoryEngine:
         self._emit_runtime_event(Events.INVENTORY_UPDATED, inventory=self.state.inventory)
         self._emit_runtime_event(Events.WORLD_STATE_UPDATED, state=self.state.get_world_state())
         self._emit_runtime_event(Events.NODE_COMPLETED, node=node)
-        self._transition_phase(EnginePhase.READY, "branch_restore_completed", scene_id=self.state.current_scene_id)
+        self._transition_phase(
+            EnginePhase.READY, "branch_restore_completed", scene_id=self.state.current_scene_id
+        )
 
-    def _apply_initial_state(self) -> None:
-        objectives = []
-        for raw in self.initial_world_state.get("objectives", []):
+    @staticmethod
+    def _coerce_objective_seed(raw_values: object) -> list[Objective]:
+        objectives: list[Objective] = []
+        if not isinstance(raw_values, list):
+            return objectives
+        for raw in raw_values:
             if isinstance(raw, Objective):
                 objectives.append(raw)
             elif isinstance(raw, dict):
@@ -504,13 +525,32 @@ class StoryEngine:
                     objectives.append(Objective(**raw))
                 except Exception:
                     continue
+        return objectives
+
+    @staticmethod
+    def _coerce_lore_entry_seed(raw_values: object) -> list[LoreEntry]:
+        lore_entries: list[LoreEntry] = []
+        if not isinstance(raw_values, list):
+            return lore_entries
+        for raw in raw_values:
+            if isinstance(raw, LoreEntry):
+                lore_entries.append(raw)
+            elif isinstance(raw, dict):
+                try:
+                    lore_entries.append(LoreEntry(**raw))
+                except Exception:
+                    continue
+        return lore_entries
+
+    def _apply_initial_state(self) -> None:
         self.state.seed_world_state(
             inventory=self.initial_world_state.get("inventory"),
             player_stats=self.initial_world_state.get("player_stats"),
-            objectives=objectives,
+            objectives=self._coerce_objective_seed(self.initial_world_state.get("objectives")),
             faction_reputation=self.initial_world_state.get("faction_reputation"),
             npc_affinity=self.initial_world_state.get("npc_affinity"),
             story_flags=set(self.initial_world_state.get("story_flags", [])),
+            lore_entries=self._coerce_lore_entry_seed(self.initial_world_state.get("lore_entries")),
         )
         if self.story_context:
             goals = self.initial_prompt_config.get("goals")
@@ -536,4 +576,5 @@ class StoryEngine:
             faction_reputation=self.state.faction_reputation,
             npc_affinity=self.state.npc_affinity,
             story_flags=self.state.story_flags,
+            lore_entries=self.state.lore_entries,
         )

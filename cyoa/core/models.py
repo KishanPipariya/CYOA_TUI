@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -8,6 +10,28 @@ class Objective(BaseModel):
         default="active",
         description="Objective status. Usually active, completed, or failed.",
     )
+
+
+class LoreEntry(BaseModel):
+    category: Literal["npc", "location", "faction", "item"] = Field(
+        description="The codex bucket this entry belongs to."
+    )
+    name: str = Field(description="Display name for the discovered lore entry.")
+    summary: str = Field(description="Short player-facing summary of what is known so far.")
+    discovered_turn: int | None = Field(
+        default=None,
+        description="Turn when this lore entry was first discovered.",
+    )
+
+    @model_validator(mode="after")
+    def normalize_text_fields(self) -> "LoreEntry":
+        self.name = self.name.strip()
+        self.summary = self.summary.strip()
+        if not self.name:
+            raise ValueError("Lore entry name cannot be empty.")
+        if not self.summary:
+            raise ValueError("Lore entry summary cannot be empty.")
+        return self
 
 
 class ChoiceRequirement(BaseModel):
@@ -127,6 +151,13 @@ class StoryNode(BaseModel):
         default_factory=list,
         description="Story flags that should no longer be considered active.",
     )
+    lore_entries_updated: list[LoreEntry] = Field(
+        default_factory=list,
+        description=(
+            "Lore or codex entries discovered or clarified this turn. "
+            "Use categories npc, location, faction, or item."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_choices_count(self) -> "StoryNode":
@@ -200,4 +231,11 @@ class ExtractionNode(BaseModel):
     story_flags_cleared: list[str] = Field(
         default_factory=list,
         description="Story flags retired by the narrative.",
+    )
+    lore_entries_updated: list[LoreEntry] = Field(
+        default_factory=list,
+        description=(
+            "Lore or codex entries discovered or clarified by the narrative. "
+            "Use categories npc, location, faction, or item."
+        ),
     )

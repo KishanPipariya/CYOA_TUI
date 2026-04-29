@@ -168,6 +168,14 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Panels And Help",
     ),
     AppBindingSpec(
+        "show_lore_codex",
+        "z",
+        "show_lore_codex",
+        "Codex",
+        "Open lore codex",
+        "Panels And Help",
+    ),
+    AppBindingSpec(
         "show_journal_summary",
         "[",
         "show_journal_summary",

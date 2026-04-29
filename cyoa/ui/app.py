@@ -92,6 +92,7 @@ from cyoa.ui.mixins import (
     TypewriterMixin,
 )
 from cyoa.ui.presenters import (
+    build_lore_codex_summary,
     build_scene_recap,
     build_world_state_summary,
     format_status_message,
@@ -819,6 +820,21 @@ class CYOAApp(
             story_flags=state.story_flags,
             last_choice_text=state.last_choice_text,
             current_scene_id=state.current_scene_id,
+        )
+
+    def get_lore_codex_text(self) -> str:
+        if not self.engine:
+            return build_lore_codex_summary(
+                story_title=None,
+                turn_count=1,
+                lore_entries=[],
+            )
+
+        state = self.engine.state
+        return build_lore_codex_summary(
+            story_title=state.story_title,
+            turn_count=state.turn_count,
+            lore_entries=state.lore_entries,
         )
 
     def on_unmount(self) -> None:

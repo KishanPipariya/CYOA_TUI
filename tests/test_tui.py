@@ -24,6 +24,7 @@ from cyoa.ui.components import (
     ConfirmScreen,
     HelpScreen,
     LoadGameScreen,
+    LoreCodexScreen,
     NotificationHistoryScreen,
     SceneRecapScreen,
     SettingsScreen,
@@ -880,6 +881,53 @@ async def test_character_sheet_modal_opens_and_reflects_current_world_state(
         assert "Steward Hale: 1" in summary_text
         assert "vault_seen" in summary_text
         assert "Go North" in summary_text
+
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert app.screen.id == "_default"
+        assert app.focused is choices[0]
+
+
+@pytest.mark.asyncio
+async def test_lore_codex_modal_opens_and_reflects_discovered_entries(mock_app_dependencies):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(100, 34)) as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+        assert app.engine is not None
+
+        await _wait_for_pilot(
+            pilot,
+            lambda: len(list(app.query_one("#choices-container", Container).query(Button))) >= 2,
+        )
+        choices = list(app.query_one("#choices-container", Container).query(Button))
+        assert app.focused is choices[0]
+
+        app.engine.state.lore_entries = [
+            {
+                "category": "npc",
+                "name": "Mira",
+                "summary": "A scout who knows the drowned passages.",
+                "discovered_turn": 2,
+            },
+            {
+                "category": "location",
+                "name": "Drowned Passage",
+                "summary": "A flooded route beneath the prison.",
+                "discovered_turn": 2,
+            },
+        ]
+
+        await pilot.press("z")
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, LoreCodexScreen)
+        assert "Lore Codex" in app.screen.query_one("#lore-codex-title", Label).render().plain
+        summary_text = app.screen._summary_text
+        assert "Mira (Turn 2): A scout who knows the drowned passages." in summary_text
+        assert "Drowned Passage (Turn 2): A flooded route beneath the prison." in summary_text
 
         await pilot.press("escape")
         await pilot.pause(0.2)

@@ -23,7 +23,9 @@ class PromptPipeline:
     def add_component(self, component: PromptComponent) -> None:
         self.components.append(component)
 
-    def process(self, context: Any, initial_messages: list[dict[str, str]] | None = None) -> list[dict[str, str]]:
+    def process(
+        self, context: Any, initial_messages: list[dict[str, str]] | None = None
+    ) -> list[dict[str, str]]:
         """Executes all components in order."""
         messages = initial_messages or []
         for component in self.components:
@@ -71,7 +73,9 @@ class SystemMessageComponent(PromptComponent):
 class PromptComponentMixin:
     """Helper to inject text into the first system message in space-efficient way."""
 
-    def _inject_into_system(self, messages: list[dict[str, str]], text: str) -> list[dict[str, str]]:
+    def _inject_into_system(
+        self, messages: list[dict[str, str]], text: str
+    ) -> list[dict[str, str]]:
         if not text:
             return messages
 
@@ -102,9 +106,10 @@ class PersonaComponent(PromptComponent, PromptComponentMixin):
             "2. Provide 2-3 choices for what they can do next.\n"
             "3. You MUST provide a creative 'title' for this new adventure in the JSON response on the first turn.\n"
             "4. Describe changes to the player's inventory and stats (health, gold, reputation) directly in the narrative prose.\n"
-            "5. Set 'mood' to an atmospheric keyword (e.g. 'mysterious', 'heroic', 'combat', 'ethereal', 'dark', 'grimy').\n"
-            "6. When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true.\n"
-            "7. Ensure your output is strictly valid JSON matching the requested schema."
+            "5. Track discoverable lore with 'lore_entries_updated' for named NPCs, locations, factions, and important items.\n"
+            "6. Set 'mood' to an atmospheric keyword (e.g. 'mysterious', 'heroic', 'combat', 'ethereal', 'dark', 'grimy').\n"
+            "7. When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true.\n"
+            "8. Ensure your output is strictly valid JSON matching the requested schema."
         )
 
     def transform(self, context: Any, messages: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -130,9 +135,7 @@ class PlayerSheetComponent(PromptComponent, PromptComponentMixin):
             lines.append(f"Current Stats: {json.dumps(stats)}")
         objectives = getattr(context, "objectives", [])
         if objectives:
-            objective_bits = [
-                f"{objective.text} ({objective.status})" for objective in objectives
-            ]
+            objective_bits = [f"{objective.text} ({objective.status})" for objective in objectives]
             lines.append(f"Objectives: {'; '.join(objective_bits)}")
         faction_reputation = getattr(context, "faction_reputation", {})
         if faction_reputation:
@@ -147,9 +150,39 @@ class PlayerSheetComponent(PromptComponent, PromptComponentMixin):
         story_flags = sorted(getattr(context, "story_flags", set()))
         if story_flags:
             lines.append(f"Unlocked Story Flags: {', '.join(story_flags)}")
+        lore_entries = getattr(context, "lore_entries", [])
+        compact_lore_lines = self._compact_lore_lines(lore_entries)
+        if compact_lore_lines:
+            lines.append("Discovered Lore:")
+            lines.extend(compact_lore_lines)
         lines.append("</player_sheet>")
 
         return self._inject_into_system(messages, "\n".join(lines))
+
+    @staticmethod
+    def _compact_lore_lines(lore_entries: list[object], *, max_entries: int = 12) -> list[str]:
+        grouped: dict[str, list[str]] = {"npc": [], "location": [], "faction": [], "item": []}
+        normalized_entries = sorted(
+            lore_entries,
+            key=lambda entry: (
+                getattr(entry, "discovered_turn", None) is None,
+                getattr(entry, "discovered_turn", 0),
+                getattr(entry, "category", ""),
+                getattr(entry, "name", ""),
+            ),
+        )
+        for entry in normalized_entries[:max_entries]:
+            category = getattr(entry, "category", "")
+            name = str(getattr(entry, "name", "")).strip()
+            summary = str(getattr(entry, "summary", "")).strip()
+            if category not in grouped or not name or not summary:
+                continue
+            grouped[category].append(f"- {category.title()}: {name} - {summary}")
+
+        lines: list[str] = []
+        for category in ("npc", "location", "faction", "item"):
+            lines.extend(grouped[category])
+        return lines
 
 
 class MemoryComponent(PromptComponent, PromptComponentMixin):

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest  # type: ignore
 
-from cyoa.core.models import Choice, StoryNode
+from cyoa.core.models import Choice, LoreEntry, StoryNode
 from cyoa.db.rag_memory import NarrativeMemory
 from cyoa.llm.broker import StoryContext
 
@@ -166,6 +166,32 @@ class TestStoryContext:
         assert "42" in sys_content
         assert "100" in sys_content
 
+    def test_lore_codex_entries_rendered_in_system_prompt(self):
+        """Compact codex summaries should be injected into the prompt context."""
+        ctx = StoryContext(starting_prompt="Start")
+        ctx.sync_world_state(
+            lore_entries=[
+                LoreEntry(
+                    category="npc",
+                    name="Mira",
+                    summary="A scout who knows the drowned passages.",
+                    discovered_turn=2,
+                ),
+                LoreEntry(
+                    category="location",
+                    name="Drowned Passage",
+                    summary="A flooded route below the prison.",
+                    discovered_turn=2,
+                ),
+            ]
+        )
+
+        sys_content = ctx.get_messages()[0]["content"]
+
+        assert "Discovered Lore:" in sys_content
+        assert "Mira - A scout who knows the drowned passages." in sys_content
+        assert "Drowned Passage - A flooded route below the prison." in sys_content
+
 
 # ── 2. LLM JSON parse failure graceful fallback ───────────────────────────────
 
@@ -260,7 +286,7 @@ class TestModelBrokerFallback:
                         "choices": [{"text": "OK"}, {"text": "Cancel"}],
                         "items_gained": ["Sword"],
                         "items_lost": [],
-                        "stat_updates": {"health": 10}
+                        "stat_updates": {"health": 10},
                     }
                 ),
             ]
@@ -402,7 +428,7 @@ class TestModelBrokerFallback:
         engine = StoryEngine(broker=broker, starting_prompt="Start")
         engine.story_context = StoryContext(
             starting_prompt="Start",
-            token_budget=50,             # Very small budget so needs_summarization() fires
+            token_budget=50,  # Very small budget so needs_summarization() fires
             token_counter=lambda x: 10,  # Every token = 10 units, easily exceeds 80%
         )
         # Artificially fill history so needs_summarization() returns True
@@ -435,7 +461,10 @@ class TestModelBrokerFallback:
             raise RuntimeError("Simulated summarization service failure")
 
         narrator_payload = json.dumps(
-            {"narrative": "Everything is fine.", "choices": [{"text": "Continue"}, {"text": "Wait"}]}
+            {
+                "narrative": "Everything is fine.",
+                "choices": [{"text": "Continue"}, {"text": "Wait"}],
+            }
         )
         extraction_payload = json.dumps({"items_gained": [], "items_lost": [], "stat_updates": {}})
         call_seq = [narrator_payload, extraction_payload]
@@ -879,7 +908,9 @@ class TestStreamingCallback:
 
         gen = ModelBroker(provider=mock_provider)
         received = []
-        result = await gen._stream_with_callback_async([], on_token_chunk=received.append, schema={})
+        result = await gen._stream_with_callback_async(
+            [], on_token_chunk=received.append, schema={}
+        )
 
         extracted = "".join(received)
         assert "torch" in extracted
@@ -994,7 +1025,7 @@ class TestBranchingLogic:
             mock_db.create_story_node_and_get_title.return_value = "Test Story"
             mock_db.get_story_tree.return_value = None
             mock_db.save_scene_async = AsyncMock(return_value="sid")
-            mock_db.verify_connectivity_async = AsyncMock(return_value=True) # Redundant but safe
+            mock_db.verify_connectivity_async = AsyncMock(return_value=True)  # Redundant but safe
 
             app = CYOAApp(model_path="dummy")
             async with app.run_test() as pilot:
@@ -1069,7 +1100,7 @@ class TestBranchingLogic:
             mock_db.create_story_node_and_get_title.return_value = "Test Story"
             mock_db.get_story_tree.return_value = None
             mock_db.save_scene_async = AsyncMock(return_value="sid")
-            mock_db.verify_connectivity_async = AsyncMock(return_value=True) # Redundant but safe
+            mock_db.verify_connectivity_async = AsyncMock(return_value=True)  # Redundant but safe
 
             app = CYOAApp(model_path="dummy")
             async with app.run_test() as pilot:

@@ -73,6 +73,7 @@ __all__ = [
     "StatusBar",
     "TextPromptScreen",
     "JournalListItem",
+    "LoreCodexScreen",
     "SceneRecapScreen",
     "AccessibleSummaryScreen",
     "SceneListItem",
@@ -2015,6 +2016,37 @@ class CharacterSheetScreen(ModalScreen[None]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-character-sheet-close":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class LoreCodexScreen(ModalScreen[None]):
+    """Modal screen showing discovered lore entries grouped by category."""
+
+    DEFAULT_CSS = HelpScreen.DEFAULT_CSS
+    BINDINGS = [("escape", "close", "Close")]
+
+    def __init__(self, summary_text: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._summary_text = summary_text
+
+    def compose(self) -> ComposeResult:
+        with DialogFrame(
+            id="lore-codex-dialog",
+            classes="dialog-frame dialog-frame-scroll dialog-frame-accent",
+        ):
+            with Container(id="lore-codex-content", classes="dialog-content"):
+                yield Label("[b]Lore Codex[/b]", id="lore-codex-title", classes="dialog-title")
+                yield Markdown(self._summary_text, id="lore-codex-text")
+            yield Button("Close [b](Esc)[/b]", id="btn-lore-codex-close", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#btn-lore-codex-close", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-lore-codex-close":
             self.dismiss(None)
 
     def action_close(self) -> None:

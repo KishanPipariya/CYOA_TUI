@@ -6,7 +6,7 @@ import pytest
 
 from cyoa.core.engine import StoryEngine
 from cyoa.core.events import Events, bus
-from cyoa.core.models import Choice, Objective, StoryNode
+from cyoa.core.models import Choice, LoreEntry, Objective, StoryNode
 from cyoa.core.runtime import EnginePhase
 from cyoa.core.state import GameState
 from cyoa.llm.broker import ModelBroker, StoryContext
@@ -182,6 +182,7 @@ async def test_engine_generate_next_first_turn_persists_title_and_scene():
         player_stats=engine.state.player_stats,
         inventory=engine.state.inventory,
         mood="default",
+        lore_entries=[],
     )
     assert titles == ["Fresh Adventure"]
     assert completions == ["Opening scene"]
@@ -349,7 +350,9 @@ async def test_engine_generate_next_ignores_runtime_event_subscriber_failures():
     engine.rag.index_node = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
     bus.subscribe(Events.TOKEN_STREAMED, lambda token: (_ for _ in ()).throw(RuntimeError(token)))
-    bus.subscribe(Events.NODE_COMPLETED, lambda node: (_ for _ in ()).throw(RuntimeError(node.narrative)))
+    bus.subscribe(
+        Events.NODE_COMPLETED, lambda node: (_ for _ in ()).throw(RuntimeError(node.narrative))
+    )
 
     await engine._generate_next(choice_text="anything")
 
@@ -361,7 +364,9 @@ async def test_engine_generate_next_ignores_runtime_event_subscriber_failures():
 async def test_engine_make_choice_ignores_runtime_event_subscriber_failures():
     broker, _provider = _make_broker_with_mock_provider()
     broker.generate_next_node_async = AsyncMock(  # type: ignore[method-assign]
-        return_value=StoryNode(narrative="After choice", choices=[Choice(text="A"), Choice(text="B")])
+        return_value=StoryNode(
+            narrative="After choice", choices=[Choice(text="A"), Choice(text="B")]
+        )
     )
     broker.save_state_async = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
@@ -448,6 +453,14 @@ def test_engine_save_and_load_roundtrip_preserves_extended_world_state():
             "faction_reputation": {"Wardens": -2},
             "npc_affinity": {"Mira": 2},
             "story_flags": ["cell_opened"],
+            "lore_entries": [
+                {
+                    "category": "location",
+                    "name": "Blackreef Cellars",
+                    "summary": "A damp prison network beneath the fortress.",
+                    "discovered_turn": 1,
+                }
+            ],
         },
         initial_prompt_config={
             "goals": ["Survive"],
@@ -467,6 +480,14 @@ def test_engine_save_and_load_roundtrip_preserves_extended_world_state():
     assert loaded.state.faction_reputation == {"Wardens": -2}
     assert loaded.state.npc_affinity == {"Mira": 2}
     assert loaded.state.story_flags == {"cell_opened"}
+    assert loaded.state.lore_entries == [
+        LoreEntry(
+            category="location",
+            name="Blackreef Cellars",
+            summary="A damp prison network beneath the fortress.",
+            discovered_turn=1,
+        )
+    ]
     assert loaded.story_context is not None
     assert loaded.story_context.goals == ["Survive"]
     assert loaded.story_context.directives == ["Honor locked choices."]
@@ -487,6 +508,14 @@ async def test_engine_branch_to_scene_uses_cached_provider_state():
                 "available_choices": ["A", "B"],
                 "inventory": ["Torch"],
                 "player_stats": {"health": 90, "gold": 1, "reputation": 0},
+                "lore_entries": [
+                    {
+                        "category": "location",
+                        "name": "Old Dock",
+                        "summary": "A rotting harbor where smugglers once traded.",
+                        "discovered_turn": 1,
+                    }
+                ],
             },
             {
                 "id": "scene-2",
@@ -494,6 +523,20 @@ async def test_engine_branch_to_scene_uses_cached_provider_state():
                 "available_choices": ["C", "D"],
                 "inventory": ["Torch", "Key"],
                 "player_stats": {"health": 80, "gold": 2, "reputation": 1},
+                "lore_entries": [
+                    {
+                        "category": "location",
+                        "name": "Old Dock",
+                        "summary": "A rotting harbor where smugglers once traded.",
+                        "discovered_turn": 1,
+                    },
+                    {
+                        "category": "item",
+                        "name": "Brass Key",
+                        "summary": "A dockmaster's key stamped with a wave crest.",
+                        "discovered_turn": 2,
+                    },
+                ],
             },
         ],
         "choices": ["A"],
@@ -511,6 +554,20 @@ async def test_engine_branch_to_scene_uses_cached_provider_state():
     assert engine.state.turn_count == 2
     assert engine.state.inventory == ["Torch", "Key"]
     assert engine.state.player_stats["health"] == 80
+    assert engine.state.lore_entries == [
+        LoreEntry(
+            category="location",
+            name="Old Dock",
+            summary="A rotting harbor where smugglers once traded.",
+            discovered_turn=1,
+        ),
+        LoreEntry(
+            category="item",
+            name="Brass Key",
+            summary="A dockmaster's key stamped with a wave crest.",
+            discovered_turn=2,
+        ),
+    ]
     assert engine.state.current_node is not None
     assert [c.text for c in engine.state.current_node.choices] == ["C", "D"]
     assert engine.state.timeline_metadata == [
@@ -608,6 +665,13 @@ def test_game_state_apply_node_updates_emits_world_state_for_objectives_relation
         npc_affinity_updates={"Mira": -1},
         story_flags_set=["met_mira"],
         story_flags_cleared=["missing-flag"],
+        lore_entries_updated=[
+            LoreEntry(
+                category="npc",
+                name="Mira",
+                summary="A wary scout who knows the flooded tunnels.",
+            )
+        ],
     )
 
     world_events: list[dict[str, object]] = []
@@ -619,6 +683,14 @@ def test_game_state_apply_node_updates_emits_world_state_for_objectives_relation
     assert state.faction_reputation == {"Guild": 2}
     assert state.npc_affinity == {"Mira": -1}
     assert state.story_flags == {"met_mira"}
+    assert state.lore_entries == [
+        LoreEntry(
+            category="npc",
+            name="Mira",
+            summary="A wary scout who knows the flooded tunnels.",
+            discovered_turn=1,
+        )
+    ]
     assert world_events == [state.get_world_state()]
 
 
@@ -642,6 +714,15 @@ def test_game_state_load_save_data_coerces_extended_world_fields():
             "faction_reputation": {"Guild": "4", "Broken": True},
             "npc_affinity": {"Mira": 2.2, "Broken": object()},
             "story_flags": ["met_mira", "", 9],
+            "lore_entries": [
+                {
+                    "category": "location",
+                    "name": "Flooded Tunnels",
+                    "summary": "Collapsed passageways beneath the keep.",
+                    "discovered_turn": 2,
+                },
+                {"category": "npc", "name": "", "summary": "broken"},
+            ],
             "current_node": {"choices": "broken"},
         }
     )
@@ -660,6 +741,14 @@ def test_game_state_load_save_data_coerces_extended_world_fields():
     assert state.faction_reputation == {"Guild": 4}
     assert state.npc_affinity == {"Mira": 2}
     assert state.story_flags == {"met_mira"}
+    assert state.lore_entries == [
+        LoreEntry(
+            category="location",
+            name="Flooded Tunnels",
+            summary="Collapsed passageways beneath the keep.",
+            discovered_turn=2,
+        )
+    ]
     assert state.current_node is None
 
 

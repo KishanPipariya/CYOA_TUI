@@ -11,7 +11,7 @@ from textual.theme import Theme
 from textual.widgets import Button, Label, ListView, ProgressBar
 
 from cyoa.core import constants
-from cyoa.core.models import Choice, ChoiceRequirement, StoryNode
+from cyoa.core.models import Choice, ChoiceRequirement, LoreEntry, StoryNode
 from cyoa.core.runtime import EnginePhase, EngineTransition
 from cyoa.core.user_config import (
     StartupAccessibilityRecommendation,
@@ -26,6 +26,7 @@ from cyoa.ui.components import (
     CommandPaletteScreen,
     FirstRunSetupScreen,
     LoadGameScreen,
+    LoreCodexScreen,
     ModelDownloadScreen,
     NotificationHistoryScreen,
     SceneRecapScreen,
@@ -50,6 +51,7 @@ from cyoa.ui.presenters import (
     build_accessible_export,
     build_choice_label,
     build_journal_summary,
+    build_lore_codex_summary,
     build_scene_recap,
     build_story_map_summary,
     build_world_state_summary,
@@ -666,6 +668,45 @@ def test_build_world_state_summary_groups_objectives_and_relationships() -> None
     assert "- vault_seen" in summary
 
 
+def test_build_lore_codex_summary_groups_entries_by_category() -> None:
+    summary = build_lore_codex_summary(
+        story_title="Vault Run",
+        turn_count=4,
+        lore_entries=[
+            LoreEntry(
+                category="npc",
+                name="Steward Hale",
+                summary="The gatekeeper of the lower archive.",
+                discovered_turn=2,
+            ),
+            LoreEntry(
+                category="location",
+                name="Moonwell Vault",
+                summary="A sealed chamber below the guild hall.",
+                discovered_turn=1,
+            ),
+            LoreEntry(
+                category="item",
+                name="Silver Key",
+                summary="A key etched with the guild crest.",
+                discovered_turn=3,
+            ),
+        ],
+    )
+
+    assert "## Overview" in summary
+    assert "- Adventure: Vault Run" in summary
+    assert "- Entries discovered: 3" in summary
+    assert "## NPCs" in summary
+    assert "- Steward Hale (Turn 2): The gatekeeper of the lower archive." in summary
+    assert "## Locations" in summary
+    assert "- Moonwell Vault (Turn 1): A sealed chamber below the guild hall." in summary
+    assert "## Factions" in summary
+    assert "- None discovered" in summary
+    assert "## Items" in summary
+    assert "- Silver Key (Turn 3): A key etched with the guild crest." in summary
+
+
 def test_build_accessible_export_uses_plain_text_reading_order() -> None:
     transcript = build_accessible_export(
         story_title="Vault Run",
@@ -808,6 +849,16 @@ def test_accessible_summary_screen_switches_and_closes() -> None:
         call("story_map"),
         call(None),
     ]
+
+
+def test_lore_codex_screen_closes() -> None:
+    screen = LoreCodexScreen("# Lore Codex\n\n## NPCs\n- Mira: Scout")
+    screen.dismiss = MagicMock()
+
+    screen.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-lore-codex-close")))
+    screen.action_close()
+
+    assert screen.dismiss.call_args_list == [call(None), call(None)]
 
 
 def test_app_effective_keybindings_merge_defaults_and_overrides() -> None:

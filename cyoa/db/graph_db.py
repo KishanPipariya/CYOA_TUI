@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import uuid
@@ -50,8 +51,7 @@ def _env_flag_enabled(name: str) -> bool:
 
 def is_graph_db_enabled() -> bool:
     return _env_flag_enabled("CYOA_ENABLE_GRAPH_DB") or any(
-        os.getenv(name)
-        for name in ("NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD")
+        os.getenv(name) for name in ("NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD")
     )
 
 
@@ -81,7 +81,9 @@ class CYOAGraphDB:
         password: str | None = None,
     ) -> None:
         """Initialize the connection to Neo4j. Reads credentials from env vars if not provided."""
-        self.enabled = any(value is not None for value in (uri, user, password)) or is_graph_db_enabled()
+        self.enabled = (
+            any(value is not None for value in (uri, user, password)) or is_graph_db_enabled()
+        )
         uri = uri or os.getenv("NEO4J_URI", DEFAULT_NEO4J_URI)
         user = user or os.getenv("NEO4J_USER")
         password = password or os.getenv("NEO4J_PASSWORD")
@@ -104,9 +106,7 @@ class CYOAGraphDB:
                 uri_str, auth=(str(user or ""), str(password or "")), connection_timeout=1.0
             )
         except Exception as e:  # noqa: BLE001
-            logger.warning(
-                f"Failed to create Neo4j driver. Graph persistence disabled. Error: {e}"
-            )
+            logger.warning(f"Failed to create Neo4j driver. Graph persistence disabled. Error: {e}")
             self.driver = None
 
     @staticmethod
@@ -139,6 +139,7 @@ class CYOAGraphDB:
             return False
 
         import asyncio
+
         try:
             await asyncio.to_thread(self.cb.call, self.driver.verify_connectivity)
             logger.info("Successfully connected to Neo4j.")
@@ -149,9 +150,7 @@ class CYOAGraphDB:
             )
             return False
         except (CircuitBreakerOpenError, ServiceUnavailable, Exception) as e:  # noqa: BLE001
-            logger.warning(
-                f"Graph DB is offline. Proceeding without graph persistence. Error: {e}"
-            )
+            logger.warning(f"Graph DB is offline. Proceeding without graph persistence. Error: {e}")
             return False
 
     @property
@@ -179,9 +178,7 @@ class CYOAGraphDB:
             return None
 
     @classmethod
-    def _resolve_story_title_collision(
-        cls, base_title: str, existing_titles: Iterable[str]
-    ) -> str:
+    def _resolve_story_title_collision(cls, base_title: str, existing_titles: Iterable[str]) -> str:
         highest_modifier = max(
             (
                 modifier
@@ -198,9 +195,7 @@ class CYOAGraphDB:
         return f"{base_title} ({highest_modifier + 1})"
 
     @staticmethod
-    def _pick_story_root(
-        nodes: dict[str, StoryTreeNode], has_incoming: set[str]
-    ) -> str | None:
+    def _pick_story_root(nodes: dict[str, StoryTreeNode], has_incoming: set[str]) -> str | None:
         for node_id in nodes:
             if node_id not in has_incoming:
                 return node_id
@@ -377,6 +372,7 @@ class CYOAGraphDB:
         player_stats: dict[str, int] | None = None,
         inventory: list[str] | None = None,
         mood: str = "default",
+        lore_entries: list[dict[str, Any]] | None = None,
     ) -> str:
         """Creates a Scene node in the graph, links it to its Story, and returns its UUID."""
         scene_id = str(uuid.uuid4())
@@ -397,7 +393,8 @@ class CYOAGraphDB:
                 player_gold: $player_gold,
                 player_reputation: $player_reputation,
                 inventory: $inventory,
-                mood: $mood
+                mood: $mood,
+                lore_entries_json: $lore_entries_json
             })
             CREATE (s)-[:BELONGS_TO]->(story)
             RETURN s.id AS scene_id
@@ -415,6 +412,7 @@ class CYOAGraphDB:
                         player_reputation=normalized_player_stats["reputation"],
                         inventory=inventory or [],
                         mood=mood,
+                        lore_entries_json=json.dumps(lore_entries or []),
                     )
                     record = result.single()
                     if record is None:
@@ -468,6 +466,7 @@ class CYOAGraphDB:
         player_stats: dict[str, int] | None = None,
         inventory: list[str] | None = None,
         mood: str = "default",
+        lore_entries: list[dict[str, Any]] | None = None,
     ) -> str:
         """
         Writes a new scene node (and optional edge from previous scene) to Neo4j.
@@ -477,7 +476,13 @@ class CYOAGraphDB:
 
         def _write() -> str:
             new_scene_id = self.create_scene_node(
-                narrative, available_choices, story_title, player_stats, inventory, mood
+                narrative,
+                available_choices,
+                story_title,
+                player_stats,
+                inventory,
+                mood,
+                lore_entries,
             )
             if source_scene_id and choice_text:
                 self.create_choice_edge(source_scene_id, new_scene_id, choice_text)
@@ -503,7 +508,9 @@ class CYOAGraphDB:
             # Use a parameterised variable-length path so Cypher does the
             # traversal in one round-trip instead of one query per hop.
             query = (
-                "MATCH path = (start:Scene)-[:LEADS_TO*.." + str(max_depth) + "]->(current:Scene {id: $current_id})\n"
+                "MATCH path = (start:Scene)-[:LEADS_TO*.."
+                + str(max_depth)
+                + "]->(current:Scene {id: $current_id})\n"
                 "WHERE NOT ()-[:LEADS_TO]->(start)\n"
                 "RETURN nodes(path) AS scenes, relationships(path) AS choices\n"
                 "ORDER BY length(path) DESC\n"
@@ -522,6 +529,7 @@ class CYOAGraphDB:
                         "available_choices": n.get("available_choices", []),
                         "player_stats": self._scene_node_player_stats(n),
                         "inventory": list(n.get("inventory", [])),
+                        "lore_entries": self._deserialize_lore_entries(n.get("lore_entries_json")),
                     }
                     for n in record["scenes"]
                 ]
@@ -577,7 +585,6 @@ class CYOAGraphDB:
             logger.warning(f"Neo4j scenes retrieval skipped: {e}")
             return []
 
-
     def get_story_tree(self, story_title: str) -> dict[str, Any]:
         """
         Returns all nodes and edges for the given story to build a topological tree.
@@ -608,6 +615,17 @@ class CYOAGraphDB:
             logger.warning(f"Neo4j story tree retrieval skipped: {e}")
             return {}
 
+    @staticmethod
+    def _deserialize_lore_entries(raw: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw, str) or not raw:
+            return []
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(payload, list):
+            return []
+        return [entry for entry in payload if isinstance(entry, dict)]
 
 
 # Example Usage removed for production cleanup.

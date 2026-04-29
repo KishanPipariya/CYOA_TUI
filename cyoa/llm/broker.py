@@ -18,7 +18,7 @@ from cyoa.core.constants import (
     DEFAULT_LLM_SUMMARY_MAX_TOKENS,
     DEFAULT_LLM_SUMMARY_THRESHOLD,
 )
-from cyoa.core.models import Choice, ExtractionNode, NarratorNode, Objective, StoryNode
+from cyoa.core.models import Choice, ExtractionNode, LoreEntry, NarratorNode, Objective, StoryNode
 from cyoa.core.observability import (
     EngineObservedSession,
     record_fallback_node,
@@ -79,9 +79,15 @@ class GenerationPreset:
 
 
 PRESETS: dict[str, GenerationPreset] = {
-    "balanced": GenerationPreset("balanced", temperature=0.6, max_tokens=512, summary_max_tokens=200),
-    "precise": GenerationPreset("precise", temperature=0.35, max_tokens=420, summary_max_tokens=160),
-    "cinematic": GenerationPreset("cinematic", temperature=0.85, max_tokens=640, summary_max_tokens=240),
+    "balanced": GenerationPreset(
+        "balanced", temperature=0.6, max_tokens=512, summary_max_tokens=200
+    ),
+    "precise": GenerationPreset(
+        "precise", temperature=0.35, max_tokens=420, summary_max_tokens=160
+    ),
+    "cinematic": GenerationPreset(
+        "cinematic", temperature=0.85, max_tokens=640, summary_max_tokens=240
+    ),
 }
 
 
@@ -111,6 +117,7 @@ class StoryContext:
         self.faction_reputation: dict[str, int] = {}
         self.npc_affinity: dict[str, int] = {}
         self.story_flags: set[str] = set()
+        self.lore_entries: list[LoreEntry] = []
         # Hierarchy tracking
         self._scene_turn_count: int = 0
         self._chapter_scene_count: int = 0
@@ -216,6 +223,7 @@ class StoryContext:
         faction_reputation: dict[str, int] | None = None,
         npc_affinity: dict[str, int] | None = None,
         story_flags: set[str] | None = None,
+        lore_entries: list[LoreEntry] | None = None,
     ) -> None:
         """Keep prompt state aligned with the engine's long-lived world state."""
         if inventory is not None:
@@ -230,6 +238,8 @@ class StoryContext:
             self.npc_affinity = dict(npc_affinity)
         if story_flags is not None:
             self.story_flags = set(story_flags)
+        if lore_entries is not None:
+            self.lore_entries = [entry.model_copy() for entry in lore_entries]
 
     def set_hierarchical_summary(
         self,
@@ -302,6 +312,7 @@ class StoryContext:
         new_ctx.faction_reputation = dict(self.faction_reputation)
         new_ctx.npc_affinity = dict(self.npc_affinity)
         new_ctx.story_flags = set(self.story_flags)
+        new_ctx.lore_entries = [entry.model_copy() for entry in self.lore_entries]
         new_ctx._scene_turn_count = self._scene_turn_count
         new_ctx._chapter_scene_count = self._chapter_scene_count
         # Reuse the same pipeline (shallow copy of list is fine if components are stateless or handled)
@@ -436,9 +447,7 @@ class ModelBroker:
 
         n_ctx_val = n_ctx or int(os.getenv("LLM_N_CTX", str(DEFAULT_LLM_N_CTX)))
         if not os.path.exists(m_path):
-            raise FileNotFoundError(
-                f"Configured llama_cpp model file does not exist: {m_path!r}."
-            )
+            raise FileNotFoundError(f"Configured llama_cpp model file does not exist: {m_path!r}.")
         return LlamaCppProvider(model_path=m_path, n_ctx=n_ctx_val)
 
     async def generate_summary_async(self, turns_to_compress: list[dict[str, str]]) -> str:
@@ -481,7 +490,10 @@ class ModelBroker:
 
                 # Incorporate old scene summary into chapter summary
                 new_chapter = await self._generate_dense_summary(
-                    [], context.chapter_summary, previous_summary=context.scene_summary, level="chapter"
+                    [],
+                    context.chapter_summary,
+                    previous_summary=context.scene_summary,
+                    level="chapter",
                 )
                 context._chapter_scene_count += 1
 
@@ -493,7 +505,10 @@ class ModelBroker:
                 if context._chapter_scene_count >= 5:
                     logger.info("Hierarchical Summarization: Promoting Chapter to Arc.")
                     new_arc = await self._generate_dense_summary(
-                        [], context.arc_summary, previous_summary=context.chapter_summary, level="arc"
+                        [],
+                        context.arc_summary,
+                        previous_summary=context.chapter_summary,
+                        level="arc",
                     )
                     # Reset chapter buffer
                     new_chapter = ""
@@ -672,6 +687,7 @@ class ModelBroker:
             npc_affinity_updates=extraction_node.npc_affinity_updates,
             story_flags_set=extraction_node.story_flags_set,
             story_flags_cleared=extraction_node.story_flags_cleared,
+            lore_entries_updated=extraction_node.lore_entries_updated,
         )
 
     async def _run_unified_generation(
@@ -690,8 +706,15 @@ class ModelBroker:
 
         while attempts < max_attempts:
             try:
-                if attempts == 0 and stream and on_token_chunk is not None and self.capabilities.streaming_json:
-                    content = await self._stream_with_callback_async(messages, on_token_chunk, self._schema)
+                if (
+                    attempts == 0
+                    and stream
+                    and on_token_chunk is not None
+                    and self.capabilities.streaming_json
+                ):
+                    content = await self._stream_with_callback_async(
+                        messages, on_token_chunk, self._schema
+                    )
                 else:
                     content = await self.provider.generate_json(
                         messages=messages,
@@ -708,13 +731,17 @@ class ModelBroker:
                 last_error = e
                 if attempts >= max_attempts:
                     break
-                logger.warning("Unified repair attempt %d/%d: %s", attempts, self._repair_attempts, e)
+                logger.warning(
+                    "Unified repair attempt %d/%d: %s", attempts, self._repair_attempts, e
+                )
                 messages = list(messages)
                 messages.append({"role": "assistant", "content": content})
-                messages.append({
-                    "role": "user",
-                    "content": f"Fix JSON error: {e}. Respond with ONLY the corrected JSON StoryNode."
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"Fix JSON error: {e}. Respond with ONLY the corrected JSON StoryNode.",
+                    }
+                )
 
         logger.error("Unified generation failed: %s", last_error)
         return self._get_fallback_node()
@@ -736,8 +763,15 @@ class ModelBroker:
 
         while attempts < max_attempts:
             try:
-                if attempts == 0 and stream and on_token_chunk is not None and self.capabilities.streaming_json:
-                    content = await self._stream_with_callback_async(messages, on_token_chunk, self._narrator_schema)
+                if (
+                    attempts == 0
+                    and stream
+                    and on_token_chunk is not None
+                    and self.capabilities.streaming_json
+                ):
+                    content = await self._stream_with_callback_async(
+                        messages, on_token_chunk, self._narrator_schema
+                    )
                 else:
                     content = await self.provider.generate_json(
                         messages=messages,
@@ -756,15 +790,22 @@ class ModelBroker:
                 if attempts >= max_attempts:
                     break
 
-                logger.warning("Narrator repair attempt %d/%d for error: %s", attempts, self._repair_attempts, e)
+                logger.warning(
+                    "Narrator repair attempt %d/%d for error: %s",
+                    attempts,
+                    self._repair_attempts,
+                    e,
+                )
                 record_repair_attempt(model_name="narrator", error_type=type(e).__name__)
 
                 messages = list(messages)
                 messages.append({"role": "assistant", "content": content})
-                messages.append({
-                    "role": "user",
-                    "content": f"Your previous output was invalid JSON. Fix the following error: {e}. Respond with ONLY the corrected JSON narrative."
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"Your previous output was invalid JSON. Fix the following error: {e}. Respond with ONLY the corrected JSON narrative.",
+                    }
+                )
 
         if not narrator_node:
             logger.error("Narrator phase failed: %s", last_error)
@@ -784,14 +825,15 @@ class ModelBroker:
                     "You are the 'Judge' for a role-playing game. Your task is to extract "
                     "player state changes from the narrative text provided. "
                     "Extract ONLY items gained, items lost, stat updates (health, gold, reputation), "
-                    "objective updates, faction shifts, NPC affinity changes, and story flag changes. "
+                    "objective updates, faction shifts, NPC affinity changes, story flag changes, "
+                    "and lore codex entries for discovered NPCs, locations, factions, or items. "
                     "If the narrative doesn't mention a change, return an empty list or 0 for that field."
-                )
+                ),
             },
             {
                 "role": "user",
-                "content": f"Extract state changes from this narrative:\n\n{narrative}"
-            }
+                "content": f"Extract state changes from this narrative:\n\n{narrative}",
+            },
         ]
 
         try:
@@ -847,9 +889,11 @@ class ModelBroker:
 
                 if isinstance(data, dict) and "narrative" in data:
                     current_narrative = data["narrative"]
-                    if isinstance(current_narrative, str) and len(current_narrative) > len(last_yielded_narrative):
+                    if isinstance(current_narrative, str) and len(current_narrative) > len(
+                        last_yielded_narrative
+                    ):
                         # Yield only the new part of the narrative
-                        new_chunk = current_narrative[len(last_yielded_narrative):]
+                        new_chunk = current_narrative[len(last_yielded_narrative) :]
                         on_token_chunk(new_chunk)
                         last_yielded_narrative = current_narrative
             except ValueError:

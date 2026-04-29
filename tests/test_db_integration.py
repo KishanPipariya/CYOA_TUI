@@ -407,6 +407,7 @@ def test_get_scene_history_path_returns_longest_root_path(mock_neo4j):
                     "available_choices": ["Left", "Right"],
                     "player_stats": {"health": 100, "gold": 2, "reputation": 0},
                     "inventory": ["Lantern"],
+                    "lore_entries": [],
                 },
                 {
                     "id": "mid",
@@ -414,6 +415,7 @@ def test_get_scene_history_path_returns_longest_root_path(mock_neo4j):
                     "available_choices": ["Forward"],
                     "player_stats": {"health": 90, "gold": 2, "reputation": 0},
                     "inventory": ["Lantern", "Map"],
+                    "lore_entries": [],
                 },
                 {
                     "id": "leaf",
@@ -421,6 +423,7 @@ def test_get_scene_history_path_returns_longest_root_path(mock_neo4j):
                     "available_choices": [],
                     "player_stats": {"health": 90, "gold": 3, "reputation": 0},
                     "inventory": ["Lantern", "Map"],
+                    "lore_entries": [],
                 },
             ],
             "choices": ["Left", "Forward"],
@@ -596,6 +599,7 @@ def test_get_scene_history_path_reconstructs_player_stats_from_flat_scene_proper
                     "available_choices": ["Left", "Right"],
                     "player_stats": {"health": 100, "gold": 2, "reputation": 0},
                     "inventory": ["Lantern"],
+                    "lore_entries": [],
                 },
                 {
                     "id": "leaf",
@@ -603,10 +607,50 @@ def test_get_scene_history_path_reconstructs_player_stats_from_flat_scene_proper
                     "available_choices": [],
                     "player_stats": {"health": 90, "gold": 3, "reputation": 1},
                     "inventory": ["Lantern", "Map"],
+                    "lore_entries": [],
                 },
             ],
             "choices": ["Left"],
         }
+
+
+def test_get_scene_history_path_deserializes_lore_entries(mock_neo4j):
+    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
+        mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
+        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
+
+        mock_result = MagicMock()
+        mock_result.single.return_value = {
+            "scenes": [
+                {
+                    "id": "leaf",
+                    "narrative": "Leaf",
+                    "available_choices": [],
+                    "player_health": 90,
+                    "player_gold": 3,
+                    "player_reputation": 1,
+                    "inventory": ["Lantern", "Map"],
+                    "lore_entries_json": (
+                        '[{"category":"location","name":"Moonwell Vault",'
+                        '"summary":"A sealed chamber below the guild hall.","discovered_turn":2}]'
+                    ),
+                },
+            ],
+            "choices": [],
+        }
+        mock_neo4j.run.return_value = mock_result
+
+        history = db.get_scene_history_path("leaf")
+
+        assert history is not None
+        assert history["scenes"][0]["lore_entries"] == [
+            {
+                "category": "location",
+                "name": "Moonwell Vault",
+                "summary": "A sealed chamber below the guild hall.",
+                "discovered_turn": 2,
+            }
+        ]
 
 
 @pytest.mark.asyncio

@@ -15,6 +15,7 @@ from cyoa.ui.components import (
     ConfirmScreen,
     HelpScreen,
     JournalListItem,
+    LoreCodexScreen,
     NotificationHistoryScreen,
     SceneRecapScreen,
 )
@@ -210,6 +211,11 @@ class NavigationMixin:
         cast(Any, app)._push_modal_screen(
             CharacterSheetScreen(cast(Any, self).get_world_state_text())
         )
+
+    def action_show_lore_codex(self) -> None:
+        """Show the discovered lore codex."""
+        app = as_textual_app(self)
+        cast(Any, app)._push_modal_screen(LoreCodexScreen(cast(Any, self).get_lore_codex_text()))
 
     def action_show_journal_summary(self) -> None:
         """Show a linear summary of journal entries for text-first review."""

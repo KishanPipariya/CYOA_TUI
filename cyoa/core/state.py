@@ -4,7 +4,7 @@ from typing import Any, ClassVar
 
 from cyoa.core.events import Events, bus
 from cyoa.core.mementos import GameStateSnapshot, StoryContextMemento
-from cyoa.core.models import Objective, StoryNode
+from cyoa.core.models import LoreEntry, Objective, StoryNode
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,9 @@ class GameState:
         player_stats: dict[str, int] | None = None,
     ) -> None:
         self.inventory: list[str] = list(inventory) if inventory is not None else []
-        self.player_stats: dict[str, int] = dict(player_stats) if player_stats else dict(self._DEFAULT_STATS)
+        self.player_stats: dict[str, int] = (
+            dict(player_stats) if player_stats else dict(self._DEFAULT_STATS)
+        )
         self.turn_count: int = 1
         self.current_node: StoryNode | None = None
         self.story_title: str | None = None
@@ -38,6 +40,7 @@ class GameState:
         self.faction_reputation: dict[str, int] = {}
         self.npc_affinity: dict[str, int] = {}
         self.story_flags: set[str] = set()
+        self.lore_entries: list[LoreEntry] = []
         self._undo_history: deque[GameStateSnapshot] = deque(maxlen=MAX_HISTORY_DEPTH)
         self._redo_history: deque[GameStateSnapshot] = deque(maxlen=MAX_HISTORY_DEPTH)
         self._bookmarks: dict[str, GameStateSnapshot] = {}
@@ -57,6 +60,7 @@ class GameState:
         self.faction_reputation = {}
         self.npc_affinity = {}
         self.story_flags = set()
+        self.lore_entries = []
         self._undo_history.clear()
         self._redo_history.clear()
         self._bookmarks = {}
@@ -186,14 +190,19 @@ class GameState:
             "faction_reputation": dict(self.faction_reputation),
             "npc_affinity": dict(self.npc_affinity),
             "story_flags": sorted(self.story_flags),
+            "lore_entries": [entry.model_dump() for entry in self.lore_entries],
             "undo_history": [snapshot.to_payload() for snapshot in self._undo_history],
             "redo_history": [snapshot.to_payload() for snapshot in self._redo_history],
-            "bookmarks": {name: snapshot.to_payload() for name, snapshot in self._bookmarks.items()},
+            "bookmarks": {
+                name: snapshot.to_payload() for name, snapshot in self._bookmarks.items()
+            },
         }
 
     def load_save_data(self, data: dict[str, Any]) -> None:
         """Hydrate state from dictionary data."""
-        self.story_title = data.get("story_title") if isinstance(data.get("story_title"), str) else None
+        self.story_title = (
+            data.get("story_title") if isinstance(data.get("story_title"), str) else None
+        )
         self.turn_count = self._coerce_positive_int(data.get("turn_count"), default=1)
         self.inventory = self._coerce_inventory(data.get("inventory"))
         self.player_stats = self._coerce_player_stats(data.get("player_stats"))
@@ -208,8 +217,13 @@ class GameState:
         self.faction_reputation = self._coerce_relationships(data.get("faction_reputation"))
         self.npc_affinity = self._coerce_relationships(data.get("npc_affinity"))
         self.story_flags = self._coerce_story_flags(data.get("story_flags"))
-        self._undo_history = deque(self._coerce_snapshot_list(data.get("undo_history")), maxlen=MAX_HISTORY_DEPTH)
-        self._redo_history = deque(self._coerce_snapshot_list(data.get("redo_history")), maxlen=MAX_HISTORY_DEPTH)
+        self.lore_entries = self._coerce_lore_entries(data.get("lore_entries"))
+        self._undo_history = deque(
+            self._coerce_snapshot_list(data.get("undo_history")), maxlen=MAX_HISTORY_DEPTH
+        )
+        self._redo_history = deque(
+            self._coerce_snapshot_list(data.get("redo_history")), maxlen=MAX_HISTORY_DEPTH
+        )
         self._bookmarks = self._coerce_bookmarks(data.get("bookmarks"))
 
         node_data = data.get("current_node")
@@ -316,6 +330,7 @@ class GameState:
             "faction_reputation": dict(self.faction_reputation),
             "npc_affinity": dict(self.npc_affinity),
             "story_flags": sorted(self.story_flags),
+            "lore_entries": [entry.model_dump() for entry in self.lore_entries],
         }
 
     def seed_world_state(
@@ -327,6 +342,7 @@ class GameState:
         faction_reputation: dict[str, int] | None = None,
         npc_affinity: dict[str, int] | None = None,
         story_flags: set[str] | None = None,
+        lore_entries: list[LoreEntry] | None = None,
     ) -> None:
         """Apply initial state from a theme or imported save payload."""
         if inventory is not None:
@@ -341,6 +357,8 @@ class GameState:
             self.npc_affinity = dict(npc_affinity)
         if story_flags is not None:
             self.story_flags = set(story_flags)
+        if lore_entries is not None:
+            self.lore_entries = [entry.model_copy() for entry in lore_entries]
 
     def _apply_objective_updates(self, objectives_updated: list[Objective]) -> bool:
         changed = False
@@ -380,11 +398,54 @@ class GameState:
                 changed = True
         return changed
 
+    def _apply_lore_entry_updates(self, lore_entries_updated: list[LoreEntry]) -> bool:
+        changed = False
+        entry_index = {
+            (entry.category, entry.name.casefold()): idx
+            for idx, entry in enumerate(self.lore_entries)
+        }
+        for entry in lore_entries_updated:
+            key = (entry.category, entry.name.casefold())
+            normalized = entry.model_copy(
+                update={
+                    "discovered_turn": (
+                        entry.discovered_turn
+                        if entry.discovered_turn is not None
+                        else self.turn_count
+                    )
+                }
+            )
+            existing_idx = entry_index.get(key)
+            if existing_idx is None:
+                self.lore_entries.append(normalized)
+                entry_index[key] = len(self.lore_entries) - 1
+                changed = True
+                continue
+
+            existing = self.lore_entries[existing_idx]
+            merged = existing.model_copy(
+                update={
+                    "summary": normalized.summary,
+                    "discovered_turn": (
+                        existing.discovered_turn
+                        if existing.discovered_turn is not None
+                        else normalized.discovered_turn
+                    ),
+                }
+            )
+            if merged != existing:
+                self.lore_entries[existing_idx] = merged
+                changed = True
+        return changed
+
     def _apply_world_updates(self, node: StoryNode) -> bool:
         changed = self._apply_objective_updates(node.objectives_updated)
         changed = self._apply_delta_map(self.faction_reputation, node.faction_updates) or changed
         changed = self._apply_delta_map(self.npc_affinity, node.npc_affinity_updates) or changed
-        changed = self._apply_flag_updates(node.story_flags_set, node.story_flags_cleared) or changed
+        changed = (
+            self._apply_flag_updates(node.story_flags_set, node.story_flags_cleared) or changed
+        )
+        changed = self._apply_lore_entry_updates(node.lore_entries_updated) or changed
         return changed
 
     def _coerce_objectives(self, value: Any) -> list[Objective]:
@@ -399,6 +460,19 @@ class GameState:
             except Exception:
                 continue
         return objectives
+
+    def _coerce_lore_entries(self, value: Any) -> list[LoreEntry]:
+        if not isinstance(value, list):
+            return []
+        entries: list[LoreEntry] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            try:
+                entries.append(LoreEntry(**item))
+            except Exception:
+                continue
+        return entries
 
     def _coerce_snapshot_list(self, value: Any) -> list[GameStateSnapshot]:
         """Normalize saved undo/redo stacks."""
@@ -442,14 +516,21 @@ class GameState:
             current_node=node,
             inventory=self._coerce_inventory(value.get("inventory")),
             player_stats=self._coerce_player_stats(value.get("player_stats")),
-            story_title=value.get("story_title") if isinstance(value.get("story_title"), str) else None,
-            current_scene_id=value.get("current_scene_id") if isinstance(value.get("current_scene_id"), str) else None,
-            last_choice_text=value.get("last_choice_text") if isinstance(value.get("last_choice_text"), str) else None,
+            story_title=value.get("story_title")
+            if isinstance(value.get("story_title"), str)
+            else None,
+            current_scene_id=value.get("current_scene_id")
+            if isinstance(value.get("current_scene_id"), str)
+            else None,
+            last_choice_text=value.get("last_choice_text")
+            if isinstance(value.get("last_choice_text"), str)
+            else None,
             timeline_metadata=self._coerce_timeline_metadata(value.get("timeline_metadata")),
             objectives=self._coerce_objectives(value.get("objectives")),
             faction_reputation=self._coerce_relationships(value.get("faction_reputation")),
             npc_affinity=self._coerce_relationships(value.get("npc_affinity")),
             story_flags=self._coerce_story_flags(value.get("story_flags")),
+            lore_entries=self._coerce_lore_entries(value.get("lore_entries")),
             story_context=StoryContextMemento.from_payload(value.get("story_context_history")),
         )
 
