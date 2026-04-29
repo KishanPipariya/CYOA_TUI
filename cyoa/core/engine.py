@@ -5,7 +5,14 @@ import uuid
 from typing import Any
 
 from cyoa.core.events import Events, bus
-from cyoa.core.models import Choice, Companion, LoreEntry, Objective, ResolvedChoiceCheck, StoryNode
+from cyoa.core.models import (
+    Choice,
+    Companion,
+    LoreEntry,
+    Objective,
+    ResolvedChoiceCheck,
+    StoryNode,
+)
 from cyoa.core.observability import (
     EngineObservedSession,
     record_provider_cache_state_restore,
@@ -287,6 +294,7 @@ class StoryEngine:
                 inventory=self.state.inventory,
                 mood=node.mood,
                 lore_entries=[entry.model_dump() for entry in self.state.lore_entries],
+                world_time=self.state.world_time.model_dump(),
             )
             return
 
@@ -511,7 +519,10 @@ class StoryEngine:
                 lore_entries.append(LoreEntry(**raw))
             except Exception:
                 continue
-        self.state.seed_world_state(lore_entries=lore_entries)
+        self.state.seed_world_state(
+            lore_entries=lore_entries,
+            world_time=target_scene.get("world_time"),
+        )
         self.state.timeline_metadata.append(
             {
                 "kind": "branch_restore",
@@ -604,6 +615,7 @@ class StoryEngine:
             npc_affinity=self.initial_world_state.get("npc_affinity"),
             story_flags=set(self.initial_world_state.get("story_flags", [])),
             lore_entries=self._coerce_lore_entry_seed(self.initial_world_state.get("lore_entries")),
+            world_time=self.initial_world_state.get("world_time"),
         )
         if self.story_context:
             goals = self.initial_prompt_config.get("goals")
@@ -631,6 +643,7 @@ class StoryEngine:
             story_flags=self.state.story_flags,
             lore_entries=self.state.lore_entries,
             companions=self.state.companions,
+            world_time=self.state.world_time,
         )
 
     def _find_choice_definition(self, choice_text: str) -> Choice | None:

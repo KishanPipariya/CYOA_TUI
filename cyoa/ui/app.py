@@ -810,6 +810,7 @@ class CYOAApp(
                 faction_reputation={},
                 npc_affinity={},
                 story_flags=[],
+                world_time=None,
             )
 
         state = self.engine.state
@@ -823,6 +824,7 @@ class CYOAApp(
             faction_reputation=state.faction_reputation,
             npc_affinity=state.npc_affinity,
             story_flags=state.story_flags,
+            world_time=state.world_time,
             last_choice_text=state.last_choice_text,
             last_resolved_choice_check=state.last_resolved_choice_check,
             current_scene_id=state.current_scene_id,

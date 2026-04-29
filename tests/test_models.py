@@ -1,7 +1,15 @@
 import pytest
 from pydantic import ValidationError
 
-from cyoa.core.models import Choice, ChoiceRequirement, Companion, LoreEntry, Objective, StoryNode
+from cyoa.core.models import (
+    Choice,
+    ChoiceRequirement,
+    Companion,
+    LoreEntry,
+    Objective,
+    StoryNode,
+    WorldTime,
+)
 
 
 def test_choice_basic_valid():
@@ -151,6 +159,34 @@ def test_choice_availability_reason_handles_companion_status_and_affinity() -> N
             {},
             set(),
             [Companion(name="Mira", status="active", affinity=3)],
+        )
+        is None
+    )
+
+
+def test_choice_availability_reason_handles_world_time_requirements() -> None:
+    choice = Choice(
+        text="Meet the smuggler at the floodgate",
+        requirements=ChoiceRequirement(min_day=2, allowed_periods=["night"]),
+    )
+
+    assert (
+        choice.availability_reason(
+            [],
+            {},
+            set(),
+            [],
+            WorldTime(day=1, hour=9),
+        )
+        == "Available from day 2 (current: day 1) | Available during night (current: morning)"
+    )
+    assert (
+        choice.availability_reason(
+            [],
+            {},
+            set(),
+            [],
+            WorldTime(day=2, hour=22),
         )
         is None
     )

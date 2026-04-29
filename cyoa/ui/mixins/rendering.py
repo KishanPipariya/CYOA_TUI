@@ -282,6 +282,7 @@ class RenderingMixin:
                         host.engine.state.player_stats,
                         host.engine.state.story_flags,
                         getattr(host.engine.state, "companions", []),
+                        getattr(host.engine.state, "world_time", None),
                     )
                 label = build_choice_label(
                     i,
@@ -332,6 +333,7 @@ class RenderingMixin:
             host.engine.state.player_stats,
             host.engine.state.story_flags,
             getattr(host.engine.state, "companions", []),
+            getattr(host.engine.state, "world_time", None),
         )
         if disabled_reason:
             app.notify(disabled_reason, severity="warning", timeout=2)

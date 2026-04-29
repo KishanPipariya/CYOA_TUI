@@ -373,6 +373,7 @@ class CYOAGraphDB:
         inventory: list[str] | None = None,
         mood: str = "default",
         lore_entries: list[dict[str, Any]] | None = None,
+        world_time: dict[str, Any] | None = None,
     ) -> str:
         """Creates a Scene node in the graph, links it to its Story, and returns its UUID."""
         scene_id = str(uuid.uuid4())
@@ -394,7 +395,8 @@ class CYOAGraphDB:
                 player_reputation: $player_reputation,
                 inventory: $inventory,
                 mood: $mood,
-                lore_entries_json: $lore_entries_json
+                lore_entries_json: $lore_entries_json,
+                world_time_json: $world_time_json
             })
             CREATE (s)-[:BELONGS_TO]->(story)
             RETURN s.id AS scene_id
@@ -413,6 +415,7 @@ class CYOAGraphDB:
                         inventory=inventory or [],
                         mood=mood,
                         lore_entries_json=json.dumps(lore_entries or []),
+                        world_time_json=json.dumps(world_time or {}),
                     )
                     record = result.single()
                     if record is None:
@@ -467,6 +470,7 @@ class CYOAGraphDB:
         inventory: list[str] | None = None,
         mood: str = "default",
         lore_entries: list[dict[str, Any]] | None = None,
+        world_time: dict[str, Any] | None = None,
     ) -> str:
         """
         Writes a new scene node (and optional edge from previous scene) to Neo4j.
@@ -483,6 +487,7 @@ class CYOAGraphDB:
                 inventory,
                 mood,
                 lore_entries,
+                world_time,
             )
             if source_scene_id and choice_text:
                 self.create_choice_edge(source_scene_id, new_scene_id, choice_text)
@@ -530,6 +535,7 @@ class CYOAGraphDB:
                         "player_stats": self._scene_node_player_stats(n),
                         "inventory": list(n.get("inventory", [])),
                         "lore_entries": self._deserialize_lore_entries(n.get("lore_entries_json")),
+                        "world_time": self._deserialize_world_time(n.get("world_time_json")),
                     }
                     for n in record["scenes"]
                 ]
@@ -626,6 +632,16 @@ class CYOAGraphDB:
         if not isinstance(payload, list):
             return []
         return [entry for entry in payload if isinstance(entry, dict)]
+
+    @staticmethod
+    def _deserialize_world_time(raw: Any) -> dict[str, Any]:
+        if not isinstance(raw, str) or not raw:
+            return {}
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
 
 # Example Usage removed for production cleanup.

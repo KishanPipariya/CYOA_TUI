@@ -64,6 +64,36 @@ class Companion(BaseModel):
         return self
 
 
+class WorldTime(BaseModel):
+    day: int = Field(default=1, ge=1, description="Current in-world day number.")
+    hour: int = Field(
+        default=8,
+        ge=0,
+        le=23,
+        description="Current in-world hour in 24-hour time.",
+    )
+
+    def period(self) -> Literal["dawn", "morning", "afternoon", "dusk", "night"]:
+        if 5 <= self.hour <= 7:
+            return "dawn"
+        if 8 <= self.hour <= 11:
+            return "morning"
+        if 12 <= self.hour <= 16:
+            return "afternoon"
+        if 17 <= self.hour <= 19:
+            return "dusk"
+        return "night"
+
+    def summary(self) -> str:
+        return f"Day {self.day}, {self.period().title()} ({self.hour:02d}:00)"
+
+    def advance(self, hours: int) -> "WorldTime":
+        if hours <= 0:
+            return self.model_copy()
+        absolute_hours = ((self.day - 1) * 24) + self.hour + hours
+        return WorldTime(day=(absolute_hours // 24) + 1, hour=absolute_hours % 24)
+
+
 class ChoiceRequirement(BaseModel):
     items: list[str] = Field(
         default_factory=list,
@@ -84,6 +114,20 @@ class ChoiceRequirement(BaseModel):
     companion_affinity: dict[str, int] = Field(
         default_factory=dict,
         description="Minimum companion affinity thresholds required before this choice is available.",
+    )
+    min_day: int | None = Field(
+        default=None,
+        ge=1,
+        description="Minimum in-world day required before this choice is available.",
+    )
+    max_day: int | None = Field(
+        default=None,
+        ge=1,
+        description="Maximum in-world day when this choice remains available.",
+    )
+    allowed_periods: list[Literal["dawn", "morning", "afternoon", "dusk", "night"]] = Field(
+        default_factory=list,
+        description="Allowed time-of-day periods for this choice.",
     )
 
 
@@ -182,8 +226,15 @@ class Choice(BaseModel):
         stats: dict[str, int],
         flags: set[str],
         companions: list[Companion] | None = None,
+        world_time: WorldTime | dict[str, int] | None = None,
     ) -> str | None:
-        missing_requirements = self.unmet_requirements(inventory, stats, flags, companions)
+        missing_requirements = self.unmet_requirements(
+            inventory,
+            stats,
+            flags,
+            companions,
+            world_time,
+        )
         if not missing_requirements:
             return None
         return " | ".join(missing_requirements)
@@ -194,13 +245,16 @@ class Choice(BaseModel):
         stats: dict[str, int],
         flags: set[str],
         companions: list[Companion] | None = None,
+        world_time: WorldTime | dict[str, int] | None = None,
     ) -> list[str]:
         companion_index = self._normalize_companion_index(companions)
+        normalized_time = self._normalize_world_time(world_time)
         return [
             *self._missing_item_requirements(inventory),
             *self._missing_stat_requirements(stats),
             *self._missing_flag_requirements(flags),
             *self._missing_companion_requirements(companion_index),
+            *self._missing_time_requirements(normalized_time),
         ]
 
     @staticmethod
@@ -221,6 +275,19 @@ class Choice(BaseModel):
             if companion.name.strip():
                 companion_index[companion.name.casefold()] = companion
         return companion_index
+
+    @staticmethod
+    def _normalize_world_time(
+        world_time: WorldTime | dict[str, int] | None,
+    ) -> WorldTime | None:
+        if isinstance(world_time, WorldTime):
+            return world_time
+        if isinstance(world_time, dict):
+            try:
+                return WorldTime(**world_time)
+            except Exception:
+                return None
+        return None
 
     def _missing_item_requirements(self, inventory: list[str]) -> list[str]:
         missing_items = [item for item in self.requirements.items if item not in inventory]
@@ -266,6 +333,36 @@ class Choice(BaseModel):
             if current_affinity < minimum:
                 missing_requirements.append(
                     f"Need {companion_name} affinity {minimum}+ (current: {current_affinity})"
+                )
+        return missing_requirements
+
+    def _missing_time_requirements(self, world_time: WorldTime | None) -> list[str]:
+        if (
+            self.requirements.min_day is None
+            and self.requirements.max_day is None
+            and not self.requirements.allowed_periods
+        ):
+            return []
+        if world_time is None:
+            return ["Need a valid world time context"]
+
+        missing_requirements: list[str] = []
+        if self.requirements.min_day is not None and world_time.day < self.requirements.min_day:
+            missing_requirements.append(
+                f"Available from day {self.requirements.min_day} (current: day {world_time.day})"
+            )
+        if self.requirements.max_day is not None and world_time.day > self.requirements.max_day:
+            missing_requirements.append(
+                f"Expired after day {self.requirements.max_day} (current: day {world_time.day})"
+            )
+        if self.requirements.allowed_periods:
+            current_period = world_time.period()
+            if current_period not in self.requirements.allowed_periods:
+                allowed = ", ".join(
+                    period.replace("_", " ") for period in self.requirements.allowed_periods
+                )
+                missing_requirements.append(
+                    f"Available during {allowed} (current: {current_period})"
                 )
         return missing_requirements
 
@@ -339,6 +436,11 @@ class StoryNode(BaseModel):
             "Companion roster updates for recruitable allies. "
             "Use status values available, active, or lost."
         ),
+    )
+    time_advance_hours: int = Field(
+        default=0,
+        ge=0,
+        description="How many in-world hours pass before the next choice point.",
     )
 
     @model_validator(mode="after")
@@ -424,4 +526,9 @@ class ExtractionNode(BaseModel):
     companions_updated: list[Companion] = Field(
         default_factory=list,
         description="Companion roster updates derived from the narrative.",
+    )
+    time_advance_hours: int = Field(
+        default=0,
+        ge=0,
+        description="How many in-world hours the narrative consumed.",
     )

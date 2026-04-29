@@ -3,7 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from cyoa.core.models import Companion, LoreEntry, Objective, ResolvedChoiceCheck, StoryNode
+from cyoa.core.models import (
+    Companion,
+    LoreEntry,
+    Objective,
+    ResolvedChoiceCheck,
+    StoryNode,
+    WorldTime,
+)
 
 if TYPE_CHECKING:
     from cyoa.core.state import GameState
@@ -54,6 +61,7 @@ class GameStateSnapshot:
     story_flags: set[str]
     lore_entries: list[LoreEntry]
     companions: list[Companion]
+    world_time: WorldTime
     story_context: StoryContextMemento = field(default_factory=StoryContextMemento)
 
     @classmethod
@@ -87,6 +95,7 @@ class GameStateSnapshot:
             story_flags=set(state.story_flags),
             lore_entries=[entry.model_copy() for entry in state.lore_entries],
             companions=[companion.model_copy() for companion in state.companions],
+            world_time=state.world_time.model_copy(),
             story_context=StoryContextMemento.from_payload(story_context_history),
         )
 
@@ -112,6 +121,7 @@ class GameStateSnapshot:
             story_flags=set(self.story_flags),
             lore_entries=[entry.model_copy() for entry in self.lore_entries],
             companions=[companion.model_copy() for companion in self.companions],
+            world_time=self.world_time.model_copy(),
             story_context=StoryContextMemento(history=self.story_context.to_payload()),
         )
 
@@ -139,6 +149,7 @@ class GameStateSnapshot:
         state.story_flags = set(self.story_flags)
         state.lore_entries = [entry.model_copy() for entry in self.lore_entries]
         state.companions = [companion.model_copy() for companion in self.companions]
+        state.world_time = self.world_time.model_copy()
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -162,5 +173,6 @@ class GameStateSnapshot:
             "story_flags": sorted(self.story_flags),
             "lore_entries": [entry.model_dump() for entry in self.lore_entries],
             "companions": [companion.model_dump() for companion in self.companions],
+            "world_time": self.world_time.model_dump(),
             "story_context_history": self.story_context.to_payload(),
         }

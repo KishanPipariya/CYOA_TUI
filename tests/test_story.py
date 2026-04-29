@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest  # type: ignore
 
-from cyoa.core.models import Choice, LoreEntry, StoryNode
+from cyoa.core.models import Choice, LoreEntry, StoryNode, WorldTime
 from cyoa.db.rag_memory import NarrativeMemory
 from cyoa.llm.broker import StoryContext
 
@@ -183,11 +183,13 @@ class TestStoryContext:
                     summary="A flooded route below the prison.",
                     discovered_turn=2,
                 ),
-            ]
+            ],
+            world_time=WorldTime(day=2, hour=21),
         )
 
         sys_content = ctx.get_messages()[0]["content"]
 
+        assert "Current World Time: Day 2, Night (21:00)" in sys_content
         assert "Discovered Lore:" in sys_content
         assert "Mira - A scout who knows the drowned passages." in sys_content
         assert "Drowned Passage - A flooded route below the prison." in sys_content

@@ -406,6 +406,7 @@ def _build_accessible_progress_lines(
     inventory: list[str],
     player_stats: dict[str, int],
     objectives: list[Any],
+    world_time: Any = None,
     last_choice_text: str | None,
     last_resolved_choice_check: Any,
     verbosity: str,
@@ -428,6 +429,9 @@ def _build_accessible_progress_lines(
     lines.append(f"- Reputation: {player_stats.get('reputation', 0)}")
     lines.append(f"- Inventory: {', '.join(inventory) if inventory else 'Empty'}")
     lines.append(f"- Objectives: {' | '.join(objective_texts) if objective_texts else 'None'}")
+    world_time_summary = _world_time_summary(world_time)
+    if world_time_summary:
+        lines.append(f"- World time: {world_time_summary}")
     if last_choice_text:
         lines.append(f"- Last choice: {last_choice_text}")
     lines.extend(f"- {line}" for line in _resolved_choice_check_lines(last_resolved_choice_check))
@@ -448,6 +452,7 @@ def build_accessible_export(
     inventory: list[str],
     player_stats: dict[str, int],
     objectives: list[Any],
+    world_time: Any = None,
     last_choice_text: str | None = None,
     last_resolved_choice_check: Any = None,
     verbosity: str = "standard",
@@ -490,6 +495,7 @@ def build_accessible_export(
             inventory=inventory,
             player_stats=player_stats,
             objectives=objectives,
+            world_time=world_time,
             last_choice_text=last_choice_text,
             last_resolved_choice_check=last_resolved_choice_check,
             verbosity=resolved_verbosity,
@@ -739,6 +745,7 @@ def build_world_state_summary(  # noqa: C901
     faction_reputation: dict[str, int],
     npc_affinity: dict[str, int],
     story_flags: set[str] | list[str] | None,
+    world_time: Any = None,
     last_choice_text: str | None = None,
     last_resolved_choice_check: Any = None,
     current_scene_id: str | None = None,
@@ -781,6 +788,9 @@ def build_world_state_summary(  # noqa: C901
     lines = ["## Overview"]
     lines.append(f"- Adventure: {story_title or 'Untitled Adventure'}")
     lines.append(f"- Turn: {turn_count}")
+    world_time_summary = _world_time_summary(world_time)
+    if world_time_summary:
+        lines.append(f"- World Time: {world_time_summary}")
     if current_scene_id:
         lines.append(f"- Scene ID: {current_scene_id}")
     if last_choice_text:
@@ -893,6 +903,39 @@ def build_world_state_summary(  # noqa: C901
         lines.append("- None")
 
     return "\n".join(lines)
+
+
+def _world_time_summary(world_time: Any) -> str | None:
+    if isinstance(world_time, dict):
+        day = world_time.get("day")
+        hour = world_time.get("hour")
+        if isinstance(day, int) and isinstance(hour, int):
+            label = _world_time_period(hour)
+            return f"Day {day}, {label} ({hour:02d}:00)"
+        return None
+
+    summary_builder = getattr(world_time, "summary", None)
+    if callable(summary_builder):
+        summary = summary_builder()
+        return summary if isinstance(summary, str) and summary.strip() else None
+
+    day = getattr(world_time, "day", None)
+    hour = getattr(world_time, "hour", None)
+    if isinstance(day, int) and isinstance(hour, int):
+        return f"Day {day}, {_world_time_period(hour)} ({hour:02d}:00)"
+    return None
+
+
+def _world_time_period(hour: int) -> str:
+    if 5 <= hour <= 7:
+        return "Dawn"
+    if 8 <= hour <= 11:
+        return "Morning"
+    if 12 <= hour <= 16:
+        return "Afternoon"
+    if 17 <= hour <= 19:
+        return "Dusk"
+    return "Night"
 
 
 def _extract_inventory_lore_record(entry: Any) -> tuple[str, dict[str, Any]] | None:

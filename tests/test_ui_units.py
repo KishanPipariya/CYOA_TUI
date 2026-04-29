@@ -712,6 +712,7 @@ def test_build_world_state_summary_groups_objectives_and_relationships() -> None
         faction_reputation={"Guild": 2},
         npc_affinity={"Steward Hale": 1},
         story_flags={"vault_seen", "guild_trusted"},
+        world_time={"day": 2, "hour": 19},
         last_choice_text="Open the lower gate",
         last_resolved_choice_check=ResolvedChoiceCheck(
             stat="reputation",
@@ -728,6 +729,7 @@ def test_build_world_state_summary_groups_objectives_and_relationships() -> None
     assert "## Overview" in summary
     assert "- Adventure: Vault Run" in summary
     assert "- Turn: 4" in summary
+    assert "- World Time: Day 2, Dusk (19:00)" in summary
     assert "- Scene ID: scene-4" in summary
     assert "- Last choice: Open the lower gate" in summary
     assert "- Last check: reputation passed (8 + 3 = 11 vs 10)" in summary
@@ -863,6 +865,7 @@ def test_build_accessible_export_uses_plain_text_reading_order() -> None:
         inventory=["Torch", "Ancient Coin"],
         player_stats={"health": 90, "gold": 5, "reputation": 1},
         objectives=[{"id": "escape", "text": "Escape the vault", "status": "active"}],
+        world_time={"day": 2, "hour": 6},
         last_choice_text="Force the vault seal",
         last_resolved_choice_check=ResolvedChoiceCheck(
             stat="reputation",
@@ -885,6 +888,7 @@ def test_build_accessible_export_uses_plain_text_reading_order() -> None:
     assert "Current Progress:" in transcript
     assert "- Inventory: Torch, Ancient Coin" in transcript
     assert "- Objectives: Escape the vault" in transcript
+    assert "- World time: Day 2, Dawn (06:00)" in transcript
     assert "- Last choice: Force the vault seal" in transcript
     assert "- Last check: reputation passed (12 + 1 = 13 vs 12)" in transcript
     assert "---" not in transcript

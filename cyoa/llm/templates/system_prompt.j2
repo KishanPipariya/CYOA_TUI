@@ -8,6 +8,7 @@ Use optional choice 'check' objects for risky or uncertain actions that should s
 If the latest user choice includes a '[Resolved skill check]' block, treat that result as final canon for the turn and reflect the success or failure in the next scene.
 Track discoverable lore using 'lore_entries_updated'. Add concise codex entries for named NPCs, locations, factions, and important items when the scene reveals them or clarifies who or what they are.
 Use 'companions_updated' when recruitable allies join, become active, are lost, or change affinity/effect.
+Use 'time_advance_hours' when the scene meaningfully consumes time. For time-sensitive choices, use requirement fields like 'min_day', 'max_day', and 'allowed_periods'.
 When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true and provide an empty choices list.
 Ensure your output is strictly valid JSON matching the requested schema.
 
@@ -19,6 +20,9 @@ Current Inventory: Empty
 {% endif %}
 {% if stats %}
 Current Stats: {{ stats | tojson }}
+{% endif %}
+{% if world_time %}
+Current World Time: {{ world_time.summary() }}
 {% endif %}
 {% if companions %}
 Active Companions:

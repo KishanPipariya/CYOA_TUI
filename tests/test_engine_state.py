@@ -14,6 +14,7 @@ from cyoa.core.models import (
     Objective,
     ResolvedChoiceCheck,
     StoryNode,
+    WorldTime,
 )
 from cyoa.core.runtime import EnginePhase
 from cyoa.core.state import GameState
@@ -289,6 +290,7 @@ async def test_engine_generate_next_first_turn_persists_title_and_scene():
         inventory=engine.state.inventory,
         mood="default",
         lore_entries=[],
+        world_time={"day": 1, "hour": 8},
     )
     assert titles == ["Fresh Adventure"]
     assert completions == ["Opening scene"]
@@ -598,6 +600,7 @@ def test_engine_save_and_load_roundtrip_preserves_extended_world_state():
                     "discovered_turn": 1,
                 }
             ],
+            "world_time": {"day": 2, "hour": 18},
         },
         initial_prompt_config={
             "goals": ["Survive"],
@@ -633,9 +636,11 @@ def test_engine_save_and_load_roundtrip_preserves_extended_world_state():
             discovered_turn=1,
         )
     ]
+    assert loaded.state.world_time == WorldTime(day=2, hour=18)
     assert loaded.story_context is not None
     assert loaded.story_context.goals == ["Survive"]
     assert loaded.story_context.directives == ["Honor locked choices."]
+    assert loaded.story_context.world_time == WorldTime(day=2, hour=18)
 
 
 @pytest.mark.asyncio
@@ -668,6 +673,7 @@ async def test_engine_branch_to_scene_uses_cached_provider_state():
                 "available_choices": ["C", "D"],
                 "inventory": ["Torch", "Key"],
                 "player_stats": {"health": 80, "gold": 2, "reputation": 1},
+                "world_time": {"day": 2, "hour": 21},
                 "lore_entries": [
                     {
                         "category": "location",
@@ -699,6 +705,7 @@ async def test_engine_branch_to_scene_uses_cached_provider_state():
     assert engine.state.turn_count == 2
     assert engine.state.inventory == ["Torch", "Key"]
     assert engine.state.player_stats["health"] == 80
+    assert engine.state.world_time == WorldTime(day=2, hour=21)
     assert engine.state.lore_entries == [
         LoreEntry(
             category="location",
@@ -790,6 +797,7 @@ def test_game_state_seed_world_state_deduplicates_and_copies_models():
         faction_reputation={"Guild": 3},
         npc_affinity={"Mira": 5},
         story_flags={"met_mira"},
+        world_time={"day": 3, "hour": 17},
     )
 
     objective.status = "completed"
@@ -804,6 +812,7 @@ def test_game_state_seed_world_state_deduplicates_and_copies_models():
     assert state.faction_reputation == {"Guild": 3}
     assert state.npc_affinity == {"Mira": 5}
     assert state.story_flags == {"met_mira"}
+    assert state.world_time == WorldTime(day=3, hour=17)
 
 
 def test_game_state_apply_node_updates_emits_world_state_for_objectives_relationships_and_flags():
@@ -831,6 +840,7 @@ def test_game_state_apply_node_updates_emits_world_state_for_objectives_relation
                 effect="Spots movement in the dark.",
             )
         ],
+        time_advance_hours=5,
     )
 
     world_events: list[dict[str, object]] = []
@@ -858,6 +868,7 @@ def test_game_state_apply_node_updates_emits_world_state_for_objectives_relation
             effect="Spots movement in the dark.",
         )
     ]
+    assert state.world_time == WorldTime(day=1, hour=13)
     assert world_events == [state.get_world_state()]
 
 
@@ -894,6 +905,7 @@ def test_game_state_load_save_data_coerces_extended_world_fields():
                 },
                 {"category": "npc", "name": "", "summary": "broken"},
             ],
+            "world_time": {"day": 4, "hour": 19},
             "current_node": {"choices": "broken"},
         }
     )
@@ -921,6 +933,7 @@ def test_game_state_load_save_data_coerces_extended_world_fields():
             discovered_turn=2,
         )
     ]
+    assert state.world_time == WorldTime(day=4, hour=19)
     assert state.current_node is None
 
 

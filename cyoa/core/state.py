@@ -4,7 +4,14 @@ from typing import Any, ClassVar
 
 from cyoa.core.events import Events, bus
 from cyoa.core.mementos import GameStateSnapshot, StoryContextMemento
-from cyoa.core.models import Companion, LoreEntry, Objective, ResolvedChoiceCheck, StoryNode
+from cyoa.core.models import (
+    Companion,
+    LoreEntry,
+    Objective,
+    ResolvedChoiceCheck,
+    StoryNode,
+    WorldTime,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +51,7 @@ class GameState:
         self.story_flags: set[str] = set()
         self.lore_entries: list[LoreEntry] = []
         self.companions: list[Companion] = []
+        self.world_time: WorldTime = WorldTime()
         self._undo_history: deque[GameStateSnapshot] = deque(maxlen=MAX_HISTORY_DEPTH)
         self._redo_history: deque[GameStateSnapshot] = deque(maxlen=MAX_HISTORY_DEPTH)
         self._bookmarks: dict[str, GameStateSnapshot] = {}
@@ -67,6 +75,7 @@ class GameState:
         self.story_flags = set()
         self.lore_entries = []
         self.companions = []
+        self.world_time = WorldTime()
         self._undo_history.clear()
         self._redo_history.clear()
         self._bookmarks = {}
@@ -99,7 +108,8 @@ class GameState:
             bus.emit_runtime(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
 
         world_state_changed = self._apply_world_updates(node)
-        if world_state_changed:
+        time_changed = self._apply_time_advance(node.time_advance_hours)
+        if world_state_changed or time_changed:
             bus.emit_runtime(Events.WORLD_STATE_UPDATED, state=self.get_world_state())
 
         # 3. Advance state
@@ -204,6 +214,7 @@ class GameState:
             "story_flags": sorted(self.story_flags),
             "lore_entries": [entry.model_dump() for entry in self.lore_entries],
             "companions": [companion.model_dump() for companion in self.companions],
+            "world_time": self.world_time.model_dump(),
             "undo_history": [snapshot.to_payload() for snapshot in self._undo_history],
             "redo_history": [snapshot.to_payload() for snapshot in self._redo_history],
             "bookmarks": {
@@ -240,6 +251,7 @@ class GameState:
         self.story_flags = self._coerce_story_flags(data.get("story_flags"))
         self.lore_entries = self._coerce_lore_entries(data.get("lore_entries"))
         self.companions = self._coerce_companions(data.get("companions"))
+        self.world_time = self._coerce_world_time(data.get("world_time"))
         self._undo_history = deque(
             self._coerce_snapshot_list(data.get("undo_history")), maxlen=MAX_HISTORY_DEPTH
         )
@@ -354,6 +366,7 @@ class GameState:
             "story_flags": sorted(self.story_flags),
             "lore_entries": [entry.model_dump() for entry in self.lore_entries],
             "companions": [companion.model_dump() for companion in self.companions],
+            "world_time": self.world_time.model_dump(),
         }
 
     def seed_world_state(
@@ -367,6 +380,7 @@ class GameState:
         story_flags: set[str] | None = None,
         lore_entries: list[LoreEntry] | None = None,
         companions: list[Companion] | None = None,
+        world_time: WorldTime | dict[str, int] | None = None,
     ) -> None:
         """Apply initial state from a theme or imported save payload."""
         if inventory is not None:
@@ -385,6 +399,8 @@ class GameState:
             self.lore_entries = [entry.model_copy() for entry in lore_entries]
         if companions is not None:
             self.companions = [companion.model_copy() for companion in companions]
+        if world_time is not None:
+            self.world_time = self._coerce_world_time(world_time)
 
     def _apply_objective_updates(self, objectives_updated: list[Objective]) -> bool:
         changed = False
@@ -492,6 +508,15 @@ class GameState:
                 changed = True
         return changed
 
+    def _apply_time_advance(self, hours: int) -> bool:
+        if hours <= 0:
+            return False
+        updated_time = self.world_time.advance(hours)
+        if updated_time == self.world_time:
+            return False
+        self.world_time = updated_time
+        return True
+
     def _apply_world_updates(self, node: StoryNode) -> bool:
         changed = self._apply_objective_updates(node.objectives_updated)
         changed = self._apply_delta_map(self.faction_reputation, node.faction_updates) or changed
@@ -549,6 +574,16 @@ class GameState:
             return ResolvedChoiceCheck(**value)
         except Exception:
             return None
+
+    def _coerce_world_time(self, value: Any) -> WorldTime:
+        if isinstance(value, WorldTime):
+            return value.model_copy()
+        if isinstance(value, dict):
+            try:
+                return WorldTime(**value)
+            except Exception:
+                return WorldTime()
+        return WorldTime()
 
     def _coerce_snapshot_list(self, value: Any) -> list[GameStateSnapshot]:
         """Normalize saved undo/redo stacks."""
@@ -618,6 +653,7 @@ class GameState:
             story_flags=self._coerce_story_flags(value.get("story_flags")),
             lore_entries=self._coerce_lore_entries(value.get("lore_entries")),
             companions=self._coerce_companions(value.get("companions")),
+            world_time=self._coerce_world_time(value.get("world_time")),
             story_context=StoryContextMemento.from_payload(value.get("story_context_history")),
         )
 

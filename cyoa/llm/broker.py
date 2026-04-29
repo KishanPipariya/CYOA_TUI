@@ -26,6 +26,7 @@ from cyoa.core.models import (
     NarratorNode,
     Objective,
     StoryNode,
+    WorldTime,
 )
 from cyoa.core.observability import (
     EngineObservedSession,
@@ -127,6 +128,7 @@ class StoryContext:
         self.story_flags: set[str] = set()
         self.lore_entries: list[LoreEntry] = []
         self.companions: list[Companion] = []
+        self.world_time: WorldTime = WorldTime()
         # Hierarchy tracking
         self._scene_turn_count: int = 0
         self._chapter_scene_count: int = 0
@@ -234,6 +236,7 @@ class StoryContext:
         story_flags: set[str] | None = None,
         lore_entries: list[LoreEntry] | None = None,
         companions: list[Companion] | None = None,
+        world_time: WorldTime | None = None,
     ) -> None:
         """Keep prompt state aligned with the engine's long-lived world state."""
         if inventory is not None:
@@ -252,6 +255,8 @@ class StoryContext:
             self.lore_entries = [entry.model_copy() for entry in lore_entries]
         if companions is not None:
             self.companions = [companion.model_copy() for companion in companions]
+        if world_time is not None:
+            self.world_time = world_time.model_copy()
 
     def set_hierarchical_summary(
         self,
@@ -326,6 +331,7 @@ class StoryContext:
         new_ctx.story_flags = set(self.story_flags)
         new_ctx.lore_entries = [entry.model_copy() for entry in self.lore_entries]
         new_ctx.companions = [companion.model_copy() for companion in self.companions]
+        new_ctx.world_time = self.world_time.model_copy()
         new_ctx._scene_turn_count = self._scene_turn_count
         new_ctx._chapter_scene_count = self._chapter_scene_count
         # Reuse the same pipeline (shallow copy of list is fine if components are stateless or handled)

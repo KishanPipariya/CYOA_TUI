@@ -17,6 +17,7 @@ class StoryRepository(Protocol):
         inventory: list[str],
         mood: str,
         lore_entries: list[dict[str, Any]] | None = None,
+        world_time: dict[str, Any] | None = None,
     ) -> str: ...
 
     def create_story_node_and_get_title(self, generated_title: str) -> str: ...

@@ -12,7 +12,7 @@ from textual.widgets._toast import Toast
 from textual.worker import WorkerFailed
 
 from cyoa.core.events import EventBus, EventDispatchError, Events, bus
-from cyoa.core.models import Choice, ChoiceRequirement, LoreEntry, StoryNode
+from cyoa.core.models import Choice, ChoiceRequirement, LoreEntry, StoryNode, WorldTime
 from cyoa.core.theme_loader import load_theme
 from cyoa.core.user_config import UserConfig
 from cyoa.ui.app import CYOAApp
@@ -869,6 +869,7 @@ async def test_character_sheet_modal_opens_and_reflects_current_world_state(
         app.engine.state.faction_reputation = {"Guild": 2}
         app.engine.state.npc_affinity = {"Steward Hale": 1}
         app.engine.state.story_flags = {"vault_seen"}
+        app.engine.state.world_time = WorldTime(day=2, hour=21)
         app.engine.state.last_choice_text = "Go North"
 
         await pilot.press("c")
@@ -883,6 +884,7 @@ async def test_character_sheet_modal_opens_and_reflects_current_world_state(
         assert "Guild: 2" in summary_text
         assert "Steward Hale: 1" in summary_text
         assert "vault_seen" in summary_text
+        assert "Day 2, Night (21:00)" in summary_text
         assert "Go North" in summary_text
 
         await pilot.press("escape")

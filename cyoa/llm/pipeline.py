@@ -109,9 +109,11 @@ class PersonaComponent(PromptComponent, PromptComponentMixin):
             "4. Describe changes to the player's inventory and stats (health, gold, reputation) directly in the narrative prose.\n"
             "5. Track discoverable lore with 'lore_entries_updated' for named NPCs, locations, factions, and important items.\n"
             "6. Use 'companions_updated' when recruitable allies join, become active, are lost, or change affinity/effect.\n"
-            "7. Set 'mood' to an atmospheric keyword (e.g. 'mysterious', 'heroic', 'combat', 'ethereal', 'dark', 'grimy').\n"
-            "8. When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true.\n"
-            "9. Ensure your output is strictly valid JSON matching the requested schema."
+            "7. Use 'time_advance_hours' when a scene meaningfully consumes in-world time.\n"
+            "8. Use choice requirement fields like 'min_day', 'max_day', and 'allowed_periods' for time-sensitive opportunities.\n"
+            "9. Set 'mood' to an atmospheric keyword (e.g. 'mysterious', 'heroic', 'combat', 'ethereal', 'dark', 'grimy').\n"
+            "10. When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true.\n"
+            "11. Ensure your output is strictly valid JSON matching the requested schema."
         )
 
     def transform(self, context: Any, messages: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -135,6 +137,7 @@ class PlayerSheetComponent(PromptComponent, PromptComponentMixin):
             import json
 
             lines.append(f"Current Stats: {json.dumps(stats)}")
+        lines.extend(self._world_time_lines(getattr(context, "world_time", None)))
         objectives = getattr(context, "objectives", [])
         if objectives:
             objective_bits = [f"{objective.text} ({objective.status})" for objective in objectives]
@@ -164,6 +167,15 @@ class PlayerSheetComponent(PromptComponent, PromptComponentMixin):
         lines.append("</player_sheet>")
 
         return self._inject_into_system(messages, "\n".join(lines))
+
+    @staticmethod
+    def _world_time_lines(world_time: object) -> list[str]:
+        if world_time is None:
+            return []
+        summary = getattr(world_time, "summary", None)
+        if not callable(summary):
+            return []
+        return [f"Current World Time: {summary()}"]
 
     @staticmethod
     def _compact_lore_lines(lore_entries: list[object], *, max_entries: int = 12) -> list[str]:

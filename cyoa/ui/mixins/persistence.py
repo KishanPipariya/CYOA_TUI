@@ -826,6 +826,7 @@ class PersistenceMixin:
         inventory = payload.get("inventory")
         player_stats = payload.get("player_stats")
         objectives = payload.get("objectives")
+        world_time = payload.get("world_time")
         return build_accessible_export(
             story_title=payload.get("story_title")
             if isinstance(payload.get("story_title"), str)
@@ -844,6 +845,7 @@ class PersistenceMixin:
             inventory=inventory if isinstance(inventory, list) else [],
             player_stats=player_stats if isinstance(player_stats, dict) else {},
             objectives=objectives if isinstance(objectives, list) else [],
+            world_time=world_time if isinstance(world_time, dict) else None,
             last_choice_text=(
                 payload.get("last_choice_text")
                 if isinstance(payload.get("last_choice_text"), str)
@@ -861,6 +863,7 @@ class PersistenceMixin:
             "turn_count": payload.get("turn_count"),
             "inventory": payload.get("inventory"),
             "player_stats": payload.get("player_stats"),
+            "world_time": payload.get("world_time"),
             "timeline_metadata": payload.get("timeline_metadata"),
             "story_segments": self._coerce_story_segments(ui_state.get("story_segments")),
             "journal_entries": self._coerce_journal_entries(ui_state.get("journal_entries")),
