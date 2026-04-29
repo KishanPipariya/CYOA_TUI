@@ -140,6 +140,32 @@ async def test_engine_generate_next_uses_cached_node_without_generation():
 
 
 @pytest.mark.asyncio
+async def test_engine_generate_next_emits_ending_reached_for_ending_node():
+    broker, _provider = _make_broker_with_mock_provider()
+    broker.generate_next_node_async = AsyncMock(  # type: ignore[method-assign]
+        return_value=StoryNode(
+            narrative="You escape the ruins.",
+            choices=[],
+            is_ending=True,
+        )
+    )
+    broker.save_state_async = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    engine = StoryEngine(broker=broker, starting_prompt="Start")
+    engine.story_context = StoryContext("Start", token_counter=lambda _x: 1)
+    engine.state.turn_count = 2
+    engine.rag.retrieve_memories = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    engine.rag.index_node = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    endings: list[str] = []
+    bus.subscribe(Events.ENDING_REACHED, lambda node: endings.append(node.narrative))
+
+    await engine._generate_next(choice_text="Run")
+
+    assert endings == ["You escape the ruins."]
+
+
+@pytest.mark.asyncio
 async def test_engine_generate_next_first_turn_persists_title_and_scene():
     broker, _provider = _make_broker_with_mock_provider()
     broker.generate_next_node_async = AsyncMock(  # type: ignore[method-assign]

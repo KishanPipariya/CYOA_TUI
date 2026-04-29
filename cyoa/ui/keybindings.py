@@ -184,6 +184,22 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Panels And Help",
     ),
     AppBindingSpec(
+        "show_endings_discovered",
+        "shift+e",
+        "show_endings_discovered",
+        "Endings",
+        "Open endings discovered",
+        "Panels And Help",
+    ),
+    AppBindingSpec(
+        "show_run_archive",
+        "a",
+        "show_run_archive",
+        "Archive",
+        "Open run archive",
+        "Panels And Help",
+    ),
+    AppBindingSpec(
         "show_journal_summary",
         "[",
         "show_journal_summary",

@@ -155,9 +155,12 @@ class EventsMixin:
         host.queue_notification(f"New Chapter: {title}", severity="information", timeout=5)
 
     def _handle_ending_reached(self, node: StoryNode) -> None:
+        app = as_textual_app(self)
         host = as_mixin_host(self)
         if not host.is_runtime_active():
             return
+        persistence: Any = self
+        persistence._record_completed_run(host, app, ending_narrative=node.narrative)
         host.queue_notification("The Story Ends.", severity="information", timeout=10)
 
     def _handle_error(self, error: str) -> None:

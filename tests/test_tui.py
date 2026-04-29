@@ -22,11 +22,13 @@ from cyoa.ui.components import (
     CharacterSheetScreen,
     CommandPaletteScreen,
     ConfirmScreen,
+    EndingsDiscoveredScreen,
     HelpScreen,
     InventoryInspectorScreen,
     LoadGameScreen,
     LoreCodexScreen,
     NotificationHistoryScreen,
+    RunArchiveScreen,
     SceneRecapScreen,
     SettingsScreen,
     StartupAccessibilityRecommendationScreen,
@@ -2228,6 +2230,57 @@ async def test_initial_scene_does_not_create_autosave(mock_app_dependencies, tmp
         )
         await pilot.pause(0.2)
         assert not (tmp_path / "autosave_latest.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_ending_persists_completed_run_summary(mock_app_dependencies, tmp_path, monkeypatch):
+    from cyoa.core import constants
+
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        await pilot.press("1")
+        await pilot.pause(1.0)
+        assert app.turn_count == 2
+        await pilot.press("1")
+        await _wait_for_pilot(
+            pilot,
+            lambda: (
+                app.engine is not None
+                and app.engine.state.current_node is not None
+                and app.engine.state.current_node.is_ending
+            ),
+        )
+
+        archive_path = tmp_path / "run_archive.json"
+        assert archive_path.exists()
+
+        payload = json.loads(archive_path.read_text(encoding="utf-8"))
+        assert len(payload) == 1
+        assert payload[0]["story_title"] == "Test Adventure"
+        assert payload[0]["turn_count"] == 3
+        assert payload[0]["ending_type"] == "escape"
+        assert payload[0]["ending_label"] == "Escape"
+        assert payload[0]["last_choice_text"] == "Open Door"
+        assert payload[0]["ending_narrative"] == "You opened the door and escaped!"
+
+        app.action_show_endings_discovered()
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, EndingsDiscoveredScreen)
+        endings_text = app.screen.query_one("#endings-discovered-text", Markdown)._markdown
+        assert "Escape" in endings_text
+        assert "Completed runs: 1" in endings_text
+        await pilot.press("escape")
+        await pilot.pause(0.1)
+
+        app.action_show_run_archive()
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, RunArchiveScreen)
+        archive_text = app.screen.query_one("#run-archive-text", Markdown)._markdown
+        assert "Test Adventure" in archive_text
+        assert "Final choice: Open Door" in archive_text
 
 
 @pytest.mark.asyncio

@@ -13,11 +13,13 @@ from cyoa.ui.components import (
     BranchScreen,
     CharacterSheetScreen,
     ConfirmScreen,
+    EndingsDiscoveredScreen,
     HelpScreen,
     InventoryInspectorScreen,
     JournalListItem,
     LoreCodexScreen,
     NotificationHistoryScreen,
+    RunArchiveScreen,
     SceneRecapScreen,
 )
 from cyoa.ui.mixins.contracts import (
@@ -27,7 +29,9 @@ from cyoa.ui.mixins.contracts import (
     as_textual_app,
 )
 from cyoa.ui.presenters import (
+    build_endings_discovered_summary,
     build_journal_summary,
+    build_run_archive_summary,
     build_story_map_summary,
     format_branch_restore_text,
 )
@@ -246,6 +250,24 @@ class NavigationMixin:
         """Show the discovered lore codex."""
         app = as_textual_app(self)
         cast(Any, app)._push_modal_screen(LoreCodexScreen(cast(Any, self).get_lore_codex_text()))
+
+    def action_show_endings_discovered(self) -> None:
+        """Show the ending types discovered across archived runs."""
+        app = as_textual_app(self)
+        persistence = cast(Any, self)
+        cast(Any, app)._push_modal_screen(
+            EndingsDiscoveredScreen(
+                build_endings_discovered_summary(persistence._load_run_archive())
+            )
+        )
+
+    def action_show_run_archive(self) -> None:
+        """Show archived completed runs for comparison."""
+        app = as_textual_app(self)
+        persistence = cast(Any, self)
+        cast(Any, app)._push_modal_screen(
+            RunArchiveScreen(build_run_archive_summary(persistence._load_run_archive()))
+        )
 
     def action_show_journal_summary(self) -> None:
         """Show a linear summary of journal entries for text-first review."""

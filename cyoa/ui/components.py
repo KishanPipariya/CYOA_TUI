@@ -78,6 +78,8 @@ __all__ = [
     "JournalListItem",
     "LoreCodexScreen",
     "InventoryInspectorScreen",
+    "EndingsDiscoveredScreen",
+    "RunArchiveScreen",
     "SceneRecapScreen",
     "AccessibleSummaryScreen",
     "SceneListItem",
@@ -2213,6 +2215,72 @@ class LoreCodexScreen(ModalScreen[None]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-lore-codex-close":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class EndingsDiscoveredScreen(ModalScreen[None]):
+    """Modal screen summarizing discovered ending types."""
+
+    DEFAULT_CSS = HelpScreen.DEFAULT_CSS
+    BINDINGS = [("escape", "close", "Close")]
+
+    def __init__(self, summary_text: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._summary_text = summary_text
+
+    def compose(self) -> ComposeResult:
+        with DialogFrame(
+            id="endings-discovered-dialog",
+            classes="dialog-frame dialog-frame-scroll dialog-frame-accent",
+        ):
+            with Container(id="endings-discovered-content", classes="dialog-content"):
+                yield Label(
+                    "[b]Endings Discovered[/b]",
+                    id="endings-discovered-title",
+                    classes="dialog-title",
+                )
+                yield Markdown(self._summary_text, id="endings-discovered-text")
+            yield Button("Close [b](Esc)[/b]", id="btn-endings-discovered-close", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#btn-endings-discovered-close", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-endings-discovered-close":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class RunArchiveScreen(ModalScreen[None]):
+    """Modal screen comparing completed archived runs."""
+
+    DEFAULT_CSS = HelpScreen.DEFAULT_CSS
+    BINDINGS = [("escape", "close", "Close")]
+
+    def __init__(self, summary_text: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._summary_text = summary_text
+
+    def compose(self) -> ComposeResult:
+        with DialogFrame(
+            id="run-archive-dialog",
+            classes="dialog-frame dialog-frame-scroll dialog-frame-accent",
+        ):
+            with Container(id="run-archive-content", classes="dialog-content"):
+                yield Label("[b]Run Archive[/b]", id="run-archive-title", classes="dialog-title")
+                yield Markdown(self._summary_text, id="run-archive-text")
+            yield Button("Close [b](Esc)[/b]", id="btn-run-archive-close", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#btn-run-archive-close", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-run-archive-close":
             self.dismiss(None)
 
     def action_close(self) -> None:

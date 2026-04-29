@@ -20,7 +20,11 @@ from cyoa.ui.mixins.contracts import (
     as_persistence_owner,
     as_textual_app,
 )
-from cyoa.ui.presenters import build_accessible_export
+from cyoa.ui.presenters import (
+    build_accessible_export,
+    classify_ending_type,
+    format_ending_type_label,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +41,10 @@ class PersistenceMixin:
         return os.path.join(constants.SAVES_DIR, "exports")
 
     @staticmethod
+    def _run_archive_path() -> str:
+        return os.path.join(constants.SAVES_DIR, "run_archive.json")
+
+    @staticmethod
     def _clone_payload(payload: dict[str, object]) -> dict[str, object]:
         """Deep-copy a JSON-compatible payload without sharing nested state."""
         return cast(dict[str, object], json.loads(json.dumps(payload)))
@@ -47,12 +55,15 @@ class PersistenceMixin:
         if not os.path.isdir(constants.SAVES_DIR):
             return []
 
-        autosave_name = os.path.basename(cls._autosave_file_path())
+        excluded_names = {
+            os.path.basename(cls._autosave_file_path()),
+            os.path.basename(cls._run_archive_path()),
+        }
         return sorted(
             [
                 filename
                 for filename in os.listdir(constants.SAVES_DIR)
-                if filename.endswith(".json") and filename != autosave_name
+                if filename.endswith(".json") and filename not in excluded_names
             ],
             key=lambda filename: os.path.getmtime(os.path.join(constants.SAVES_DIR, filename)),
             reverse=True,
@@ -246,6 +257,23 @@ class PersistenceMixin:
         if not isinstance(payload, list):
             return []
         return [entry for entry in payload if isinstance(entry, dict)]
+
+    @staticmethod
+    def _coerce_run_archive_entries(payload: object) -> list[dict[str, object]]:
+        """Normalize archived completed-run entries loaded from disk."""
+        if not isinstance(payload, list):
+            return []
+
+        entries: list[dict[str, object]] = []
+        for raw in payload:
+            if not isinstance(raw, dict):
+                continue
+            completed_at = raw.get("completed_at")
+            ending_type = raw.get("ending_type")
+            if not isinstance(completed_at, str) or not isinstance(ending_type, str):
+                continue
+            entries.append(cast(dict[str, object], raw))
+        return entries
 
     @staticmethod
     def _coerce_restore_points(payload: object) -> dict[str, dict[str, object]]:
@@ -503,6 +531,107 @@ class PersistenceMixin:
                 json.dump(payload, f, indent=2, ensure_ascii=False)
         except OSError as exc:
             logger.warning("Unable to write persistence payload to %s: %s", path, exc)
+
+    def _load_run_archive(self) -> list[dict[str, object]]:
+        """Return the archived completed runs, tolerating a missing or malformed file."""
+        path = self._run_archive_path()
+        if not os.path.exists(path):
+            return []
+        try:
+            with open(path, encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Unable to read run archive %s: %s", path, exc)
+            return []
+        return self._coerce_run_archive_entries(payload)
+
+    def _write_run_archive(self, entries: list[dict[str, object]]) -> None:
+        """Persist the archived completed runs as a JSON list."""
+        path = self._run_archive_path()
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open_private_text_file(path, "w") as handle:
+                json.dump(entries, handle, indent=2, ensure_ascii=False)
+        except OSError as exc:
+            logger.warning("Unable to write run archive to %s: %s", path, exc)
+
+    def _build_completed_run_summary(
+        self,
+        host: object,
+        app: object,
+        *,
+        ending_narrative: str,
+    ) -> dict[str, object]:
+        """Capture a compact summary for a completed ending."""
+        mixin_host = as_mixin_host(host)
+        engine = mixin_host.engine
+        if engine is None:
+            return {}
+
+        state = engine.state
+        title = state.story_title or "Untitled Adventure"
+        ending_type = classify_ending_type(
+            ending_narrative,
+            health=state.player_stats.get("health"),
+        )
+        ui_state = self._coerce_ui_state(self._build_save_payload(host, app).get("ui_state"))
+        journal_entries = self._coerce_journal_entries(ui_state.get("journal_entries"))
+        branch_restores = [
+            entry.copy()
+            for entry in state.timeline_metadata
+            if entry.get("kind") == "branch_restore"
+        ]
+        divergence_points = sorted(
+            {
+                int(entry["restored_turn"])
+                for entry in branch_restores
+                if isinstance(entry.get("restored_turn"), int)
+            }
+        )
+
+        return {
+            "story_title": title,
+            "completed_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "turn_count": state.turn_count,
+            "current_scene_id": state.current_scene_id,
+            "last_choice_text": state.last_choice_text,
+            "ending_type": ending_type,
+            "ending_label": format_ending_type_label(ending_type),
+            "ending_narrative": ending_narrative,
+            "inventory": list(state.inventory),
+            "player_stats": dict(state.player_stats),
+            "objectives": [objective.model_dump() for objective in state.objectives],
+            "faction_reputation": dict(state.faction_reputation),
+            "npc_affinity": dict(state.npc_affinity),
+            "story_flags": sorted(state.story_flags),
+            "timeline_metadata": [entry.copy() for entry in state.timeline_metadata],
+            "branch_restores": branch_restores,
+            "divergence_points": divergence_points,
+            "journal_entries": journal_entries,
+            "story_segments": self._coerce_story_segments(ui_state.get("story_segments")),
+            "discovered_lore_count": len(state.lore_entries),
+            "objective_status_counts": {
+                "active": sum(1 for objective in state.objectives if objective.status == "active"),
+                "completed": sum(
+                    1 for objective in state.objectives if objective.status == "completed"
+                ),
+                "failed": sum(1 for objective in state.objectives if objective.status == "failed"),
+            },
+            "notification_hint": (
+                f"{title} ended in {state.turn_count} turn"
+                f"{'' if state.turn_count == 1 else 's'} as a {format_ending_type_label(ending_type).lower()}."
+            ),
+        }
+
+    def _record_completed_run(self, host: object, app: object, *, ending_narrative: str) -> None:
+        """Append a finished run summary to the archive."""
+        summary = self._build_completed_run_summary(host, app, ending_narrative=ending_narrative)
+        if not summary:
+            return
+
+        entries = self._load_run_archive()
+        entries.append(summary)
+        self._write_run_archive(entries)
 
     def _sync_prompt_status(self, host: object, app: object) -> None:
         """Keep the status bar aligned with current prompt directives."""

@@ -24,12 +24,14 @@ from cyoa.ui.components import (
     BranchScreen,
     CharacterSheetScreen,
     CommandPaletteScreen,
+    EndingsDiscoveredScreen,
     FirstRunSetupScreen,
     InventoryInspectorScreen,
     LoadGameScreen,
     LoreCodexScreen,
     ModelDownloadScreen,
     NotificationHistoryScreen,
+    RunArchiveScreen,
     SceneRecapScreen,
     SettingsScreen,
     StartupAccessibilityRecommendationScreen,
@@ -51,15 +53,18 @@ from cyoa.ui.mixins.typewriter import TypewriterMixin
 from cyoa.ui.presenters import (
     build_accessible_export,
     build_choice_label,
+    build_endings_discovered_summary,
     build_help_text,
     build_inventory_empty_summary,
     build_inventory_inspector_entries,
     build_inventory_item_summary,
     build_journal_summary,
     build_lore_codex_summary,
+    build_run_archive_summary,
     build_scene_recap,
     build_story_map_summary,
     build_world_state_summary,
+    classify_ending_type,
     format_status_message,
     loading_story_text,
 )
@@ -919,6 +924,72 @@ def test_lore_codex_screen_closes() -> None:
     screen.action_close()
 
     assert screen.dismiss.call_args_list == [call(None), call(None)]
+
+
+def test_endings_discovered_screen_closes() -> None:
+    screen = EndingsDiscoveredScreen("## Endings\n- Escape")
+    screen.dismiss = MagicMock()
+
+    screen.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-endings-discovered-close"))
+    )
+    screen.action_close()
+
+    assert screen.dismiss.call_args_list == [call(None), call(None)]
+
+
+def test_run_archive_screen_closes() -> None:
+    screen = RunArchiveScreen("## Run Archive\n- Test Adventure")
+    screen.dismiss = MagicMock()
+
+    screen.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="btn-run-archive-close")))
+    screen.action_close()
+
+    assert screen.dismiss.call_args_list == [call(None), call(None)]
+
+
+def test_classify_ending_type_prefers_health_and_escape_keywords() -> None:
+    assert classify_ending_type("You collapse as the cavern seals.", health=0) == "death"
+    assert classify_ending_type("You opened the gate and escaped into dawn.") == "escape"
+
+
+def test_list_manual_save_files_excludes_internal_archive_and_autosave(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+    (tmp_path / "autosave_latest.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "run_archive.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "chapter_one.json").write_text("{}", encoding="utf-8")
+
+    assert PersistenceMixin._list_manual_save_files() == ["chapter_one.json"]
+
+
+def test_archive_presenters_surface_endings_flags_and_divergence_points() -> None:
+    archive_entries = [
+        {
+            "story_title": "Test Adventure",
+            "completed_at": "2026-04-29T12:00:00Z",
+            "turn_count": 3,
+            "ending_type": "escape",
+            "ending_label": "Escape",
+            "ending_narrative": "You opened the door and escaped!",
+            "last_choice_text": "Open Door",
+            "story_flags": ["saw_signal", "trusted_mira"],
+            "divergence_points": [2],
+            "inventory": ["Broken Sword", "Health Potion"],
+            "objective_status_counts": {"active": 1, "completed": 2, "failed": 0},
+        }
+    ]
+
+    endings_summary = build_endings_discovered_summary(archive_entries)
+    archive_summary = build_run_archive_summary(archive_entries)
+
+    assert "Escape" in endings_summary
+    assert "Completed runs: 1" in endings_summary
+    assert "Latest divergence points: Turn 2" in endings_summary
+    assert "Final choice: Open Door" in archive_summary
+    assert "Flags: saw_signal, trusted_mira" in archive_summary
 
 
 def test_app_effective_keybindings_merge_defaults_and_overrides() -> None:
