@@ -2625,6 +2625,49 @@ async def test_save_game_prompts_before_overwriting_existing_file(
 
 
 @pytest.mark.asyncio
+async def test_save_game_overwrite_confirmation_uses_original_engine_snapshot(
+    mock_app_dependencies, tmp_path, monkeypatch
+):
+    from cyoa.core import constants
+
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+
+        original_turn = app.engine.state.turn_count
+
+        await pilot.press("s")
+        await _wait_for_pilot(
+            pilot,
+            lambda: len([f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]) == 1,
+        )
+
+        overwrite_turn = app.engine.state.turn_count
+        overwrite_scene_id = app.engine.state.current_scene_id
+
+        await pilot.press("s")
+        await _wait_for_pilot(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+
+        app.engine.state.turn_count = overwrite_turn + 7
+        app.engine.state.current_scene_id = "mutated-scene-id"
+
+        await pilot.press("y")
+        await _wait_for_pilot(pilot, lambda: not isinstance(app.screen, ConfirmScreen))
+
+        assert app._last_manual_save_turn == overwrite_turn
+        assert app._last_manual_save_scene_id == overwrite_scene_id
+        assert [f for f in os.listdir(str(tmp_path)) if f.endswith(".json")] == [
+            f"Test Adventure_turn{original_turn}.json"
+        ]
+
+
+@pytest.mark.asyncio
 async def test_save_load_preserves_restore_points_and_allows_restoring_them(
     mock_app_dependencies, tmp_path, monkeypatch
 ):

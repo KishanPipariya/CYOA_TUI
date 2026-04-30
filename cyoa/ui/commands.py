@@ -152,6 +152,9 @@ class SaveGameCommand:
         if not host.engine or not host.engine.state.current_node:
             app.notify("Nothing to save yet.", severity="warning", timeout=2)
             return
+        engine = host.engine
+        save_turn = engine.state.turn_count
+        save_scene_id = engine.state.current_scene_id
 
         save_title = owner._resolve_save_title(host)
         if not save_title:
@@ -160,16 +163,14 @@ class SaveGameCommand:
 
         os.makedirs(constants.SAVES_DIR, exist_ok=True)
         safe_title = "".join(c if c.isalnum() or c in " _-" else "_" for c in save_title)
-        save_path = os.path.join(
-            constants.SAVES_DIR, f"{safe_title}_turn{host.engine.state.turn_count}.json"
-        )
+        save_path = os.path.join(constants.SAVES_DIR, f"{safe_title}_turn{save_turn}.json")
         save_data = owner._build_save_payload(host, app)
 
         def write_save() -> None:
             try:
                 owner._write_json_payload(save_path, save_data)
-                host._last_manual_save_turn = host.engine.state.turn_count
-                host._last_manual_save_scene_id = host.engine.state.current_scene_id
+                host._last_manual_save_turn = save_turn
+                host._last_manual_save_scene_id = save_scene_id
                 owner._discard_autosave()
                 app.notify(f"Game saved to {save_path}", severity="information", timeout=3)
             except OSError as exc:

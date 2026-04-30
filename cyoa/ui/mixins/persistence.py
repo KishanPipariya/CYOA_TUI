@@ -816,41 +816,36 @@ class PersistenceMixin:
         """Render a plain-text transcript export for assistive-technology workflows."""
         ui_state = self._coerce_ui_state(payload.get("ui_state"))
         prompt_config = payload.get("prompt_config", {})
-        directives = []
+        directives: list[str] = []
         if isinstance(prompt_config, dict):
             raw_directives = prompt_config.get("directives")
             if isinstance(raw_directives, list):
                 directives = [
                     directive for directive in raw_directives if isinstance(directive, str)
                 ]
+        story_title = payload.get("story_title")
+        turn_count = payload.get("turn_count")
+        saved_at = payload.get("saved_at")
+        current_story_text = ui_state.get("current_story_text")
         inventory = payload.get("inventory")
         player_stats = payload.get("player_stats")
         objectives = payload.get("objectives")
         world_time = payload.get("world_time")
+        last_choice_text = payload.get("last_choice_text")
         return build_accessible_export(
-            story_title=payload.get("story_title")
-            if isinstance(payload.get("story_title"), str)
-            else None,
-            turn_count=payload.get("turn_count")
-            if isinstance(payload.get("turn_count"), int)
-            else None,
-            saved_at=payload.get("saved_at") if isinstance(payload.get("saved_at"), str) else None,
+            story_title=story_title if isinstance(story_title, str) else None,
+            turn_count=turn_count if isinstance(turn_count, int) else None,
+            saved_at=saved_at if isinstance(saved_at, str) else None,
             story_segments=self._coerce_story_segments(ui_state.get("story_segments")),
             current_story_text=(
-                ui_state.get("current_story_text")
-                if isinstance(ui_state.get("current_story_text"), str)
-                else None
+                current_story_text if isinstance(current_story_text, str) else None
             ),
             directives=directives,
             inventory=inventory if isinstance(inventory, list) else [],
             player_stats=player_stats if isinstance(player_stats, dict) else {},
             objectives=objectives if isinstance(objectives, list) else [],
             world_time=world_time if isinstance(world_time, dict) else None,
-            last_choice_text=(
-                payload.get("last_choice_text")
-                if isinstance(payload.get("last_choice_text"), str)
-                else None
-            ),
+            last_choice_text=last_choice_text if isinstance(last_choice_text, str) else None,
             last_resolved_choice_check=payload.get("last_resolved_choice_check"),
             verbosity=getattr(self, "scene_recap_verbosity", "standard"),
         )

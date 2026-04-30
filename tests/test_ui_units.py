@@ -1978,6 +1978,23 @@ def test_cyoa_app_dismisses_startup_accessibility_recommendation(
     app._continue_startup_sequence.assert_called_once_with()
 
 
+def test_first_run_accessibility_changes_normalizes_and_falls_back() -> None:
+    app = CYOAApp(model_path="")
+
+    assert app._first_run_accessibility_changes("screen reader friendly") == (
+        "screen_reader_friendly",
+        False,
+        True,
+        True,
+    )
+    assert app._first_run_accessibility_changes("unknown") == (
+        "default",
+        False,
+        False,
+        False,
+    )
+
+
 def test_cyoa_app_downloaded_model_selection_updates_runtime_and_config(
     monkeypatch: pytest.MonkeyPatch,
 ):

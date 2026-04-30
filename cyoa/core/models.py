@@ -1,4 +1,5 @@
-from typing import Literal
+from collections.abc import Sequence
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -244,7 +245,7 @@ class Choice(BaseModel):
         inventory: list[str],
         stats: dict[str, int],
         flags: set[str],
-        companions: list[Companion] | None = None,
+        companions: Sequence[Companion | dict[str, Any]] | None = None,
         world_time: WorldTime | dict[str, int] | None = None,
     ) -> list[str]:
         companion_index = self._normalize_companion_index(companions)
@@ -259,19 +260,17 @@ class Choice(BaseModel):
 
     @staticmethod
     def _normalize_companion_index(
-        companions: list[Companion] | None,
+        companions: Sequence[Companion | dict[str, Any]] | None,
     ) -> dict[str, Companion]:
         companion_index: dict[str, Companion] = {}
         for raw_companion in companions or []:
             if isinstance(raw_companion, Companion):
                 companion = raw_companion
-            elif isinstance(raw_companion, dict):
+            else:
                 try:
                     companion = Companion(**raw_companion)
                 except Exception:
                     continue
-            else:
-                continue
             if companion.name.strip():
                 companion_index[companion.name.casefold()] = companion
         return companion_index

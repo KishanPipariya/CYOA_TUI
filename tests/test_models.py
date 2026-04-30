@@ -1,3 +1,5 @@
+from collections import UserDict
+
 import pytest
 from pydantic import ValidationError
 
@@ -159,6 +161,26 @@ def test_choice_availability_reason_handles_companion_status_and_affinity() -> N
             {},
             set(),
             [Companion(name="Mira", status="active", affinity=3)],
+        )
+        is None
+    )
+
+
+def test_choice_availability_reason_accepts_mapping_like_companion_payloads() -> None:
+    choice = Choice(
+        text="Ask Mira to cover the retreat",
+        requirements=ChoiceRequirement(
+            companions={"Mira": "active"},
+            companion_affinity={"Mira": 3},
+        ),
+    )
+
+    assert (
+        choice.availability_reason(
+            [],
+            {},
+            set(),
+            [UserDict({"name": "Mira", "status": "active", "affinity": 3})],
         )
         is None
     )

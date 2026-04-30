@@ -876,16 +876,19 @@ def build_world_state_summary(  # noqa: C901
     if not any(companion_buckets.values()):
         lines.append("- None")
     else:
-        for heading, items in (
+        for heading, companion_items in (
             ("Active", companion_buckets["active"]),
             ("Available", companion_buckets["available"]),
             ("Lost", companion_buckets["lost"]),
             ("Other", companion_buckets["other"]),
         ):
-            if not items:
+            if not companion_items:
                 continue
             lines.append(f"### {heading}")
-            for companion in sorted(items, key=lambda item: str(item["name"]).casefold()):
+            for companion in sorted(
+                companion_items,
+                key=lambda item: str(item["name"]).casefold(),
+            ):
                 line = f"- {companion['name']} (Affinity {companion['affinity']})"
                 if companion["effect"]:
                     line = f"{line}: {companion['effect']}"

@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import tomllib
 from pathlib import Path
 from typing import Any, cast
@@ -32,9 +33,13 @@ def _relative_luminance(color: Color) -> float:
         normalized = value / 255
         if normalized <= 0.03928:
             return normalized / 12.92
-        return ((normalized + 0.055) / 1.055) ** 2.4
+        adjusted = (normalized + 0.055) / 1.055
+        return math.pow(adjusted, 2.4)
 
-    return 0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+    red = int(color.r)
+    green = int(color.g)
+    blue = int(color.b)
+    return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue)
 
 
 def _contrast_ratio(left: Color, right: Color) -> float:
