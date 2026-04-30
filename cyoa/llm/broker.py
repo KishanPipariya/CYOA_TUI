@@ -455,6 +455,12 @@ class ModelBroker:
         self, model_path: str | None = None, n_ctx: int | None = None
     ) -> LLMProvider:
         provider_type = os.getenv("LLM_PROVIDER", "llama_cpp").lower()
+        if model_path is not None:
+            explicit_model_path = pathlib.Path(model_path)
+            if explicit_model_path.suffix.lower() == ".gguf" and not explicit_model_path.exists():
+                raise FileNotFoundError(
+                    f"Configured llama_cpp model file does not exist: {model_path!r}."
+                )
         if provider_type == "mock":
             mock_model = model_path or os.getenv("LLM_MODEL") or "mock"
             return MockProvider(model_name=mock_model)

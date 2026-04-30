@@ -527,18 +527,20 @@ class CYOAGraphDB:
                 if not record:
                     return None
 
-                scenes = [
-                    {
+                scenes = []
+                for n in record["scenes"]:
+                    scene = {
                         "id": n["id"],
                         "narrative": n["narrative"],
                         "available_choices": n.get("available_choices", []),
                         "player_stats": self._scene_node_player_stats(n),
                         "inventory": list(n.get("inventory", [])),
                         "lore_entries": self._deserialize_lore_entries(n.get("lore_entries_json")),
-                        "world_time": self._deserialize_world_time(n.get("world_time_json")),
                     }
-                    for n in record["scenes"]
-                ]
+                    world_time = self._deserialize_world_time(n.get("world_time_json"))
+                    if world_time:
+                        scene["world_time"] = world_time
+                    scenes.append(scene)
                 choices = [r["action_text"] for r in record["choices"]]
 
                 return {"scenes": scenes, "choices": choices}

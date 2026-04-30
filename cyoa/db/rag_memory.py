@@ -14,20 +14,44 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from time import monotonic
+from types import SimpleNamespace
 from typing import Any
 
 from cyoa.core.observability import DBObservedSession
 
 __all__ = ["NarrativeMemory", "NPCMemory"]
 
-try:
-    import chromadb
 
-    _CHROMA_AVAILABLE = True
-except ImportError:
-    _CHROMA_AVAILABLE = False
+def _missing_chroma_client(*args: object, **kwargs: object) -> object:
+    del args, kwargs
+    raise ImportError("chromadb is not installed")
+
+
+@dataclass(frozen=True, slots=True)
+class _ChromaRuntime:
+    available: bool
+    client_factory: Callable[[], Any]
+
+
+def _load_chroma_runtime() -> _ChromaRuntime:
+    try:
+        import chromadb as chroma_module
+
+        return _ChromaRuntime(available=True, client_factory=chroma_module.Client)
+    except ImportError:  # pragma: no cover - exercised via fallback behavior
+        return _ChromaRuntime(available=False, client_factory=_missing_chroma_client)
+
+
+_CHROMA_RUNTIME = _load_chroma_runtime()
+_CHROMA_AVAILABLE = _CHROMA_RUNTIME.available
+chromadb = SimpleNamespace(Client=_CHROMA_RUNTIME.client_factory)
 
 logger = logging.getLogger(__name__)
+
+
+def _chroma_client_available() -> bool:
+    client_factory = getattr(chromadb, "Client", None)
+    return callable(client_factory) and client_factory is not _missing_chroma_client
 
 
 def _env_flag_enabled(name: str) -> bool:
@@ -98,7 +122,7 @@ class NarrativeMemory:
     """
 
     def __init__(self, collection_name: str = "cyoa_narrative_memory") -> None:
-        self._available: bool = _CHROMA_AVAILABLE
+        self._available: bool = _chroma_client_available()
         self._collection_name: str = collection_name
         self._client: Any | None = None
         self._collection: Any | None = None
@@ -255,7 +279,7 @@ class NPCMemory:
     """
 
     def __init__(self, base_collection_name: str = "cyoa_npc_memory") -> None:
-        self._available: bool = _CHROMA_AVAILABLE
+        self._available: bool = _chroma_client_available()
         self._base_name: str = base_collection_name
         self._client: Any | None = None
         self._collections: dict[str, Any] = {}

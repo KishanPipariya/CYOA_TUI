@@ -56,11 +56,16 @@ class RenderingMixin:
                 host._current_turn_text = ""
                 host._reset_story_segments("")
 
+        current_turn_widget = getattr(host, "_current_turn_widget", None)
+        if current_turn_widget is None:
+            host._typewriter_queue.put_nowait(partial)
+            return
+
         if not host.typewriter_enabled or host.reduced_motion:
             host._current_story += partial
             host._current_turn_text += partial
             host._update_current_story_segment(host._current_turn_text)
-            host._current_turn_widget.update(host._current_turn_text)
+            current_turn_widget.update(host._current_turn_text)
             if host._is_at_bottom():
                 host._scroll_to_bottom(animate=False)
         else:

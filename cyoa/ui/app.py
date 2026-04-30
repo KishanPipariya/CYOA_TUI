@@ -603,6 +603,9 @@ class CYOAApp(
 
         journal_panel.add_class("panel-collapsed")
         story_map_panel.add_class("panel-collapsed")
+        journal_panel.refresh(layout=True)
+        story_map_panel.refresh(layout=True)
+        self.refresh(layout=True)
 
         focused = self._focused_widget()
         if focused is not None and not self._widget_can_receive_focus(focused):

@@ -72,8 +72,12 @@ class NavigationMixin:
         textual_app = as_textual_app(app)
         panel = textual_app.query_one("#journal-panel", Container)
         if compact_layout:
-            textual_app.query_one("#story-map-panel", Container).add_class("panel-collapsed")
+            story_map_panel = textual_app.query_one("#story-map-panel", Container)
+            story_map_panel.add_class("panel-collapsed")
+            story_map_panel.refresh(layout=True)
         panel.remove_class("panel-collapsed")
+        panel.refresh(layout=True)
+        textual_app.refresh(layout=True)
         journal_list = textual_app.query_one("#journal-list", ListView)
         journal_list.scroll_end(animate=not as_mixin_host(app).reduced_motion)
         return journal_list
@@ -83,8 +87,12 @@ class NavigationMixin:
         textual_app = as_textual_app(app)
         panel = textual_app.query_one("#story-map-panel", Container)
         if compact_layout:
-            textual_app.query_one("#journal-panel", Container).add_class("panel-collapsed")
+            journal_panel = textual_app.query_one("#journal-panel", Container)
+            journal_panel.add_class("panel-collapsed")
+            journal_panel.refresh(layout=True)
         panel.remove_class("panel-collapsed")
+        panel.refresh(layout=True)
+        textual_app.refresh(layout=True)
         return textual_app.query_one("#story-map-tree", Tree)
 
     @staticmethod
@@ -495,6 +503,8 @@ class NavigationMixin:
             app.call_after_refresh(journal_list.focus)
             return
         panel.add_class("panel-collapsed")
+        panel.refresh(layout=True)
+        app.refresh(layout=True)
         self._focus_first_available_choice(app)
 
     def action_toggle_story_map(self) -> None:
@@ -512,6 +522,8 @@ class NavigationMixin:
             app.call_after_refresh(tree.focus)
             return
         panel.add_class("panel-collapsed")
+        panel.refresh(layout=True)
+        app.refresh(layout=True)
         self._focus_first_available_choice(app)
 
     @work(exclusive=True)

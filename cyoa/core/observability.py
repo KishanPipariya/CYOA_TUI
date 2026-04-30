@@ -2,6 +2,7 @@ import logging
 import os
 import socket
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -17,93 +18,201 @@ OTelSpan: Any
 OTelStatus: Any
 OTelStatusCode: Any
 
-try:
-    from opentelemetry import metrics as otel_metrics
-    from opentelemetry import trace as otel_trace
-    from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-    from opentelemetry.sdk.metrics import MeterProvider
-    from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-    from opentelemetry.sdk.resources import Resource
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.trace import Span as OTelSpan
-    from opentelemetry.trace import Status as OTelStatus
-    from opentelemetry.trace import StatusCode as OTelStatusCode
 
-    _OTEL_AVAILABLE = True
-except ImportError:  # pragma: no cover - exercised via fallback behavior
-    _OTEL_AVAILABLE = False
+class _FallbackStatusCode(Enum):
+    ERROR = "ERROR"
 
-    class _FallbackStatusCode(Enum):
-        ERROR = "ERROR"
 
-    class _FallbackStatus:
-        def __init__(self, status_code: _FallbackStatusCode):
-            self.status_code = status_code
+class _FallbackStatus:
+    def __init__(self, status_code: _FallbackStatusCode):
+        self.status_code = status_code
 
-    class _FallbackSpan:
-        def add_event(self, name: str, attributes: dict[str, object] | None = None) -> None:
-            del name, attributes
 
-        def record_exception(self, exc: BaseException) -> None:
-            del exc
+class _FallbackSpan:
+    def add_event(self, name: str, attributes: dict[str, object] | None = None) -> None:
+        del name, attributes
 
-        def set_status(self, status: "_FallbackStatus") -> None:
-            del status
+    def record_exception(self, exc: BaseException) -> None:
+        del exc
 
-        def set_attribute(self, key: str, value: object) -> None:
-            del key, value
+    def set_status(self, status: "_FallbackStatus") -> None:
+        del status
 
-        def end(self) -> None:
-            return None
+    def set_attribute(self, key: str, value: object) -> None:
+        del key, value
 
-    class _NoopMetric:
-        def record(self, value: float, attributes: dict[str, str] | None = None) -> None:
-            del value, attributes
+    def end(self) -> None:
+        return None
 
-        def add(self, value: int, attributes: dict[str, str] | None = None) -> None:
-            del value, attributes
 
-    class _NoopMeter:
-        def create_histogram(self, name: str, description: str, unit: str) -> _NoopMetric:
-            del name, description, unit
-            return _NoopMetric()
+class _FallbackMetric:
+    def record(self, value: float, attributes: dict[str, str] | None = None) -> None:
+        del value, attributes
 
-        def create_counter(self, name: str, description: str) -> _NoopMetric:
-            del name, description
-            return _NoopMetric()
+    def add(self, value: int, attributes: dict[str, str] | None = None) -> None:
+        del value, attributes
 
-    class _NoopTracer:
-        def start_span(self, name: str, attributes: dict[str, object]) -> "_FallbackSpan":
-            del name, attributes
-            return _FallbackSpan()
 
-    class _NoopMetricsAPI:
-        @staticmethod
-        def get_meter(name: str) -> _NoopMeter:
-            del name
-            return _NoopMeter()
+class _FallbackMeter:
+    def create_histogram(self, name: str, description: str, unit: str) -> _FallbackMetric:
+        del name, description, unit
+        return _FallbackMetric()
 
-        @staticmethod
-        def set_meter_provider(provider: object) -> None:
-            del provider
+    def create_counter(self, name: str, description: str) -> _FallbackMetric:
+        del name, description
+        return _FallbackMetric()
 
-    class _NoopTraceAPI:
-        @staticmethod
-        def get_tracer(name: str) -> _NoopTracer:
-            del name
-            return _NoopTracer()
 
-        @staticmethod
-        def set_tracer_provider(provider: object) -> None:
-            del provider
+class _FallbackTracer:
+    def start_span(self, name: str, attributes: dict[str, object]) -> _FallbackSpan:
+        del name, attributes
+        return _FallbackSpan()
 
-    otel_metrics = _NoopMetricsAPI()
-    otel_trace = _NoopTraceAPI()
-    OTelSpan = _FallbackSpan
-    OTelStatus = _FallbackStatus
-    OTelStatusCode = _FallbackStatusCode
+
+class _FallbackMetricsAPI:
+    @staticmethod
+    def get_meter(name: str) -> _FallbackMeter:
+        del name
+        return _FallbackMeter()
+
+    @staticmethod
+    def set_meter_provider(provider: object) -> None:
+        del provider
+
+
+class _FallbackTraceAPI:
+    @staticmethod
+    def get_tracer(name: str) -> _FallbackTracer:
+        del name
+        return _FallbackTracer()
+
+    @staticmethod
+    def set_tracer_provider(provider: object) -> None:
+        del provider
+
+
+class _FallbackResource:
+    @staticmethod
+    def create(attributes: dict[str, object]) -> dict[str, object]:
+        return dict(attributes)
+
+
+class _FallbackTracerProvider:
+    def __init__(self, *, resource: object | None = None) -> None:
+        self.resource = resource
+
+    def add_span_processor(self, processor: object) -> None:
+        del processor
+
+
+class _FallbackMeterProvider:
+    def __init__(
+        self,
+        *,
+        resource: object | None = None,
+        metric_readers: list[object] | None = None,
+    ) -> None:
+        self.resource = resource
+        self.metric_readers = list(metric_readers or [])
+
+
+class _FallbackBatchSpanProcessor:
+    def __init__(self, exporter: object) -> None:
+        self.exporter = exporter
+
+
+class _FallbackOTLPSpanExporter:
+    pass
+
+
+class _FallbackOTLPMetricExporter:
+    pass
+
+
+class _FallbackPeriodicExportingMetricReader:
+    def __init__(self, exporter: object) -> None:
+        self.exporter = exporter
+
+
+@dataclass(frozen=True, slots=True)
+class _OpenTelemetryRuntime:
+    available: bool
+    metrics_api: Any
+    trace_api: Any
+    resource_cls: Any
+    tracer_provider_cls: Any
+    meter_provider_cls: Any
+    span_exporter_cls: Any
+    metric_exporter_cls: Any
+    span_processor_cls: Any
+    metric_reader_cls: Any
+    span_cls: Any
+    status_cls: Any
+    status_code_cls: Any
+
+
+def _load_open_telemetry_runtime() -> _OpenTelemetryRuntime:
+    try:
+        from opentelemetry import metrics as runtime_metrics
+        from opentelemetry import trace as runtime_trace
+        from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        from opentelemetry.trace import Span as OTelSpan
+        from opentelemetry.trace import Status as OTelStatus
+        from opentelemetry.trace import StatusCode as OTelStatusCode
+
+        return _OpenTelemetryRuntime(
+            available=True,
+            metrics_api=runtime_metrics,
+            trace_api=runtime_trace,
+            resource_cls=Resource,
+            tracer_provider_cls=TracerProvider,
+            meter_provider_cls=MeterProvider,
+            span_exporter_cls=OTLPSpanExporter,
+            metric_exporter_cls=OTLPMetricExporter,
+            span_processor_cls=BatchSpanProcessor,
+            metric_reader_cls=PeriodicExportingMetricReader,
+            span_cls=OTelSpan,
+            status_cls=OTelStatus,
+            status_code_cls=OTelStatusCode,
+        )
+    except ImportError:  # pragma: no cover - exercised via fallback behavior
+        return _OpenTelemetryRuntime(
+            available=False,
+            metrics_api=_FallbackMetricsAPI(),
+            trace_api=_FallbackTraceAPI(),
+            resource_cls=_FallbackResource,
+            tracer_provider_cls=_FallbackTracerProvider,
+            meter_provider_cls=_FallbackMeterProvider,
+            span_exporter_cls=_FallbackOTLPSpanExporter,
+            metric_exporter_cls=_FallbackOTLPMetricExporter,
+            span_processor_cls=_FallbackBatchSpanProcessor,
+            metric_reader_cls=_FallbackPeriodicExportingMetricReader,
+            span_cls=_FallbackSpan,
+            status_cls=_FallbackStatus,
+            status_code_cls=_FallbackStatusCode,
+        )
+
+
+_OTEL_RUNTIME = _load_open_telemetry_runtime()
+_OTEL_AVAILABLE = _OTEL_RUNTIME.available
+otel_metrics = _OTEL_RUNTIME.metrics_api
+otel_trace = _OTEL_RUNTIME.trace_api
+Resource = _OTEL_RUNTIME.resource_cls
+TracerProvider = _OTEL_RUNTIME.tracer_provider_cls
+MeterProvider = _OTEL_RUNTIME.meter_provider_cls
+OTLPSpanExporter = _OTEL_RUNTIME.span_exporter_cls
+OTLPMetricExporter = _OTEL_RUNTIME.metric_exporter_cls
+BatchSpanProcessor = _OTEL_RUNTIME.span_processor_cls
+PeriodicExportingMetricReader = _OTEL_RUNTIME.metric_reader_cls
+OTelSpan = _OTEL_RUNTIME.span_cls
+OTelStatus = _OTEL_RUNTIME.status_cls
+OTelStatusCode = _OTEL_RUNTIME.status_code_cls
 
 metrics: Any = otel_metrics
 trace: Any = otel_trace
