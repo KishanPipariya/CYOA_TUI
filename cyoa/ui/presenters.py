@@ -1454,8 +1454,17 @@ def build_help_text(
     screen_reader_mode: bool,
     cognitive_load_reduction_mode: bool = False,
     current_bindings: dict[str, str] | None = None,
+    safety_summary: str = "",
+    safety_advisories: tuple[str, ...] = (),
 ) -> str:
     bindings = current_bindings or {}
+    safety_lines = [line for line in (safety_summary, *safety_advisories) if line]
+    safety_bullets = "\n".join(f"- {line}" for line in safety_lines)
+    safety_block = (
+        "\n".join(["- Active safety profile is shown in Settings.", safety_bullets])
+        if safety_bullets
+        else "- Active safety profile is shown in Settings."
+    )
     key_rows = "\n".join(
         f"| [b][reverse]{_help_key_cell(bindings.get(spec.id, spec.key))}[/reverse][/b] | {spec.settings_label} |"
         for spec in APP_BINDING_SPECS
@@ -1502,6 +1511,7 @@ def build_help_text(
 - Key bindings can be customized in Settings. Footer hints and this help sheet follow your saved keys.
 - Reduced Motion disables spinner animation and narrated text animation.
 - Journal and Story Map panels move keyboard focus automatically when opened.
+{safety_block}
 
 ---
 
@@ -1558,6 +1568,7 @@ def build_help_text(
 - Locked choices include a written reason and do not rely on color alone.
 - Reduced Motion is available in Settings and disables spinner animation and narrated text animation.
 - Journal and Story Map panels move keyboard focus automatically when opened.
+{safety_block}
 
 ---
 

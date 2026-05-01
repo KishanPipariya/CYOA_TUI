@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -30,6 +31,7 @@ from cyoa.ui.components import (
     LoreCodexScreen,
     NotificationHistoryScreen,
     RunArchiveScreen,
+    SaveListItem,
     SceneRecapScreen,
     SettingsScreen,
     StartupAccessibilityRecommendationScreen,
@@ -728,6 +730,29 @@ async def test_choice_focus_moves_with_arrow_keys(mock_app_dependencies):
         journal_list = app.query_one("#journal-list", ListView)
         journal_text = "".join(str(label.render()) for label in journal_list.query(Label))
         assert "Go South" in journal_text
+
+
+@pytest.mark.asyncio
+async def test_steady_input_timing_gates_rapid_choice_navigation(mock_app_dependencies):
+    app = _app_with_accessibility_config(input_timing_profile="steady")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+
+        choices_container = app.query_one("#choices-container", Container)
+        buttons = list(choices_container.query(Button))
+        assert len(buttons) == 2
+        assert app.focused is buttons[0]
+
+        app.action_focus_next_choice()
+        app.action_focus_next_choice()
+        await pilot.pause(0.1)
+        assert app.focused is buttons[1]
+
+        await pilot.pause(0.3)
+        app.action_focus_next_choice()
+        await pilot.pause(0.1)
+        assert app.focused is buttons[0]
 
 
 @pytest.mark.asyncio
@@ -2217,6 +2242,52 @@ async def test_save_and_load_game(mock_app_dependencies, tmp_path, monkeypatch):
         await pilot.pause(1.0)
 
         assert app.turn_count == 1
+
+
+@pytest.mark.asyncio
+async def test_expanded_confirmations_protect_loading_saves(
+    mock_app_dependencies, tmp_path, monkeypatch
+):
+    from cyoa.core import constants
+
+    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
+
+    app = _app_with_accessibility_config(confirm_high_impact_actions=True)
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        await pilot.press("1")
+        await pilot.pause(1.0)
+        assert app.turn_count == 2
+
+        await pilot.press("s")
+        await pilot.pause(0.5)
+        save_files = [f for f in os.listdir(str(tmp_path)) if f.endswith(".json")]
+        assert len(save_files) == 1
+
+        await pilot.press("1")
+        await pilot.pause(1.0)
+        assert app.turn_count == 3
+
+        await pilot.press("l")
+        await _wait_for_pilot(pilot, lambda: isinstance(app.screen, LoadGameScreen))
+        load_item = app.screen.query_one(SaveListItem)
+        cast(LoadGameScreen, app.screen).on_list_view_selected(SimpleNamespace(item=load_item))
+        await _wait_for_pilot(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+
+        await pilot.press("n")
+        await _wait_for_pilot(pilot, lambda: not isinstance(app.screen, ConfirmScreen))
+        assert app.turn_count == 3
+
+        await pilot.press("l")
+        await _wait_for_pilot(pilot, lambda: isinstance(app.screen, LoadGameScreen))
+        load_item = app.screen.query_one(SaveListItem)
+        cast(LoadGameScreen, app.screen).on_list_view_selected(SimpleNamespace(item=load_item))
+        await _wait_for_pilot(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+
+        await pilot.press("y")
+        await _wait_for_pilot(pilot, lambda: app.turn_count == 2)
+        assert "You went North." in app._current_story
 
 
 @pytest.mark.asyncio

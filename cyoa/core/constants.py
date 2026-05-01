@@ -141,6 +141,7 @@ TEXT_SCALE_OPTIONS: tuple[str, ...] = ("standard", "large", "xlarge")
 READING_WIDTH_OPTIONS: tuple[str, ...] = ("focused", "standard", "full")
 LINE_SPACING_OPTIONS: tuple[str, ...] = ("compact", "standard", "relaxed")
 VERBOSITY_OPTIONS: tuple[str, ...] = ("minimal", "standard", "detailed")
+INPUT_TIMING_PROFILE_OPTIONS: tuple[str, ...] = ("default", "gentle", "steady")
 TYPEWRITER_CHAR_DELAY = 0.02  # seconds per character (legacy, kept for compat)
 TYPEWRITER_CATCHUP_THRESHOLD = 50  # if queue > 50, speed up reveal
 TYPEWRITER_MAX_BATCH = 5  # max characters to reveal per tick during catchup

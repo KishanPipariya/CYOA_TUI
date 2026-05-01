@@ -1,5 +1,5 @@
 import logging
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from textual.containers import Container, VerticalScroll
@@ -330,6 +330,8 @@ class RenderingMixin:
             or not host.engine.state.current_node
             or choice_idx >= len(host.engine.state.current_node.choices)
         ):
+            return
+        if not cast(Any, self)._accept_timed_input("choice"):
             return
 
         choice = host.engine.state.current_node.choices[choice_idx]

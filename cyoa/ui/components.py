@@ -26,6 +26,7 @@ from cyoa.core.user_config import (
     TerminalAccessibilityFallback,
     accessibility_preset_overrides,
     build_accessibility_profile_report,
+    build_safety_profile_report,
 )
 from cyoa.ui.keybindings import (
     CommandPaletteEntry,
@@ -500,12 +501,16 @@ class HelpScreen(ModalScreen[None]):
         screen_reader_mode: bool = False,
         cognitive_load_reduction_mode: bool = False,
         current_bindings: dict[str, str] | None = None,
+        safety_summary: str = "",
+        safety_advisories: tuple[str, ...] = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._screen_reader_mode = screen_reader_mode
         self._cognitive_load_reduction_mode = cognitive_load_reduction_mode
         self._current_bindings = current_bindings or {}
+        self._safety_summary = safety_summary
+        self._safety_advisories = safety_advisories
 
     def compose(self) -> ComposeResult:
         with DialogFrame(
@@ -517,6 +522,8 @@ class HelpScreen(ModalScreen[None]):
                         screen_reader_mode=self._screen_reader_mode,
                         cognitive_load_reduction_mode=self._cognitive_load_reduction_mode,
                         current_bindings=self._current_bindings,
+                        safety_summary=self._safety_summary,
+                        safety_advisories=self._safety_advisories,
                     ),
                     id="help-text",
                 )
@@ -1360,6 +1367,8 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         scene_recap_verbosity: str,
         runtime_metadata_verbosity: str,
         locked_choice_verbosity: str,
+        input_timing_profile: str = "default",
+        confirm_high_impact_actions: bool = False,
         keybindings: dict[str, str] | None = None,
         typewriter: bool,
         typewriter_speed: str,
@@ -1407,6 +1416,12 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             if locked_choice_verbosity in constants.VERBOSITY_OPTIONS
             else "standard"
         )
+        self._input_timing_profile = (
+            input_timing_profile
+            if input_timing_profile in constants.INPUT_TIMING_PROFILE_OPTIONS
+            else "default"
+        )
+        self._confirm_high_impact_actions = confirm_high_impact_actions
         self._effective_keybindings = effective_keybindings(keybindings)
         self._typewriter = typewriter
         self._typewriter_speed = (
@@ -1511,6 +1526,33 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             yield Label(
                 "",
                 id="settings-accessibility-advisories",
+                classes="settings-value settings-validation-feedback",
+            )
+
+            yield Label("Input Timing", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Default", id="btn-settings-input-timing-default")
+                yield Button("Gentle", id="btn-settings-input-timing-gentle")
+                yield Button("Steady", id="btn-settings-input-timing-steady")
+            yield Label(
+                "Gentle and Steady slow repeated focus movement and choice activation to reduce accidental repeats.",
+                classes="settings-value",
+            )
+
+            yield Label("Protected Actions", classes="settings-label")
+            with Horizontal(classes="settings-row settings-section"):
+                yield Button("Standard", id="btn-settings-confirm-standard")
+                yield Button("Expanded", id="btn-settings-confirm-expanded")
+            yield Label(
+                "Expanded confirmations also protect loading a save, restoring a checkpoint, branching from history, and starting over from an ending screen.",
+                classes="settings-value",
+            )
+
+            yield Label("Safety Profile", classes="settings-label")
+            yield Label("", id="settings-safety-summary", classes="settings-value")
+            yield Label(
+                "",
+                id="settings-safety-advisories",
                 classes="settings-value settings-validation-feedback",
             )
 
@@ -1696,6 +1738,13 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 f"btn-settings-locked-choice-verbosity-{verbosity}",
                 self._locked_choice_verbosity == verbosity,
             )
+        for profile in constants.INPUT_TIMING_PROFILE_OPTIONS:
+            self._set_selected(
+                f"btn-settings-input-timing-{profile}",
+                self._input_timing_profile == profile,
+            )
+        self._set_selected("btn-settings-confirm-standard", not self._confirm_high_impact_actions)
+        self._set_selected("btn-settings-confirm-expanded", self._confirm_high_impact_actions)
         self._set_selected("btn-settings-typewriter-on", self._typewriter)
         self._set_selected("btn-settings-typewriter-off", not self._typewriter)
 
@@ -1711,6 +1760,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             f"{self._current_theme} ({self._theme_index + 1}/{len(self._theme_names)})"
         )
         self._refresh_accessibility_profile_report()
+        self._refresh_safety_profile_report()
 
     def _effective_accessibility_state(self) -> dict[str, bool]:
         effective = {
@@ -1742,6 +1792,16 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         )
         self.query_one("#settings-accessibility-summary", Label).update(report.summary)
         advisories = self.query_one("#settings-accessibility-advisories", Label)
+        advisories.update(" ".join(report.advisory_lines))
+        advisories.set_class(bool(report.advisory_lines), "settings-validation-error")
+
+    def _refresh_safety_profile_report(self) -> None:
+        report = build_safety_profile_report(
+            input_timing_profile=self._input_timing_profile,
+            confirm_high_impact_actions=self._confirm_high_impact_actions,
+        )
+        self.query_one("#settings-safety-summary", Label).update(report.summary)
+        advisories = self.query_one("#settings-safety-advisories", Label)
         advisories.update(" ".join(report.advisory_lines))
         advisories.set_class(bool(report.advisory_lines), "settings-validation-error")
 
@@ -1832,6 +1892,8 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             "scene_recap_verbosity": self._scene_recap_verbosity,
             "runtime_metadata_verbosity": self._runtime_metadata_verbosity,
             "locked_choice_verbosity": self._locked_choice_verbosity,
+            "input_timing_profile": self._input_timing_profile,
+            "confirm_high_impact_actions": self._confirm_high_impact_actions,
             "keybindings": keybinding_overrides,
             "typewriter": self._typewriter,
             "typewriter_speed": self._typewriter_speed,
@@ -1913,6 +1975,12 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             self._locked_choice_verbosity = button_id.removeprefix(
                 "btn-settings-locked-choice-verbosity-"
             )
+        elif button_id and button_id.startswith("btn-settings-input-timing-"):
+            self._input_timing_profile = button_id.removeprefix("btn-settings-input-timing-")
+        elif button_id == "btn-settings-confirm-standard":
+            self._confirm_high_impact_actions = False
+        elif button_id == "btn-settings-confirm-expanded":
+            self._confirm_high_impact_actions = True
         elif button_id == "btn-settings-typewriter-on":
             self._typewriter = True
         elif button_id == "btn-settings-typewriter-off":

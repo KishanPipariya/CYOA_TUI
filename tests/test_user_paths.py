@@ -51,6 +51,8 @@ def test_save_config_creates_parent_directory(tmp_path, monkeypatch) -> None:
         "scene_recap_verbosity": "standard",
         "runtime_metadata_verbosity": "standard",
         "locked_choice_verbosity": "standard",
+        "input_timing_profile": "default",
+        "confirm_high_impact_actions": False,
         "typewriter": False,
         "typewriter_speed": "normal",
     }
@@ -76,6 +78,8 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
             scene_recap_verbosity="detailed",
             runtime_metadata_verbosity="minimal",
             locked_choice_verbosity="detailed",
+            input_timing_profile="steady",
+            confirm_high_impact_actions=True,
             keybindings={"show_settings": "f2"},
             typewriter=False,
             typewriter_speed="fast",
@@ -105,6 +109,8 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
     assert restored.scene_recap_verbosity == "detailed"
     assert restored.runtime_metadata_verbosity == "minimal"
     assert restored.locked_choice_verbosity == "detailed"
+    assert restored.input_timing_profile == "steady"
+    assert restored.confirm_high_impact_actions is True
     assert restored.keybindings == {"show_settings": "f2"}
     assert restored.typewriter is False
     assert restored.typewriter_speed == "fast"

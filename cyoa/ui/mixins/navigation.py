@@ -198,6 +198,7 @@ class NavigationMixin:
 
     def action_show_help(self) -> None:
         """Show the help screen with keybindings and game mechanics."""
+        safety_summary, safety_advisories = cast(Any, self).current_safety_profile()
         cast(Any, as_textual_app(self))._push_modal_screen(
             HelpScreen(
                 screen_reader_mode=as_mixin_host(self).screen_reader_mode,
@@ -205,6 +206,8 @@ class NavigationMixin:
                     as_mixin_host(self), "cognitive_load_reduction_mode", False
                 ),
                 current_bindings=cast(Any, self).get_effective_keybindings(),
+                safety_summary=safety_summary,
+                safety_advisories=safety_advisories,
             )
         )
 
@@ -485,12 +488,28 @@ class NavigationMixin:
         def on_selected(name: str | None) -> None:
             payload = host._bookmark_payloads.get(name or "")
             if name and payload:
-                persistence._restore_from_payload(
-                    payload,
-                    source_label=f"Restored restore point {name}",
-                    preserve_restore_points=True,
-                )
-                app.notify(f"Restored restore point: {name}", severity="information", timeout=3)
+
+                def restore_payload() -> None:
+                    persistence._restore_from_payload(
+                        payload,
+                        source_label=f"Restored restore point {name}",
+                        preserve_restore_points=True,
+                    )
+                    app.notify(
+                        f"Restored restore point: {name}",
+                        severity="information",
+                        timeout=3,
+                    )
+
+                if cast(Any, self).should_confirm_high_impact_action("restore_bookmark"):
+                    cast(Any, app)._push_modal_screen(
+                        ConfirmScreen(
+                            f"[b]Restore restore point '{name}'?[/b]\n\nThe current unsaved run state will be replaced with that checkpoint."
+                        ),
+                        lambda confirmed: restore_payload() if confirmed else None,
+                    )
+                    return
+                restore_payload()
 
         cast(Any, app)._push_modal_screen(
             OptionListScreen(
@@ -559,6 +578,16 @@ class NavigationMixin:
 
         def check_branch(idx: int | None) -> None:
             if idx is not None:
+                if cast(Any, self).should_confirm_high_impact_action("branch_past"):
+                    cast(Any, app)._push_modal_screen(
+                        ConfirmScreen(
+                            "[b]Branch from this past scene?[/b]\n\nThe current unsaved route will be replaced with a new branch from the selected turn."
+                        ),
+                        lambda confirmed: (
+                            self.restore_to_scene(idx, history) if confirmed else None
+                        ),
+                    )
+                    return
                 self.restore_to_scene(idx, history)
 
         cast(Any, app)._push_modal_screen(

@@ -53,9 +53,11 @@ from cyoa.core.user_config import (
     UserConfig,
     UserConfigSaveError,
     accessibility_preset_overrides,
+    build_safety_profile_report,
     infer_accessibility_preset,
     infer_startup_accessibility_recommendation,
     infer_terminal_accessibility_fallback,
+    input_timing_profile_details,
     load_user_config,
     reset_user_config,
     resolve_accessibility_preferences,
@@ -232,6 +234,7 @@ class CYOAApp(
         self._notification_timer: Any | None = None
         self._notification_history: list[NotificationHistoryEntry] = []
         self._notification_history_limit: int = 200
+        self._timed_input_history: dict[str, float] = {}
         self._latest_status_source_message: str = "Waiting for adventure updates."
         self._latest_status_severity: SeverityLevel = "information"
         self._latest_status_message: str = self._prepare_status_message(
@@ -1729,6 +1732,18 @@ class CYOAApp(
                 locked_choice_verbosity=str(
                     pick("locked_choice_verbosity", self.locked_choice_verbosity)
                 ),
+                input_timing_profile=str(
+                    pick(
+                        "input_timing_profile",
+                        getattr(config, "input_timing_profile", "default"),
+                    )
+                ),
+                confirm_high_impact_actions=bool(
+                    pick(
+                        "confirm_high_impact_actions",
+                        getattr(config, "confirm_high_impact_actions", False),
+                    )
+                ),
                 keybindings=cast(
                     dict[str, str], pick("keybindings", getattr(config, "keybindings", {}))
                 ),
@@ -1875,6 +1890,18 @@ class CYOAApp(
             getattr(self._user_config, "locked_choice_verbosity", "standard"),
             constants.VERBOSITY_OPTIONS,
         )
+        input_timing_profile = self._resolve_option_setting(
+            payload,
+            "input_timing_profile",
+            getattr(self._user_config, "input_timing_profile", "default"),
+            constants.INPUT_TIMING_PROFILE_OPTIONS,
+        )
+        confirm_high_impact_actions = bool(
+            payload.get(
+                "confirm_high_impact_actions",
+                getattr(self._user_config, "confirm_high_impact_actions", False),
+            )
+        )
         typewriter = bool(payload.get("typewriter", self._user_config.typewriter))
         typewriter_speed = self._resolve_option_setting(
             payload,
@@ -1908,6 +1935,8 @@ class CYOAApp(
             scene_recap_verbosity=scene_recap_verbosity,
             runtime_metadata_verbosity=runtime_metadata_verbosity,
             locked_choice_verbosity=locked_choice_verbosity,
+            input_timing_profile=input_timing_profile,
+            confirm_high_impact_actions=confirm_high_impact_actions,
             keybindings=keybinding_overrides,
             typewriter=typewriter,
             typewriter_speed=typewriter_speed,
@@ -1932,6 +1961,7 @@ class CYOAApp(
         self.scene_recap_verbosity = scene_recap_verbosity
         self.runtime_metadata_verbosity = runtime_metadata_verbosity
         self.locked_choice_verbosity = locked_choice_verbosity
+        self._timed_input_history.clear()
         self.typewriter_enabled = typewriter
         self.typewriter_speed = typewriter_speed
         self._keybinding_overrides = keybinding_overrides
@@ -1986,6 +2016,7 @@ class CYOAApp(
         self.locked_choice_verbosity = getattr(
             self._user_config, "locked_choice_verbosity", "standard"
         )
+        self._timed_input_history.clear()
         self.typewriter_enabled = self._user_config.typewriter
         self.typewriter_speed = self._user_config.typewriter_speed
         self.notify(
@@ -2078,6 +2109,10 @@ class CYOAApp(
             "scene_recap_verbosity": self.scene_recap_verbosity,
             "runtime_metadata_verbosity": self.runtime_metadata_verbosity,
             "locked_choice_verbosity": self.locked_choice_verbosity,
+            "input_timing_profile": getattr(self._user_config, "input_timing_profile", "default"),
+            "confirm_high_impact_actions": bool(
+                getattr(self._user_config, "confirm_high_impact_actions", False)
+            ),
             "typewriter_enabled": self.typewriter_enabled,
             "typewriter_speed": self.typewriter_speed,
             "diagnostics_enabled": bool(getattr(self._user_config, "diagnostics_enabled", False)),
@@ -2237,6 +2272,56 @@ class CYOAApp(
             timeout=4,
         )
 
+    def _input_timing_profile(self) -> str:
+        return str(getattr(self._user_config, "input_timing_profile", "default") or "default")
+
+    def _confirm_high_impact_actions_enabled(self) -> bool:
+        return bool(getattr(self._user_config, "confirm_high_impact_actions", False))
+
+    def _timed_input_interval(self, gate: str) -> float:
+        details = input_timing_profile_details(self._input_timing_profile())
+        if gate == "navigation":
+            return float(details["navigation_debounce_seconds"])
+        if gate == "choice":
+            return float(details["repeat_pacing_seconds"])
+        return 0.0
+
+    def _accept_timed_input(self, gate: str) -> bool:
+        interval = self._timed_input_interval(gate)
+        if interval <= 0:
+            return True
+        now = time.monotonic()
+        last = self._timed_input_history.get(gate)
+        if last is not None and (now - last) < interval:
+            return False
+        self._timed_input_history[gate] = now
+        return True
+
+    def should_confirm_high_impact_action(self, action_id: str) -> bool:
+        if action_id in {
+            "restart",
+            "quit",
+            "save_overwrite",
+            "bookmark_overwrite",
+            "startup_new_game",
+        }:
+            return True
+        if not self._confirm_high_impact_actions_enabled():
+            return False
+        return action_id in {
+            "load_game",
+            "restore_bookmark",
+            "branch_past",
+            "new_adventure_button",
+        }
+
+    def current_safety_profile(self) -> tuple[str, tuple[str, ...]]:
+        report = build_safety_profile_report(
+            input_timing_profile=self._input_timing_profile(),
+            confirm_high_impact_actions=self._confirm_high_impact_actions_enabled(),
+        )
+        return report.summary, report.advisory_lines
+
     def action_edit_directives(self) -> None:
         """Edit comma-separated player directives for the active run."""
         if not self.engine or not self.engine.story_context:
@@ -2270,7 +2355,10 @@ class CYOAApp(
         """Typewriter skip shortcut on clicking the story area."""
         try:
             if isinstance(event.control, Button) and event.control.id == "btn-new-adventure":
-                self.run_worker(self.action_restart(), exclusive=True)
+                if self.should_confirm_high_impact_action("new_adventure_button"):
+                    self.action_request_restart()
+                else:
+                    self.run_worker(self.action_restart(), exclusive=True)
                 return
 
             # U1 Fix: Only skip if clicking within the story container
@@ -2284,7 +2372,7 @@ class CYOAApp(
         except (Exception, KeyError) as e:
             logger.debug("Click handler failed: %s", e)
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
+    async def on_button_pressed(self, event: Button.Pressed) -> None:  # noqa: C901
         if event.button.id == "btn-compact-journal":
             self.action_toggle_journal()
             return
@@ -2302,7 +2390,10 @@ class CYOAApp(
             return
 
         if event.button.id == "btn-new-adventure":
-            self.run_worker(self.action_restart(), exclusive=True)
+            if self.should_confirm_high_impact_action("new_adventure_button"):
+                self.action_request_restart()
+            else:
+                self.run_worker(self.action_restart(), exclusive=True)
             return
 
         if event.button.id == "btn-retry":
@@ -2365,7 +2456,9 @@ class CYOAApp(
         target.focus()
 
     def action_focus_next_choice(self) -> None:
-        self._move_choice_focus(1)
+        if self._accept_timed_input("navigation"):
+            self._move_choice_focus(1)
 
     def action_focus_previous_choice(self) -> None:
-        self._move_choice_focus(-1)
+        if self._accept_timed_input("navigation"):
+            self._move_choice_focus(-1)

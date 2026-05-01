@@ -1211,18 +1211,25 @@ def test_help_text_covers_branching_exports_and_review_panels() -> None:
     help_text = build_help_text(
         screen_reader_mode=False,
         current_bindings={"show_help": "f1", "show_settings": "f2"},
+        safety_summary="Safety profile: Gentle timing with expanded action confirmations.",
+        safety_advisories=(
+            "Expanded confirmations also protect loading a save and branching from past scenes.",
+        ),
     )
     screen_reader_help = build_help_text(
         screen_reader_mode=True,
         current_bindings={"show_help": "f1", "show_settings": "f2"},
+        safety_summary="Safety profile: Default timing with standard action confirmations.",
     )
 
     assert "Adventure Flow" in help_text
     assert "Branch lets you revisit an earlier scene" in help_text
     assert "Export writes markdown, accessible markdown, and JSON copies" in help_text
     assert "Journal Summary and Story Map Summary" in help_text
+    assert "Safety profile: Gentle timing with expanded action confirmations." in help_text
     assert "Play Loop" in screen_reader_help
     assert "Repeat Status and notification history" in screen_reader_help
+    assert "Active safety profile is shown in Settings." in screen_reader_help
     assert "Key bindings can be customized in Settings." in screen_reader_help
 
 
@@ -1790,6 +1797,8 @@ def test_settings_screen_dismisses_saved_payload(tmp_path) -> None:
         "scene_recap_verbosity": "detailed",
         "runtime_metadata_verbosity": "minimal",
         "locked_choice_verbosity": "detailed",
+        "input_timing_profile": "default",
+        "confirm_high_impact_actions": False,
         "keybindings": {"show_settings": "f2", "toggle_journal": "f3"},
         "typewriter": False,
         "typewriter_speed": "fast",

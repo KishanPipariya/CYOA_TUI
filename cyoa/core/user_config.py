@@ -7,6 +7,7 @@ from typing import Any
 
 from cyoa.core.constants import (
     CONFIG_FILE,
+    INPUT_TIMING_PROFILE_OPTIONS,
     LINE_SPACING_OPTIONS,
     READING_WIDTH_OPTIONS,
     TEXT_SCALE_OPTIONS,
@@ -63,6 +64,12 @@ class AccessibilityProfileReport:
     advisory_lines: tuple[str, ...] = ()
 
 
+@dataclass(slots=True, frozen=True)
+class SafetyProfileReport:
+    summary: str
+    advisory_lines: tuple[str, ...] = ()
+
+
 class UserConfigSaveError(RuntimeError):
     """Raised when the durable user config cannot be persisted."""
 
@@ -79,6 +86,14 @@ def _coerce_accessibility_preset(value: object, default: str = "default") -> str
     if isinstance(value, str):
         cleaned = value.strip().lower().replace("-", "_").replace(" ", "_")
         if cleaned in ACCESSIBILITY_PRESET_OPTIONS:
+            return cleaned
+    return default
+
+
+def _coerce_input_timing_profile(value: object, default: str = "default") -> str:
+    if isinstance(value, str):
+        cleaned = value.strip().lower().replace("-", "_").replace(" ", "_")
+        if cleaned in INPUT_TIMING_PROFILE_OPTIONS:
             return cleaned
     return default
 
@@ -157,6 +172,8 @@ class UserConfig:
     scene_recap_verbosity: str = "standard"
     runtime_metadata_verbosity: str = "standard"
     locked_choice_verbosity: str = "standard"
+    input_timing_profile: str = "default"
+    confirm_high_impact_actions: bool = False
     keybindings: dict[str, str] = field(default_factory=dict)
     typewriter: bool = True
     typewriter_speed: str = "normal"
@@ -190,6 +207,8 @@ class UserConfig:
             "scene_recap_verbosity",
             "runtime_metadata_verbosity",
             "locked_choice_verbosity",
+            "input_timing_profile",
+            "confirm_high_impact_actions",
             "keybindings",
             "typewriter",
             "typewriter_speed",
@@ -223,6 +242,8 @@ class UserConfig:
         scene_recap_verbosity = payload.get("scene_recap_verbosity")
         runtime_metadata_verbosity = payload.get("runtime_metadata_verbosity")
         locked_choice_verbosity = payload.get("locked_choice_verbosity")
+        input_timing_profile = payload.get("input_timing_profile")
+        confirm_high_impact_actions = payload.get("confirm_high_impact_actions")
         keybindings = payload.get("keybindings")
         typewriter = payload.get("typewriter")
         typewriter_speed = payload.get("typewriter_speed")
@@ -276,6 +297,12 @@ class UserConfig:
             locked_choice_verbosity=_coerce_option(
                 locked_choice_verbosity, VERBOSITY_OPTIONS, "standard"
             ),
+            input_timing_profile=_coerce_input_timing_profile(input_timing_profile),
+            confirm_high_impact_actions=(
+                confirm_high_impact_actions
+                if isinstance(confirm_high_impact_actions, bool)
+                else False
+            ),
             keybindings=parsed_keybindings,
             typewriter=typewriter if isinstance(typewriter, bool) else True,
             typewriter_speed=(
@@ -325,6 +352,8 @@ class UserConfig:
                 "scene_recap_verbosity": self.scene_recap_verbosity,
                 "runtime_metadata_verbosity": self.runtime_metadata_verbosity,
                 "locked_choice_verbosity": self.locked_choice_verbosity,
+                "input_timing_profile": self.input_timing_profile,
+                "confirm_high_impact_actions": self.confirm_high_impact_actions,
                 "keybindings": self.keybindings,
                 "typewriter": self.typewriter,
                 "typewriter_speed": self.typewriter_speed,
@@ -353,6 +382,8 @@ class UserConfig:
             "scene_recap_verbosity": self.scene_recap_verbosity,
             "runtime_metadata_verbosity": self.runtime_metadata_verbosity,
             "locked_choice_verbosity": self.locked_choice_verbosity,
+            "input_timing_profile": self.input_timing_profile,
+            "confirm_high_impact_actions": self.confirm_high_impact_actions,
             "typewriter": self.typewriter,
             "typewriter_speed": self.typewriter_speed,
         }
@@ -593,6 +624,67 @@ def build_accessibility_profile_report(
     )
 
     return AccessibilityProfileReport(
+        summary=" ".join(summary_parts),
+        advisory_lines=tuple(advisory_lines),
+    )
+
+
+def input_timing_profile_details(profile: str) -> dict[str, float | str]:
+    normalized = _coerce_input_timing_profile(profile)
+    if normalized == "gentle":
+        return {
+            "profile": "gentle",
+            "label": "Gentle",
+            "navigation_debounce_seconds": 0.12,
+            "repeat_pacing_seconds": 0.2,
+        }
+    if normalized == "steady":
+        return {
+            "profile": "steady",
+            "label": "Steady",
+            "navigation_debounce_seconds": 0.25,
+            "repeat_pacing_seconds": 0.35,
+        }
+    return {
+        "profile": "default",
+        "label": "Default",
+        "navigation_debounce_seconds": 0.0,
+        "repeat_pacing_seconds": 0.0,
+    }
+
+
+def build_safety_profile_report(
+    *,
+    input_timing_profile: str,
+    confirm_high_impact_actions: bool,
+) -> SafetyProfileReport:
+    details = input_timing_profile_details(input_timing_profile)
+    navigation_ms = int(float(details["navigation_debounce_seconds"]) * 1000)
+    repeat_ms = int(float(details["repeat_pacing_seconds"]) * 1000)
+    confirmation_label = "Expanded" if confirm_high_impact_actions else "Standard"
+    summary_parts = [
+        (
+            f"Safety profile: {details['label']} timing with {confirmation_label.lower()} action confirmations."
+        ),
+    ]
+    if navigation_ms or repeat_ms:
+        summary_parts.append(
+            f"Navigation debounce {navigation_ms} ms and repeat pacing {repeat_ms} ms are active."
+        )
+    else:
+        summary_parts.append("Direct keyboard timing stays at the fast default.")
+
+    advisory_lines: list[str] = []
+    if confirm_high_impact_actions:
+        advisory_lines.append(
+            "Expanded confirmations also protect loading saves, restoring checkpoints, branching from past scenes, and the end-of-run new-adventure button."
+        )
+    if navigation_ms or repeat_ms:
+        advisory_lines.append(
+            "Timed input gating can ignore very fast repeated key presses so sticky keys, hold-repeat, and switch-like inputs do not trigger extra moves."
+        )
+
+    return SafetyProfileReport(
         summary=" ".join(summary_parts),
         advisory_lines=tuple(advisory_lines),
     )

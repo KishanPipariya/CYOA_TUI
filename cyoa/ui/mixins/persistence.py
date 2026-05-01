@@ -382,7 +382,20 @@ class PersistenceMixin:
 
         def on_selected(save_file: str | None) -> None:
             if save_file:
-                self._restore_from_save(os.path.join(constants.SAVES_DIR, save_file))
+                restore_path = os.path.join(constants.SAVES_DIR, save_file)
+                if cast(Any, self).should_confirm_high_impact_action("load_game"):
+                    from cyoa.ui.components import ConfirmScreen
+
+                    cast(Any, app)._push_modal_screen(
+                        ConfirmScreen(
+                            f"[b]Load save '{save_file}'?[/b]\n\nThe current unsaved run state will be replaced with that save."
+                        ),
+                        lambda confirmed: (
+                            self._restore_from_save(restore_path) if confirmed else None
+                        ),
+                    )
+                    return
+                self._restore_from_save(restore_path)
 
         cast(Any, app)._push_modal_screen(LoadGameScreen(save_files), on_selected)
 
