@@ -8,9 +8,9 @@ AI-generated choose-your-own-adventure fiction in the terminal, built with `Text
 ![Coverage](https://raw.githubusercontent.com/KishanPipariya/CYOA_TUI/main/.github/badges/coverage.svg)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-## Install And Play
+## Install and play
 
-The fastest path is:
+The quickest way to get started is:
 
 ```bash
 uv sync
@@ -24,7 +24,7 @@ uv sync --extra local-llm
 uv run cyoa-tui --runtime-preset local-fast
 ```
 
-Useful startup profiles:
+Startup profiles:
 
 ```bash
 uv run cyoa-tui --runtime-preset mock-smoke
@@ -32,7 +32,7 @@ uv run cyoa-tui --runtime-preset local-fast
 uv run cyoa-tui --runtime-preset local-quality
 ```
 
-You can force critical accessibility modes before the full UI renders:
+You can also force key accessibility modes before the full UI renders:
 
 ```bash
 uv run cyoa-tui --screen-reader --reduced-motion
@@ -41,33 +41,33 @@ uv run cyoa-tui --high-contrast
 
 These flags apply immediately for the current launch. They do not rewrite saved settings unless you later save the same values from the in-app Settings screen.
 
-On first launch, choose one of these:
+On first launch, choose one of these options:
 
 - `Quick Demo` for instant play with the built-in mock backend
 - `Download Local Model` to save a recommended GGUF into the app data folder
 
 If you already have a packaged release build, unpack it and run `./cyoa-tui` from a terminal.
 
-## What The App Does
+## What you get
 
-- streams narrative turns in a terminal-first UI
-- presents branching choices with keyboard-first navigation
-- supports saves, load, undo/redo, restart, bookmarks, exports, journal, and story map
-- lets you branch from past scenes without deleting your current save history
-- includes recap, character sheet, lore codex, command palette, and notification review flows
-- runs safely on fresh machines without forcing a local model at startup
-- supports runtime presets, startup accessibility flags, and customizable keybindings
-- stores config, saves, models, and logs in standard user app-data directories
+- streaming narrative turns in a terminal-first UI
+- branching choices with keyboard-first navigation
+- save/load, undo/redo, restart, bookmarks, exports, a journal, and a story map
+- the ability to branch from past scenes without losing your current save history
+- recap, character sheet, lore codex, command palette, and notification review flows
+- safe startup on fresh machines without requiring a local model immediately
+- runtime presets, startup accessibility flags, and customizable keybindings
+- config, saves, models, and logs stored in standard user app-data directories
 
-Press `h` for the in-app help overlay, `ctrl+shift+p` for the command palette, and `o` for Settings. Settings covers provider choice, local model path, theme pack, keybindings, verbosity, typewriter behavior, and diagnostics.
+Press `h` for the in-app help overlay, `ctrl+shift+p` for the command palette, and `o` for Settings. From Settings, you can choose a provider, point to a local model, switch theme packs, edit keybindings, and tune verbosity, typewriter behavior, and diagnostics.
 
-## Consumer Docs
+## Learn more
 
 - [Consumer Guide](docs/consumer-guide.md)
 - [Advanced Setup](docs/advanced-setup.md)
 - [Non-Docker Neo4j Setup](docs/non-docker-neo4j.md)
 
-## Demo Snapshot
+## Demo snapshot
 
 ![CYOA TUI live screenshot](docs/assets/Screenshot%202026-04-18%20at%205.49.19%E2%80%AFPM.png)
 
@@ -75,7 +75,7 @@ Press `h` for the in-app help overlay, `ctrl+shift+p` for the command palette, a
 
 Contributor and infrastructure details live in [Advanced Setup](docs/advanced-setup.md).
 
-## Technical References
+## Technical references
 
 - [CODEWIKI.md](CODEWIKI.md)
 - [workflow.md](workflow.md)

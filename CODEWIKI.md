@@ -1,222 +1,382 @@
 # CYOA TUI CodeWiki
 
-This document describes the repository as it exists on April 18, 2026. It is intended as a fast technical map for contributors, reviewers, and anyone evaluating the project architecture.
+This document describes the repository as it exists on 2026-05-01. It is a fast technical map for contributors, reviewers, and anyone trying to understand the current architecture without reading the entire codebase first.
 
 ## 1. Project Snapshot
 
-- App type: terminal interactive fiction built with `Textual`
-- Runtime: Python `>=3.13`
-- Entrypoint: [`main.py`](/Users/kishan/CYOA_TUI/main.py)
-- Core package: [`cyoa/`](/Users/kishan/CYOA_TUI/cyoa)
-- LLM backends:
-  - `llama_cpp` for local GGUF models
-  - `mock` for tests and demo-friendly local runs
-- Optional integrations:
-  - Neo4j graph persistence in [`cyoa/db/graph_db.py`](/Users/kishan/CYOA_TUI/cyoa/db/graph_db.py)
-  - Chroma-backed memory in [`cyoa/db/rag_memory.py`](/Users/kishan/CYOA_TUI/cyoa/db/rag_memory.py)
-  - OpenTelemetry metrics and traces in [`cyoa/core/observability.py`](/Users/kishan/CYOA_TUI/cyoa/core/observability.py)
+- App type: terminal-first interactive fiction built with `Textual`
+- Python: `>=3.13`
+- Packaged command: `cyoa-tui`, defined in [`pyproject.toml`](pyproject.toml)
+- Script entrypoint: [`cyoa/cli.py`](cyoa/cli.py), which delegates to [`main.py`](main.py)
+- Main package: [`cyoa/`](cyoa/)
+- Built-in providers:
+  - `mock` for demos, tests, and safe startup
+  - `llama_cpp` for local GGUF inference
+- Optional extras:
+  - `local-llm` for `llama-cpp-python` and guided model download support
+  - `memory` for Chroma-backed retrieval
+  - `graph` for Neo4j persistence
+  - `observability` for OpenTelemetry export
+  - `packaging` for PyInstaller builds
 
-## 2. User-Facing Capabilities
+## 2. What The App Currently Does
 
-The current runtime supports:
+The current codebase supports:
 
-- streaming story generation and branching choices
-- keyboard-first navigation with number keys, arrows, and `enter`
-- save/load, undo/redo, bookmarks, and rewind-based branching
-- story export to Markdown and JSON
-- journal panel, story map panel, and typewriter controls
-- generation preset cycling and live directive editing
-- optional theme-driven opening prompts, mood styling, and ASCII scene art
-- optional observability and graph persistence without making them mandatory for startup
+- first-run setup with `Quick Demo` or guided local model download
+- strict startup validation for provider, preset, theme, and numeric env settings
+- startup accessibility overrides from CLI and saved accessibility presets
+- terminal accessibility fallback and startup recommendations
+- streaming narrative turns with typewriter controls
+- branching choices with keyboard-first navigation
+- choice requirements based on inventory, stats, flags, companions, and in-world time
+- optional risky choice checks that resolve with a roll and persist the result
+- save/load, autosave recovery, undo/redo, bookmarks, and branch-from-history flows
+- exports as Markdown, accessible plain text, and machine-readable timeline JSON
+- journal, story map, inventory inspector, scene recap, character sheet, lore codex, notification history, run archive, endings discovered, and hidden achievements screens
+- editable directives, runtime preset selection, generation preset cycling, and remappable keybindings
+- optional Neo4j, RAG, and telemetry integrations that degrade gracefully when unavailable
 
 ## 3. Repository Map
 
-### Startup
+### Startup and packaging
 
-- [`main.py`](/Users/kishan/CYOA_TUI/main.py)
-  - loads `.env`
-  - parses `--model`, `--theme`, `--prompt`, `--preset`, and `--runtime-preset`
-  - validates provider and numeric env settings
-  - initializes observability
-  - creates `StoryLogger`
-  - starts `CYOAApp`
+- [`pyproject.toml`](pyproject.toml)
+  - defines the `cyoa-tui` console script
+  - declares optional extras and dev tooling
+- [`cyoa/cli.py`](cyoa/cli.py)
+  - thin wrapper around `main.main`
+- [`main.py`](main.py)
+  - loads `.env` before other imports that read environment variables
+  - parses CLI flags
+  - validates startup configuration
+  - persists resolved user config
+  - loads theme content or a direct prompt override
+  - creates [`StoryLogger`](cyoa/db/story_logger.py)
+  - starts [`CYOAApp`](cyoa/ui/app.py)
 
 ### Core runtime
 
-- [`cyoa/core/constants.py`](/Users/kishan/CYOA_TUI/cyoa/core/constants.py): defaults, filesystem paths, loading art
-- [`cyoa/core/models.py`](/Users/kishan/CYOA_TUI/cyoa/core/models.py): typed story payloads such as `Choice` and `StoryNode`
-- [`cyoa/core/state.py`](/Users/kishan/CYOA_TUI/cyoa/core/state.py): game state, undo/redo, bookmarks, serialization
-- [`cyoa/core/engine.py`](/Users/kishan/CYOA_TUI/cyoa/core/engine.py): turn orchestration, retries, persistence hooks, branching
-- [`cyoa/core/rag.py`](/Users/kishan/CYOA_TUI/cyoa/core/rag.py): retrieval-facing memory coordinator
-- [`cyoa/core/events.py`](/Users/kishan/CYOA_TUI/cyoa/core/events.py): event bus contract
-- [`cyoa/core/circuit_breaker.py`](/Users/kishan/CYOA_TUI/cyoa/core/circuit_breaker.py): DB isolation and degraded-mode handling
-- [`cyoa/core/theme_loader.py`](/Users/kishan/CYOA_TUI/cyoa/core/theme_loader.py): theme discovery and validation
-- [`cyoa/core/observability.py`](/Users/kishan/CYOA_TUI/cyoa/core/observability.py): metrics/tracing setup and observed sessions
+- [`cyoa/core/constants.py`](cyoa/core/constants.py): defaults, user data paths, startup prompt, UI constants
+- [`cyoa/core/models.py`](cyoa/core/models.py): Pydantic contracts for choices, story nodes, objectives, lore, companions, and world time
+- [`cyoa/core/state.py`](cyoa/core/state.py): long-lived game state, snapshots, bookmarks, save serialization, and event emission
+- [`cyoa/core/mementos.py`](cyoa/core/mementos.py): typed undo/redo and restore payloads
+- [`cyoa/core/engine.py`](cyoa/core/engine.py): main orchestration layer for generation, branching, persistence, and runtime phases
+- [`cyoa/core/runtime.py`](cyoa/core/runtime.py): `EnginePhase` and `EngineTransition`
+- [`cyoa/core/events.py`](cyoa/core/events.py): global event bus and event name contract
+- [`cyoa/core/rag.py`](cyoa/core/rag.py): retrieval coordinator over narrative and NPC memory stores
+- [`cyoa/core/user_config.py`](cyoa/core/user_config.py): saved preferences, accessibility presets, startup recommendations
+- [`cyoa/core/theme_loader.py`](cyoa/core/theme_loader.py): theme discovery, validation, and contrast checks
+- [`cyoa/core/model_download.py`](cyoa/core/model_download.py): guided GGUF recommendation and download
+- [`cyoa/core/preflight.py`](cyoa/core/preflight.py): terminal and local-model preflight checks
+- [`cyoa/core/observability.py`](cyoa/core/observability.py): OpenTelemetry setup and no-op fallback runtime
+- [`cyoa/core/support.py`](cyoa/core/support.py): private file handling, crash logs, support paths, file-manager reveal helper
+- [`cyoa/core/ports.py`](cyoa/core/ports.py): protocols for story repositories and memory stores
 
 ### LLM layer
 
-- [`cyoa/llm/broker.py`](/Users/kishan/CYOA_TUI/cyoa/llm/broker.py): `StoryContext`, speculation cache, provider-agnostic generation broker
-- [`cyoa/llm/providers.py`](/Users/kishan/CYOA_TUI/cyoa/llm/providers.py): concrete providers for `llama_cpp` and `mock`
-- [`cyoa/llm/pipeline.py`](/Users/kishan/CYOA_TUI/cyoa/llm/pipeline.py): prompt assembly pipeline
-- [`cyoa/llm/templates/system_prompt.j2`](/Users/kishan/CYOA_TUI/cyoa/llm/templates/system_prompt.j2): base prompt template
+- [`cyoa/llm/broker.py`](cyoa/llm/broker.py)
+  - owns `StoryContext`
+  - manages generation presets
+  - supports unified generation or the two-step narrator-plus-extraction path
+  - performs schema repair retries
+  - maintains speculative cache entries and provider state restore
+  - runs background summarization when context pressure rises
+- [`cyoa/llm/providers.py`](cyoa/llm/providers.py)
+  - provider abstraction
+  - `MockProvider`
+  - `LlamaCppProvider`
+  - token counting, JSON streaming, and provider state transfer hooks
+- [`cyoa/llm/pipeline.py`](cyoa/llm/pipeline.py): modular prompt assembly pipeline
+- [`cyoa/llm/templates/system_prompt.j2`](cyoa/llm/templates/system_prompt.j2): base system prompt template
+
+### Persistence and optional services
+
+- [`cyoa/db/story_logger.py`](cyoa/db/story_logger.py): event-driven `story.md` transcript writer
+- [`cyoa/db/graph_db.py`](cyoa/db/graph_db.py): optional Neo4j repository, schema helpers, story tree reconstruction, connectivity verification
+- [`cyoa/db/rag_memory.py`](cyoa/db/rag_memory.py): optional in-process Chroma-backed narrative and NPC memory stores with fallback behavior
 
 ### UI layer
 
-- [`cyoa/ui/app.py`](/Users/kishan/CYOA_TUI/cyoa/ui/app.py): top-level Textual app and command bindings
-- [`cyoa/ui/components.py`](/Users/kishan/CYOA_TUI/cyoa/ui/components.py): status bar, modals, spinners, helper screens
-- [`cyoa/ui/styles.tcss`](/Users/kishan/CYOA_TUI/cyoa/ui/styles.tcss): UI styling
-- [`cyoa/ui/ascii_art.py`](/Users/kishan/CYOA_TUI/cyoa/ui/ascii_art.py): mood/scene art lookup
-- [`cyoa/ui/mixins/`](/Users/kishan/CYOA_TUI/cyoa/ui/mixins): persistence, navigation, rendering, typewriter, theme, event handling
+- [`cyoa/ui/app.py`](cyoa/ui/app.py): Textual app, startup flow, model download flow, settings application, notifications, engine bootstrapping
+- [`cyoa/ui/components.py`](cyoa/ui/components.py): workspace widgets, modals, settings UI, first-run screens, palette UI
+- [`cyoa/ui/keybindings.py`](cyoa/ui/keybindings.py): binding specs, palette entries, keybinding override resolution
+- [`cyoa/ui/presenters.py`](cyoa/ui/presenters.py): rendering helpers for recaps, codex summaries, exports, status text, achievements, archive views
+- [`cyoa/ui/commands.py`](cyoa/ui/commands.py): command objects for persistence-oriented UI actions
+- [`cyoa/ui/ascii_art.py`](cyoa/ui/ascii_art.py): narrative scene-art lookup
+- [`cyoa/ui/styles.tcss`](cyoa/ui/styles.tcss): app styling
+- [`cyoa/ui/mixins/`](cyoa/ui/mixins)
+  - `events.py`: event subscriptions and runtime reaction
+  - `navigation.py`: user actions, panels, help, archive, bookmarks, branching
+  - `persistence.py`: save/load, autosave, export, restore, archive writes
+  - `rendering.py`: story rendering and panel refresh logic
+  - `theme.py`: theme and appearance application
+  - `typewriter.py`: streaming reveal behavior
 
-### Tooling and runtime assets
+### Assets, scripts, and docs
 
-- [`themes/`](/Users/kishan/CYOA_TUI/themes): shipped themes and mood configuration
-- [`monitoring/`](/Users/kishan/CYOA_TUI/monitoring): OpenTelemetry collector, Prometheus, Grafana config
-- [`docker-compose.yml`](/Users/kishan/CYOA_TUI/docker-compose.yml): local observability and Neo4j stack
-- [`scripts/run_smoke.sh`](/Users/kishan/CYOA_TUI/scripts/run_smoke.sh): smoke suite entrypoint
-- [`scripts/check_coverage.py`](/Users/kishan/CYOA_TUI/scripts/check_coverage.py): package-level coverage floor enforcement
+- [`themes/`](themes): shipped narrative themes and palette definitions
+- [`monitoring/`](monitoring): OTEL collector, Prometheus, and Grafana config
+- [`docker-compose.yml`](docker-compose.yml): local stack for monitoring and Neo4j
+- [`scripts/`](scripts)
+  - `run_smoke.sh`
+  - `check_coverage.py`
+  - `validate_themes.py`
+  - `build_binary.py`
+  - `install_git_hooks.sh`
+- [`docs/`](docs): consumer and setup documentation
 
-## 4. Runtime Flow
+## 4. Startup Flow
+
+The packaged startup path is:
+
+```text
+cyoa-tui -> cyoa.cli:main -> main.main
+```
+
+`main.py` is intentionally strict and current startup behavior is easy to verify from code:
+
+1. `.env` is loaded immediately.
+2. Observability setup is initialized before app launch.
+3. User-facing directories are created.
+4. CLI arguments are parsed.
+5. Startup config is resolved from CLI, environment, runtime presets, and saved config.
+6. Invalid providers, presets, themes, or numeric env values fail fast with exit code `2`.
+7. Resolved provider, model path, theme, preset, and runtime preset are saved back to user config.
+8. Theme data is loaded unless `--prompt` overrides it directly.
+9. `StoryLogger` subscribes to engine events.
+10. `CYOAApp` is created and run.
+
+Current CLI flags in [`main.py`](main.py):
+
+- `--model`
+- `--theme`
+- `--prompt`
+- `--preset`
+- `--runtime-preset`
+- `--screen-reader`
+- `--high-contrast`
+- `--reduced-motion`
+
+Current runtime presets:
+
+- `local-quality`: `llama_cpp` + `precise`
+- `local-fast`: `llama_cpp` + `balanced`
+- `mock-smoke`: `mock` + `precise`
+
+The safe default-provider rule is important:
+
+- if a valid local model path is available, startup prefers `llama_cpp`
+- otherwise startup falls back to `mock`
+
+## 5. UI Startup Behavior
+
+The UI is no longer a thin wrapper around the engine. It owns a substantial amount of product behavior.
+
+Key startup responsibilities inside [`cyoa/ui/app.py`](cyoa/ui/app.py):
+
+- loading saved UI preferences and keybinding overrides
+- applying accessibility preferences and terminal fallbacks
+- showing the first-run setup screen when required
+- offering startup accessibility recommendations when appropriate
+- checking for autosave recovery
+- presenting guided model download with preflight notes and blocking reasons
+- bootstrapping `ModelBroker`, `StoryEngine`, optional graph persistence, and optional RAG
+- warming optional runtime services only after the first scene is visible
+
+Current first-run entry options exposed by the UI:
+
+- `Quick Demo`
+- `Download Local Model`
+
+## 6. Runtime Architecture
+
+### Engine
+
+[`StoryEngine`](cyoa/core/engine.py) is the central coordinator. It currently:
+
+- maintains the current `GameState`
+- owns `StoryContext` and speculative cache state
+- tracks explicit lifecycle phases with `EnginePhase`
+- initializes fresh adventures and restarts existing ones
+- processes choices, including optional risky choice checks
+- retrieves memories before generation
+- triggers background summarization when context size crosses a threshold
+- restores saves, bookmarks, undo/redo snapshots, and branch-to-history state
+- persists nodes to Neo4j when online
+- indexes scenes into narrative and NPC memory stores
+- shuts down background tasks and external services cleanly
+
+### Story context and prompts
+
+[`StoryContext`](cyoa/llm/broker.py) now carries more than just raw history. It tracks:
+
+- the starting prompt
+- rolling message history
+- current inventory and player stats
+- injected memory snippets and structured memory metadata
+- hierarchical summaries
+- goals and directives
+- objectives, factions, NPC affinity, flags, lore entries, companions, and world time
+
+Prompt assembly is component-based in [`cyoa/llm/pipeline.py`](cyoa/llm/pipeline.py), not a single hardcoded string builder.
+
+### Generation path
+
+[`ModelBroker`](cyoa/llm/broker.py) currently supports two generation patterns:
+
+- unified mode: one model call produces the full `StoryNode`
+- judge pattern: one call produces `NarratorNode`, then a second call extracts structured state deltas into `ExtractionNode`
+
+The broker also manages:
+
+- generation presets: `balanced`, `precise`, `cinematic`
+- runtime temperature and token limits
+- JSON repair attempts
+- background summarization
+- provider state save/restore for speculation
+
+### Optional memory
+
+[`RAGManager`](cyoa/core/rag.py) separates:
+
+- recent scene continuity memory
+- semantic chapter memory
+- NPC-specific memory
+
+It injects these memories into `StoryContext` and rebuilds memory stores after branch or restore flows when needed.
+
+### Optional graph persistence
+
+[`CYOAGraphDB`](cyoa/db/graph_db.py) provides:
+
+- story title creation and collision handling
+- scene persistence
+- scene history path lookup
+- story tree reconstruction for the map/archive surfaces
+- schema migration statements
+- async connectivity verification
+
+## 7. Runtime Flow
 
 ```mermaid
 flowchart TD
-    A[main.py] --> B[load .env and validate config]
-    B --> C[setup observability]
-    C --> D[build StoryLogger and CYOAApp]
-    D --> E[Textual on_mount]
-    E --> F[initialize ModelBroker and StoryEngine]
-    F --> G[verify optional Neo4j connectivity]
-    G --> H[engine.initialize]
-    H --> I[generate first node]
-    I --> J[retrieve memory and assemble prompt]
-    J --> K[provider generation or speculation cache hit]
-    K --> L[apply state updates]
-    L --> M[index memory and persist scene when online]
-    M --> N[emit events]
-    N --> O[render story, stats, journal, and choices]
-    O --> P[user choice]
-    P --> I
+    A[cyoa-tui] --> B[cyoa.cli.main]
+    B --> C[main.py]
+    C --> D[resolve startup config and theme]
+    D --> E[create StoryLogger and CYOAApp]
+    E --> F[CYOAApp on_mount]
+    F --> G[first-run, accessibility, autosave, or model-download flows]
+    G --> H[initialize ModelBroker and StoryEngine]
+    H --> I[engine.initialize]
+    I --> J[prepare StoryContext and initial world state]
+    J --> K[generate first StoryNode]
+    K --> L[index memory and optionally persist scene]
+    L --> M[emit runtime events]
+    M --> N[render story, choices, panels, and status]
+    N --> O[player action]
+    O --> P[engine.make_choice / undo / redo / branch / restore]
+    P --> K
 ```
 
-## 5. Startup and Configuration
-
-`main.py` is intentionally strict. It fails early when startup configuration is invalid instead of quietly degrading into an unexpected runtime mode.
-
-Current startup behavior:
-
-- valid providers are `llama_cpp` and `mock`
-- `llama_cpp` requires an existing local model path
-- `LLM_N_CTX`, `LLM_MAX_TOKENS`, and `LLM_TOKEN_BUDGET` must be positive integers
-- `LLM_TEMPERATURE` must be a non-negative float
-- `--prompt` overrides the theme prompt
-- `--preset` applies a named generation preset
-- `--runtime-preset` applies an opinionated profile that can choose provider and preset together
-
-Runtime presets currently defined in [`main.py`](/Users/kishan/CYOA_TUI/main.py):
-
-- `local-quality`
-- `local-fast`
-- `mock-smoke`
-
-## 6. Engine Behavior
-
-`StoryEngine` is the coordination layer for the playable loop. It currently:
-
-- initializes and resets `GameState`
-- manages `StoryContext` history, goals, and directives
-- retrieves memory before generation
-- launches summarization when context thresholds are crossed
-- uses speculation cache entries when available
-- delegates actual model work to `ModelBroker`
-- applies stat, inventory, and world-state updates from generated nodes
-- records titles, scene ids, and timeline metadata
-- persists scenes to Neo4j when available
-- supports retry, undo/redo, bookmark restore, save/load, and branch restore
-
-## 7. UI Behavior
-
-The Textual layer is not just a thin shell. It owns interaction patterns, modal flows, and rendering behavior.
-
-Current UI-visible features:
-
-- story streaming with typewriter animation
-- choice selection by `1-4`, arrows, or `enter`
-- journal and story map side panels
-- help modal and restart/quit confirmation flows
-- bookmark creation and restore
-- story export to `saves/exports/`
-- runtime diagnostics in the status bar:
-  - provider
-  - runtime preset
-  - generation preset
-  - engine phase
-- editable player directives shown in the status panel
-- theme-specific loading spinner frames and accent colors
-
-## 8. Persistence and Degraded Mode
-
-Neo4j behavior:
-
-- connectivity is verified asynchronously at startup
-- failures disable graph persistence rather than aborting the session
-- a circuit breaker protects repeated failing operations
-
-Chroma behavior:
-
-- Chroma runs in-process and is not started by `docker-compose`
-- memory initialization is lazy
-- recent-history fallback remains available when Chroma is offline
-- retries and re-probing are used instead of assuming a permanently healthy memory layer
-
-Export behavior:
-
-- story exports are written locally as Markdown and JSON
-- exports are not uploaded anywhere automatically
-
-## 9. Core Data Contracts
+## 8. Core Data Contracts
 
 ### `StoryNode`
 
-Key runtime fields include:
+[`StoryNode`](cyoa/core/models.py) is richer than in earlier versions. Important fields now include:
 
-- `narrative: str`
-- `title: str | None`
-- `items_gained: list[str]`
-- `items_lost: list[str]`
-- `stat_updates: dict[str, int]`
-- `choices: list[Choice]`
-- `is_ending: bool`
-- `mood: str`
+- `narrative`
+- `title`
+- `items_gained`
+- `items_lost`
+- `npcs_present`
+- `stat_updates`
+- `choices`
+- `is_ending`
+- `mood`
+- `objectives_updated`
+- `faction_updates`
+- `npc_affinity_updates`
+- `story_flags_set`
+- `story_flags_cleared`
+- `lore_entries_updated`
+- `companions_updated`
+- `time_advance_hours`
 
 Validation rule:
 
-- non-ending nodes must have `2` to `4` choices
-- ending nodes may have `0` choices
+- non-ending nodes must contain `2` to `4` choices
+
+### `Choice`
+
+Choices can now include:
+
+- `requirements`
+- `check`
+
+Requirement checks support:
+
+- inventory items
+- minimum stats
+- required flags
+- companion roster state
+- companion affinity thresholds
+- minimum or maximum day
+- allowed time-of-day periods
 
 ### `GameState`
 
-Default player stats in [`cyoa/core/state.py`](/Users/kishan/CYOA_TUI/cyoa/core/state.py):
+[`GameState`](cyoa/core/state.py) tracks:
+
+- current node and story title
+- inventory and player stats
+- turn count
+- current scene id
+- last submitted choice text
+- last resolved choice check
+- timeline metadata
+- objectives
+- faction reputation
+- NPC affinity
+- story flags
+- lore entries
+- companions
+- world time
+- undo and redo history
+- named bookmarks
+
+Default stats are still:
 
 - `health: 100`
 - `gold: 0`
 - `reputation: 0`
 
-State serialization includes:
+### `StoryContext`
 
-- story metadata and current node
-- inventory and player stats
-- objectives, faction reputation, NPC affinity, and story flags
-- timeline metadata
-- undo/redo stacks
-- bookmarks
+`StoryContext` is the engine-facing prompt state. It should be considered the source of truth for what the LLM sees, while `GameState` is the source of truth for what the player has and what the UI renders.
 
-## 10. Event Contracts
+### Engine lifecycle
 
-Key events defined in [`cyoa/core/events.py`](/Users/kishan/CYOA_TUI/cyoa/core/events.py) include:
+[`cyoa/core/runtime.py`](cyoa/core/runtime.py) defines these phases:
+
+- `idle`
+- `initializing`
+- `generating`
+- `ready`
+- `restoring`
+- `error`
+- `shutdown`
+
+## 9. Event Contract
+
+The global event bus in [`cyoa/core/events.py`](cyoa/core/events.py) still drives cross-module coordination.
+
+Current high-signal events:
 
 - lifecycle:
   - `engine.started`
   - `engine.restarted`
+  - `engine.phase_changed`
 - narrative flow:
   - `engine.choice_made`
   - `engine.node_generating`
@@ -226,6 +386,7 @@ Key events defined in [`cyoa/core/events.py`](/Users/kishan/CYOA_TUI/cyoa/core/e
 - state:
   - `engine.stats_updated`
   - `engine.inventory_updated`
+  - `engine.world_state_updated`
   - `engine.story_title_generated`
 - outcomes:
   - `engine.ending_reached`
@@ -235,127 +396,189 @@ Key events defined in [`cyoa/core/events.py`](/Users/kishan/CYOA_TUI/cyoa/core/e
   - `db.saved`
   - `memory.indexed`
 
-Common payloads used by subscribers:
+`StoryLogger` is one concrete subscriber. The UI layer is another major subscriber.
 
-- `engine.choice_made`: `choice_text: str`
-- `engine.token_streamed`: `token: str`
-- `engine.node_completed`: `node: StoryNode`
-- `engine.stats_updated`: `stats: dict[str, int]`
-- `engine.inventory_updated`: `inventory: list[str]`
-- `engine.story_title_generated`: `title: str | None`
-- `engine.error_occurred`: `error: str`
-- `engine.status_message`: `message: str`
+## 10. Configuration Surface
 
-## 11. Configuration Surface
+### CLI
 
-### Provider selection
+See [`main.py`](main.py) for the authoritative parser.
 
-- `LLM_PROVIDER`
-- `LLM_MODEL_PATH`
-- `LLM_MODEL`
+### Environment variables
 
-### Generation and context
+The most important current env surface is:
 
-- `LLM_UNIFIED_MODE`
-- `LLM_N_CTX`
-- `LLM_TEMPERATURE`
-- `LLM_MAX_TOKENS`
-- `LLM_TOKEN_BUDGET`
-- `LLM_SUMMARY_THRESHOLD`
-- `LLM_SUMMARY_MAX_TOKENS`
-- `LLM_REPAIR_ATTEMPTS`
-- `LLM_PRESET`
-- `APP_RUNTIME_PRESET`
+- provider and model:
+  - `LLM_PROVIDER`
+  - `LLM_MODEL_PATH`
+  - `LLM_MODEL`
+- generation:
+  - `LLM_PRESET`
+  - `LLM_UNIFIED_MODE`
+  - `LLM_N_CTX`
+  - `LLM_TEMPERATURE`
+  - `LLM_MAX_TOKENS`
+  - `LLM_TOKEN_BUDGET`
+  - `LLM_SUMMARY_THRESHOLD`
+  - `LLM_SUMMARY_MAX_TOKENS`
+  - `LLM_REPAIR_ATTEMPTS`
+- runtime presets:
+  - `APP_RUNTIME_PRESET`
+- optional integrations:
+  - `CYOA_ENABLE_GRAPH_DB`
+  - `CYOA_ENABLE_OBSERVABILITY`
+- diagnostics:
+  - `CYOA_ENABLE_RAG`
+- Neo4j:
+  - `NEO4J_URI`
+  - `NEO4J_USER`
+  - `NEO4J_PASSWORD`
+- observability:
+  - `OTEL_EXPORTER_OTLP_ENDPOINT`
+- filesystem overrides:
+  - `CYOA_CONFIG_DIR`
+  - `CYOA_DATA_DIR`
+  - `CYOA_STATE_DIR`
 
-### Persistence and telemetry
+### Saved user config
 
-- `NEO4J_URI`
-- `NEO4J_USER`
-- `NEO4J_PASSWORD`
-- `OTEL_EXPORTER_OTLP_ENDPOINT`
-- `GRAFANA_PASSWORD`
+[`cyoa/core/user_config.py`](cyoa/core/user_config.py) persists:
 
-### Local runtime files
+- provider and model path
+- theme and runtime preset
+- accessibility preset and direct accessibility toggles
+- typography and reading width preferences
+- notification, recap, and metadata verbosity
+- typewriter settings
+- diagnostics mode
+- keybinding overrides
+- first-run completion state
+- dismissed startup recommendations
 
-- `.config.json`: UI preferences
-- `saves/*.json`: save files
-- `saves/exports/*`: Markdown and JSON story exports
-- `story.md`: story transcript log
+## 11. Persistence and Local Files
 
-## 12. Test and Quality Snapshot
+Current user-facing storage is platform-aware and defined in [`cyoa/core/constants.py`](cyoa/core/constants.py).
 
-Latest verified local results in this workspace on `2026-04-18`:
+Important files and directories include:
 
-- full test suite: `296 passed`
-- total coverage in `coverage.json`: `89.46%`
-- enforced package coverage floors:
-  - `cyoa/core`: `94.41%` against `83.00%`
-  - `cyoa/llm`: `94.38%` against `78.00%`
-  - `cyoa/db`: `94.09%` against `72.00%`
-  - `cyoa/ui`: `89.69%` against `85.00%`
+- `config.json`: durable user preferences
+- `saves/`: manual saves and autosave payloads
+- `saves/exports/`: exported Markdown, accessible text, and timeline JSON
+- `saves/run_archive.json`: archive metadata
+- `models/`: downloaded GGUF files
+- `story.md`: append-only story transcript maintained by `StoryLogger`
+- `last_crash.log`: structured crash report written on unexpected startup failure
 
-High-signal test modules:
+File writes use owner-only permissions where supported via [`open_private_text_file`](cyoa/core/support.py).
 
-- [`tests/test_main.py`](/Users/kishan/CYOA_TUI/tests/test_main.py): startup validation and main lifecycle
-- [`tests/test_engine_state.py`](/Users/kishan/CYOA_TUI/tests/test_engine_state.py): engine state flow, persistence hooks, branching
-- [`tests/test_tui.py`](/Users/kishan/CYOA_TUI/tests/test_tui.py): Textual interaction coverage
-- [`tests/test_llm_providers.py`](/Users/kishan/CYOA_TUI/tests/test_llm_providers.py): provider behavior and selection
-- [`tests/test_observability.py`](/Users/kishan/CYOA_TUI/tests/test_observability.py): tracing and metrics
-- [`tests/test_db_integration.py`](/Users/kishan/CYOA_TUI/tests/test_db_integration.py): graph persistence and schema behavior
-- [`tests/test_themes.py`](/Users/kishan/CYOA_TUI/tests/test_themes.py): theme validation
+## 12. Optional Integrations and Degraded Mode
 
-## 13. Operational Caveats
+The current architecture is intentionally resilient when optional services are missing.
 
-- `docker-compose.yml` does not start Chroma because memory is embedded in-process.
-- `scripts/run_smoke.sh` only runs the smoke subset, not the entire suite.
-- `mock` mode is the easiest showcase path, but it does not represent real provider latency or model quality.
-- feature presence in the repo does not imply that optional services are active in a given session
+### Neo4j
 
-## 14. Extension Notes
+- not required for startup
+- only activated when explicitly enabled or when Neo4j credentials are present
+- connectivity is verified asynchronously after the first scene
+- failures produce warnings and disable graph-backed features for the session
+- a circuit breaker prevents repeated expensive failures
+
+### RAG memory
+
+- backed by in-process Chroma when the `memory` extra is installed
+- narrative and NPC memory are separate stores
+- recent-history fallback still works when Chroma is unavailable
+- the app can surface a warning while continuing play when RAG diagnostics are enabled
+
+### Observability
+
+- OpenTelemetry is optional
+- the code ships with a no-op fallback runtime when the extra is absent
+- OTLP export only activates when `CYOA_ENABLE_OBSERVABILITY` is set
+- unreachable collectors log warnings instead of aborting the app
+
+## 13. Theme System
+
+Themes are more than prompt skins.
+
+Each theme in [`themes/`](themes):
+
+- provides a narrative prompt
+- provides spinner frames and accent color
+- supplies a validated UI palette
+- can seed opening inventory, stats, objectives, companions, reputations, affinity, and flags
+- can seed prompt goals, directives, and persona
+
+[`cyoa/core/theme_loader.py`](cyoa/core/theme_loader.py) performs structural validation and accessibility-oriented contrast checks for muted and locked surfaces.
+
+## 14. Tests and Tooling
+
+This repo has broad test coverage across startup, engine, UI, persistence, packaging, themes, and optional integrations. High-signal modules include:
+
+- [`tests/test_main.py`](tests/test_main.py): startup validation and entrypoint behavior
+- [`tests/test_tui.py`](tests/test_tui.py): integrated Textual behavior
+- [`tests/test_ui_units.py`](tests/test_ui_units.py): presenter, export, and UI helper logic
+- [`tests/test_engine_state.py`](tests/test_engine_state.py): engine state and restore flows
+- [`tests/test_story.py`](tests/test_story.py): story generation and memory behaviors
+- [`tests/test_llm_providers.py`](tests/test_llm_providers.py): provider-specific behavior
+- [`tests/test_db_integration.py`](tests/test_db_integration.py): graph repository behavior
+- [`tests/test_model_download.py`](tests/test_model_download.py): recommendation and download flow
+- [`tests/test_themes.py`](tests/test_themes.py): theme validation
+- [`tests/test_observability.py`](tests/test_observability.py): OTEL behavior and fallbacks
+- [`tests/test_packaging.py`](tests/test_packaging.py): packaged/runtime expectations
+
+Common developer commands:
+
+```bash
+uv sync --group dev
+uv run pytest -q
+bash scripts/run_smoke.sh
+uv run python scripts/check_coverage.py
+uv run python scripts/validate_themes.py
+uv run ruff check .
+uv run mypy cyoa
+uv run python scripts/build_binary.py
+```
+
+## 15. Extension Notes
 
 ### Add a theme
 
 1. Add `themes/<name>.toml`.
-2. Include a prompt, spinner frames, and optional accent color.
-3. Update `themes/themes.json` when mood styling needs to change.
-4. Run `uv run python scripts/validate_themes.py` and `uv run pytest -q tests/test_themes.py`.
+2. Include prompt, spinner frames, accent color, and required `ui` palette fields.
+3. Add opening world-state or directive fields only if the theme needs them.
+4. Run `uv run python scripts/validate_themes.py`.
+5. Run `uv run pytest -q tests/test_themes.py`.
 
 ### Add a provider
 
-1. Implement `LLMProvider` in [`cyoa/llm/providers.py`](/Users/kishan/CYOA_TUI/cyoa/llm/providers.py).
-2. Extend provider selection in `ModelBroker`.
-3. Match text, JSON, and streaming behavior.
-4. Add regression coverage in `tests/test_llm_providers.py`.
+1. Implement `LLMProvider` in [`cyoa/llm/providers.py`](cyoa/llm/providers.py).
+2. Wire provider construction into `ModelBroker._create_provider_from_env`.
+3. Decide whether it supports streaming JSON and provider state transfer.
+4. Add or update tests in [`tests/test_llm_providers.py`](tests/test_llm_providers.py).
 
-### Add a player stat
+### Add a new piece of world state
 
-1. Extend `GameState._DEFAULT_STATS`.
-2. Ensure prompt assembly and status rendering include the new stat.
-3. Update engine/UI serialization paths.
-4. Add tests that cover save/load and UI display.
+1. Extend the relevant Pydantic model in [`cyoa/core/models.py`](cyoa/core/models.py).
+2. Persist it in [`cyoa/core/state.py`](cyoa/core/state.py) and [`cyoa/core/mementos.py`](cyoa/core/mementos.py).
+3. Sync it through `StoryContext` in [`cyoa/llm/broker.py`](cyoa/llm/broker.py).
+4. Surface it in presenters or UI panels if it is player-visible.
+5. Cover save/load, undo/redo, and export behavior in tests.
 
-### Add an event
+### Add a new event
 
-1. Define it in `Events`.
-2. Emit it from engine, state, or UI code.
-3. Subscribe where needed.
-4. Add regression coverage.
+1. Define the event name in [`cyoa/core/events.py`](cyoa/core/events.py).
+2. Emit it from the engine, state, broker, or UI layer.
+3. Subscribe from the relevant consumer.
+4. Add regression tests if the event changes user-visible behavior.
 
-## 15. Developer Commands
+## 16. Current Architectural Takeaways
 
-```bash
-uv sync --group dev
-bash scripts/run_smoke.sh
-uv run pytest --cov=cyoa --cov-report=term-missing --cov-report=xml --cov-report=json -q
-uv run python scripts/check_coverage.py
-uv run ruff check .
-uv run mypy cyoa
-```
+The current codebase is best understood as four cooperating layers:
 
-Useful local runs:
+- startup and settings resolution in `main.py` and `cyoa/core`
+- narrative orchestration in `StoryEngine` and `ModelBroker`
+- optional persistence and retrieval services in `cyoa/db`
+- a fairly feature-rich Textual product shell in `cyoa/ui`
 
-```bash
-LLM_PROVIDER=mock uv run python main.py --runtime-preset mock-smoke
-uv run python main.py --theme dark_dungeon
-docker-compose up -d
-```
+The most important change from older versions of this repo is that the app now treats startup safety, accessibility, restore flows, and optional-service degradation as first-class features rather than afterthoughts.
