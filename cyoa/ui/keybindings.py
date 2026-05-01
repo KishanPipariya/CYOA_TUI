@@ -192,6 +192,14 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Panels And Help",
     ),
     AppBindingSpec(
+        "show_hidden_achievements",
+        "shift+a",
+        "show_hidden_achievements",
+        "Achievements",
+        "Open hidden achievements",
+        "Panels And Help",
+    ),
+    AppBindingSpec(
         "show_run_archive",
         "a",
         "show_run_archive",

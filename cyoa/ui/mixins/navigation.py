@@ -15,6 +15,7 @@ from cyoa.ui.components import (
     ConfirmScreen,
     EndingsDiscoveredScreen,
     HelpScreen,
+    HiddenAchievementsScreen,
     InventoryInspectorScreen,
     JournalListItem,
     LoreCodexScreen,
@@ -30,6 +31,7 @@ from cyoa.ui.mixins.contracts import (
 )
 from cyoa.ui.presenters import (
     build_endings_discovered_summary,
+    build_hidden_achievements_summary,
     build_journal_summary,
     build_run_archive_summary,
     build_story_map_summary,
@@ -266,6 +268,16 @@ class NavigationMixin:
         cast(Any, app)._push_modal_screen(
             EndingsDiscoveredScreen(
                 build_endings_discovered_summary(persistence._load_run_archive())
+            )
+        )
+
+    def action_show_hidden_achievements(self) -> None:
+        """Show hidden achievements unlocked from archived play history."""
+        app = as_textual_app(self)
+        persistence = cast(Any, self)
+        cast(Any, app)._push_modal_screen(
+            HiddenAchievementsScreen(
+                build_hidden_achievements_summary(persistence._load_run_archive())
             )
         )
 

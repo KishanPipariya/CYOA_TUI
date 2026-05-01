@@ -1146,6 +1146,177 @@ def _coerce_run_archive_entry(entry: Any) -> dict[str, Any] | None:
     return entry
 
 
+def derive_hidden_achievements(archive_entries: list[Any]) -> list[dict[str, Any]]:
+    entries = [
+        normalized
+        for entry in archive_entries
+        if (normalized := _coerce_run_archive_entry(entry)) is not None
+    ]
+    if not entries:
+        return []
+
+    sorted_entries = sorted(
+        entries,
+        key=lambda item: str(item.get("completed_at", "")),
+        reverse=True,
+    )
+    unlocked: list[dict[str, Any]] = []
+
+    def add_if_present(
+        achievement_id: str,
+        title: str,
+        requirement: str,
+        matching_entry: dict[str, Any] | None,
+    ) -> None:
+        if matching_entry is None:
+            return
+        unlocked.append(
+            {
+                "id": achievement_id,
+                "title": title,
+                "requirement": requirement,
+                "story_title": matching_entry.get("story_title") or "Untitled Adventure",
+                "completed_at": str(matching_entry.get("completed_at", "Unknown")),
+            }
+        )
+
+    add_if_present(
+        "story_survivor",
+        "Story Survivor",
+        "Reach any archived ending.",
+        sorted_entries[0],
+    )
+    add_if_present(
+        "branch_cartographer",
+        "Branch Cartographer",
+        "Finish a run after restoring and diverging from an earlier turn.",
+        next(
+            (
+                entry
+                for entry in sorted_entries
+                if isinstance(entry.get("divergence_points"), list) and entry["divergence_points"]
+            ),
+            None,
+        ),
+    )
+    add_if_present(
+        "lorekeeper",
+        "Lorekeeper",
+        "Finish a run after discovering at least 5 codex entries.",
+        next(
+            (
+                entry
+                for entry in sorted_entries
+                if isinstance(entry.get("discovered_lore_count"), int)
+                and int(entry["discovered_lore_count"]) >= 5
+            ),
+            None,
+        ),
+    )
+    add_if_present(
+        "objective_closer",
+        "Objective Closer",
+        "Finish a run with at least 3 completed objectives.",
+        next(
+            (
+                entry
+                for entry in sorted_entries
+                if isinstance(entry.get("objective_status_counts"), dict)
+                and int(entry["objective_status_counts"].get("completed", 0)) >= 3
+            ),
+            None,
+        ),
+    )
+    add_if_present(
+        "silver_tongue",
+        "Silver Tongue",
+        "Finish a run with reputation 10+ or a successful final reputation check.",
+        next(
+            (
+                entry
+                for entry in sorted_entries
+                if (
+                    isinstance(entry.get("player_stats"), dict)
+                    and int(entry["player_stats"].get("reputation", 0)) >= 10
+                )
+                or (
+                    isinstance(entry.get("last_resolved_choice_check"), dict)
+                    and entry["last_resolved_choice_check"].get("stat") == "reputation"
+                    and bool(entry["last_resolved_choice_check"].get("success"))
+                )
+            ),
+            None,
+        ),
+    )
+    add_if_present(
+        "fellowship_ending",
+        "Fellowship Ending",
+        "Reach an ending with an active companion still at your side.",
+        next(
+            (
+                entry
+                for entry in sorted_entries
+                if isinstance(entry.get("companions"), list)
+                and any(
+                    isinstance(companion, dict) and companion.get("status") == "active"
+                    for companion in entry["companions"]
+                )
+            ),
+            None,
+        ),
+    )
+    return unlocked
+
+
+def identify_newly_unlocked_hidden_achievements(
+    previous_archive_entries: list[Any],
+    current_archive_entries: list[Any],
+) -> list[dict[str, Any]]:
+    previous_ids = {
+        str(entry.get("id"))
+        for entry in derive_hidden_achievements(previous_archive_entries)
+        if isinstance(entry.get("id"), str)
+    }
+    return [
+        entry
+        for entry in derive_hidden_achievements(current_archive_entries)
+        if isinstance(entry.get("id"), str) and str(entry["id"]) not in previous_ids
+    ]
+
+
+def build_hidden_achievements_summary(archive_entries: list[Any]) -> str:
+    unlocked = derive_hidden_achievements(archive_entries)
+    total_achievements = 6
+    if not unlocked:
+        return (
+            "## Hidden Achievements\n"
+            f"- Unlocked: 0 / {total_achievements}\n"
+            f"- Still hidden: {total_achievements}\n\n"
+            "No hidden achievements have surfaced yet. Finish runs and vary your playstyle to reveal them."
+        )
+
+    lines = [
+        "## Hidden Achievements",
+        f"- Unlocked: {len(unlocked)} / {total_achievements}",
+        f"- Still hidden: {total_achievements - len(unlocked)}",
+        "",
+        "Hidden achievements unlock from archived run history. Undiscovered entries stay concealed.",
+    ]
+
+    for index, achievement in enumerate(unlocked, start=1):
+        lines.extend(
+            [
+                "",
+                f"## {index}. {achievement['title']}",
+                f"- Requirement: {achievement['requirement']}",
+                f"- First surfaced in: {achievement['story_title']}",
+                f"- Unlocked at: {achievement['completed_at']}",
+            ]
+        )
+
+    return "\n".join(lines)
+
+
 def build_endings_discovered_summary(archive_entries: list[Any]) -> str:
     normalized_entries = [
         normalized
@@ -1316,7 +1487,7 @@ def build_help_text(
 - Help, Settings, and the command palette expose the full action surface without leaving the keyboard.
 - Inventory Inspector surfaces carried items, hidden lore, and current item hooks.
 - Scene Recap summarizes the current turn, Character shows persistent state, and Codex lists discovered lore.
-- Endings Discovered groups seen ending types, and Run Archive compares completed adventures by flags and branch history.
+- Endings Discovered groups seen ending types, Hidden Achievements tracks unlocked meta-goals, and Run Archive compares completed adventures by flags and branch history.
 - Journal Summary and Story Map Summary provide text-first review modes for long sessions.
 - Repeat Status and notification history make transient status messages reviewable.
 
@@ -1360,7 +1531,7 @@ def build_help_text(
 
 - `h`, `o`, and the command palette keep help, settings, and action discovery close at hand.
 - Inventory Inspector, Recap, Character, and Codex cover carried items, the current scene, persistent stats, and discovered lore.
-- Endings Discovered and Run Archive summarize completed adventures, ending types, and divergence points.
+- Endings Discovered, Hidden Achievements, and Run Archive summarize completed adventures, unlocked meta-goals, ending types, and divergence points.
 - Journal Summary and Story Map Summary turn long runs into readable linear summaries.
 - `n` repeats the latest status and notification history keeps recent messages reviewable.
 

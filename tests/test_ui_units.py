@@ -33,6 +33,7 @@ from cyoa.ui.components import (
     CommandPaletteScreen,
     EndingsDiscoveredScreen,
     FirstRunSetupScreen,
+    HiddenAchievementsScreen,
     InventoryInspectorScreen,
     LoadGameScreen,
     LoreCodexScreen,
@@ -62,6 +63,7 @@ from cyoa.ui.presenters import (
     build_choice_label,
     build_endings_discovered_summary,
     build_help_text,
+    build_hidden_achievements_summary,
     build_inventory_empty_summary,
     build_inventory_inspector_entries,
     build_inventory_item_summary,
@@ -72,7 +74,9 @@ from cyoa.ui.presenters import (
     build_story_map_summary,
     build_world_state_summary,
     classify_ending_type,
+    derive_hidden_achievements,
     format_status_message,
+    identify_newly_unlocked_hidden_achievements,
     loading_story_text,
 )
 
@@ -1052,6 +1056,18 @@ def test_run_archive_screen_closes() -> None:
     assert screen.dismiss.call_args_list == [call(None), call(None)]
 
 
+def test_hidden_achievements_screen_closes() -> None:
+    screen = HiddenAchievementsScreen("## Hidden Achievements\n- Story Survivor")
+    screen.dismiss = MagicMock()
+
+    screen.on_button_pressed(
+        SimpleNamespace(button=SimpleNamespace(id="btn-hidden-achievements-close"))
+    )
+    screen.action_close()
+
+    assert screen.dismiss.call_args_list == [call(None), call(None)]
+
+
 def test_classify_ending_type_prefers_health_and_escape_keywords() -> None:
     assert classify_ending_type("You collapse as the cavern seals.", health=0) == "death"
     assert classify_ending_type("You opened the gate and escaped into dawn.") == "escape"
@@ -1091,12 +1107,17 @@ def test_archive_presenters_surface_endings_flags_and_divergence_points() -> Non
             "story_flags": ["saw_signal", "trusted_mira"],
             "divergence_points": [2],
             "inventory": ["Broken Sword", "Health Potion"],
+            "companions": [{"name": "Mira", "status": "active", "affinity": 4}],
+            "player_stats": {"health": 12, "gold": 5, "reputation": 10},
+            "discovered_lore_count": 6,
             "objective_status_counts": {"active": 1, "completed": 2, "failed": 0},
         }
     ]
 
     endings_summary = build_endings_discovered_summary(archive_entries)
     archive_summary = build_run_archive_summary(archive_entries)
+    achievements_summary = build_hidden_achievements_summary(archive_entries)
+    achievements = derive_hidden_achievements(archive_entries)
 
     assert "Escape" in endings_summary
     assert "Completed runs: 1" in endings_summary
@@ -1104,6 +1125,51 @@ def test_archive_presenters_surface_endings_flags_and_divergence_points() -> Non
     assert "Final choice: Open Door" in archive_summary
     assert "Last check: reputation passed (8 + 2 = 10 vs 9)" in archive_summary
     assert "Flags: saw_signal, trusted_mira" in archive_summary
+    assert "Unlocked: 5 / 6" in achievements_summary
+    assert "Story Survivor" in achievements_summary
+    assert "Fellowship Ending" in achievements_summary
+    assert [achievement["id"] for achievement in achievements] == [
+        "story_survivor",
+        "branch_cartographer",
+        "lorekeeper",
+        "silver_tongue",
+        "fellowship_ending",
+    ]
+
+
+def test_hidden_achievement_unlock_detection_compares_previous_archive() -> None:
+    previous_entries = [
+        {
+            "story_title": "Earlier Run",
+            "completed_at": "2026-04-28T12:00:00Z",
+            "turn_count": 2,
+            "ending_type": "escape",
+            "ending_label": "Escape",
+            "ending_narrative": "You escaped.",
+        }
+    ]
+    current_entries = [
+        *previous_entries,
+        {
+            "story_title": "Branched Finale",
+            "completed_at": "2026-04-29T12:00:00Z",
+            "turn_count": 5,
+            "ending_type": "escape",
+            "ending_label": "Escape",
+            "ending_narrative": "You escaped with Mira.",
+            "divergence_points": [3],
+            "companions": [{"name": "Mira", "status": "active", "affinity": 5}],
+            "objective_status_counts": {"active": 0, "completed": 3, "failed": 0},
+        },
+    ]
+
+    unlocked = identify_newly_unlocked_hidden_achievements(previous_entries, current_entries)
+
+    assert [entry["id"] for entry in unlocked] == [
+        "branch_cartographer",
+        "objective_closer",
+        "fellowship_ending",
+    ]
 
 
 def test_app_effective_keybindings_merge_defaults_and_overrides() -> None:

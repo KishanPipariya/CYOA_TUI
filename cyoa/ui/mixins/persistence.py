@@ -24,6 +24,7 @@ from cyoa.ui.presenters import (
     build_accessible_export,
     classify_ending_type,
     format_ending_type_label,
+    identify_newly_unlocked_hidden_achievements,
 )
 
 logger = logging.getLogger(__name__)
@@ -606,9 +607,11 @@ class PersistenceMixin:
             "inventory": list(state.inventory),
             "player_stats": dict(state.player_stats),
             "objectives": [objective.model_dump() for objective in state.objectives],
+            "companions": [companion.model_dump() for companion in state.companions],
             "faction_reputation": dict(state.faction_reputation),
             "npc_affinity": dict(state.npc_affinity),
             "story_flags": sorted(state.story_flags),
+            "world_time": state.world_time.model_dump(),
             "timeline_metadata": [entry.copy() for entry in state.timeline_metadata],
             "branch_restores": branch_restores,
             "divergence_points": divergence_points,
@@ -628,15 +631,20 @@ class PersistenceMixin:
             ),
         }
 
-    def _record_completed_run(self, host: object, app: object, *, ending_narrative: str) -> None:
-        """Append a finished run summary to the archive."""
+    def _record_completed_run(
+        self, host: object, app: object, *, ending_narrative: str
+    ) -> list[dict[str, object]]:
+        """Append a finished run summary to the archive and report new achievements."""
         summary = self._build_completed_run_summary(host, app, ending_narrative=ending_narrative)
         if not summary:
-            return
+            return []
 
         entries = self._load_run_archive()
+        previous_entries = [entry.copy() for entry in entries]
         entries.append(summary)
         self._write_run_archive(entries)
+        unlocked = identify_newly_unlocked_hidden_achievements(previous_entries, entries)
+        return [cast(dict[str, object], entry) for entry in unlocked]
 
     def _sync_prompt_status(self, host: object, app: object) -> None:
         """Keep the status bar aligned with current prompt directives."""

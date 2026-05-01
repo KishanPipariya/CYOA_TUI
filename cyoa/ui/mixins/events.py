@@ -160,7 +160,20 @@ class EventsMixin:
         if not host.is_runtime_active():
             return
         persistence: Any = self
-        persistence._record_completed_run(host, app, ending_narrative=node.narrative)
+        unlocked_achievements = persistence._record_completed_run(
+            host,
+            app,
+            ending_narrative=node.narrative,
+        )
+        for achievement in unlocked_achievements:
+            title = achievement.get("title")
+            if isinstance(title, str) and title.strip():
+                host.queue_notification(
+                    f"Hidden achievement unlocked: {title}",
+                    severity="information",
+                    timeout=6,
+                    batch=False,
+                )
         host.queue_notification("The Story Ends.", severity="information", timeout=10)
 
     def _handle_error(self, error: str) -> None:

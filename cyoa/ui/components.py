@@ -79,6 +79,7 @@ __all__ = [
     "LoreCodexScreen",
     "InventoryInspectorScreen",
     "EndingsDiscoveredScreen",
+    "HiddenAchievementsScreen",
     "RunArchiveScreen",
     "SceneRecapScreen",
     "AccessibleSummaryScreen",
@@ -2250,6 +2251,43 @@ class EndingsDiscoveredScreen(ModalScreen[None]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-endings-discovered-close":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class HiddenAchievementsScreen(ModalScreen[None]):
+    """Modal screen summarizing hidden achievements unlocked from run history."""
+
+    DEFAULT_CSS = HelpScreen.DEFAULT_CSS
+    BINDINGS = [("escape", "close", "Close")]
+
+    def __init__(self, summary_text: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._summary_text = summary_text
+
+    def compose(self) -> ComposeResult:
+        with DialogFrame(
+            id="hidden-achievements-dialog",
+            classes="dialog-frame dialog-frame-scroll dialog-frame-accent",
+        ):
+            with Container(id="hidden-achievements-content", classes="dialog-content"):
+                yield Label(
+                    "[b]Hidden Achievements[/b]",
+                    id="hidden-achievements-title",
+                    classes="dialog-title",
+                )
+                yield Markdown(self._summary_text, id="hidden-achievements-text")
+            yield Button(
+                "Close [b](Esc)[/b]", id="btn-hidden-achievements-close", variant="primary"
+            )
+
+    def on_mount(self) -> None:
+        self.query_one("#btn-hidden-achievements-close", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-hidden-achievements-close":
             self.dismiss(None)
 
     def action_close(self) -> None:

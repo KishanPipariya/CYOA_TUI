@@ -24,6 +24,7 @@ from cyoa.ui.components import (
     ConfirmScreen,
     EndingsDiscoveredScreen,
     HelpScreen,
+    HiddenAchievementsScreen,
     InventoryInspectorScreen,
     LoadGameScreen,
     LoreCodexScreen,
@@ -2267,6 +2268,12 @@ async def test_ending_persists_completed_run_summary(mock_app_dependencies, tmp_
         assert payload[0]["ending_label"] == "Escape"
         assert payload[0]["last_choice_text"] == "Open Door"
         assert payload[0]["ending_narrative"] == "You opened the door and escaped!"
+        assert payload[0]["companions"] == []
+        assert payload[0]["world_time"] == {"day": 1, "hour": 8}
+        assert any(
+            "Hidden achievement unlocked: Story Survivor" in line
+            for line in app.get_notification_history_lines()
+        )
 
         app.action_show_endings_discovered()
         await pilot.pause(0.2)
@@ -2283,6 +2290,15 @@ async def test_ending_persists_completed_run_summary(mock_app_dependencies, tmp_
         archive_text = app.screen.query_one("#run-archive-text", Markdown)._markdown
         assert "Test Adventure" in archive_text
         assert "Final choice: Open Door" in archive_text
+        await pilot.press("escape")
+        await pilot.pause(0.1)
+
+        app.action_show_hidden_achievements()
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, HiddenAchievementsScreen)
+        achievement_text = app.screen.query_one("#hidden-achievements-text", Markdown)._markdown
+        assert "Story Survivor" in achievement_text
+        assert "Unlocked: 1 / 6" in achievement_text
 
 
 @pytest.mark.asyncio
