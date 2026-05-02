@@ -187,10 +187,10 @@ def _load_open_telemetry_runtime() -> _OpenTelemetryRuntime:
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
         otlp_export_available = True
-        span_exporter_cls = OTLPSpanExporter
-        metric_exporter_cls = OTLPMetricExporter
-        span_processor_cls = BatchSpanProcessor
-        metric_reader_cls = PeriodicExportingMetricReader
+        span_exporter_cls: Any = OTLPSpanExporter
+        metric_exporter_cls: Any = OTLPMetricExporter
+        span_processor_cls: Any = BatchSpanProcessor
+        metric_reader_cls: Any = PeriodicExportingMetricReader
     except ImportError:  # pragma: no cover - exercised via fallback behavior
         otlp_export_available = False
         span_exporter_cls = _FallbackOTLPSpanExporter
