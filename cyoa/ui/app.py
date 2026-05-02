@@ -380,12 +380,6 @@ class CYOAApp(
         except Exception:
             return
         focus_target = self._capture_focus_target()
-        if (
-            focus_target is not None
-            and focus_target.kind == "widget_id"
-            and focus_target.value == "story-container"
-        ):
-            focus_target = None
         choices_container.remove_children()
         mount_args = (
             self.engine.state.current_node,
