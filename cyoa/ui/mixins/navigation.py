@@ -45,6 +45,23 @@ class NavigationMixin:
     """Mixin for app navigation and branching."""
 
     @staticmethod
+    def _queue_focus(app: object, widget: Widget) -> None:
+        textual_app = as_textual_app(app)
+
+        def apply_focus() -> None:
+            if (
+                widget.is_attached
+                and widget.visible
+                and widget.display
+                and not bool(getattr(widget, "disabled", False))
+            ):
+                widget.focus()
+
+        apply_focus()
+        textual_app.call_after_refresh(apply_focus)
+        textual_app.set_timer(0.01, apply_focus)
+
+    @staticmethod
     def _focus_first_available_choice(app: object) -> None:
         buttons = [
             button
@@ -52,7 +69,17 @@ class NavigationMixin:
             if isinstance(button, Button) and not button.disabled
         ]
         if buttons:
-            as_textual_app(app).call_after_refresh(buttons[0].focus)
+            NavigationMixin._queue_focus(app, buttons[0])
+
+    @staticmethod
+    def _refresh_side_panel_layout(app: object) -> None:
+        textual_app = as_textual_app(app)
+        for selector in ("#journal-panel", "#story-map-panel", "#workspace", "#main-container"):
+            try:
+                textual_app.query_one(selector, Widget).refresh(layout=True)
+            except Exception:
+                continue
+        textual_app.refresh(layout=True)
 
     @staticmethod
     def _highlight_region(app: object, widget: Widget) -> None:
@@ -76,10 +103,8 @@ class NavigationMixin:
         if compact_layout:
             story_map_panel = textual_app.query_one("#story-map-panel", Container)
             story_map_panel.add_class("panel-collapsed")
-            story_map_panel.refresh(layout=True)
         panel.remove_class("panel-collapsed")
-        panel.refresh(layout=True)
-        textual_app.refresh(layout=True)
+        NavigationMixin._refresh_side_panel_layout(app)
         journal_list = textual_app.query_one("#journal-list", ListView)
         journal_list.scroll_end(animate=not as_mixin_host(app).reduced_motion)
         return journal_list
@@ -91,10 +116,8 @@ class NavigationMixin:
         if compact_layout:
             journal_panel = textual_app.query_one("#journal-panel", Container)
             journal_panel.add_class("panel-collapsed")
-            journal_panel.refresh(layout=True)
         panel.remove_class("panel-collapsed")
-        panel.refresh(layout=True)
-        textual_app.refresh(layout=True)
+        NavigationMixin._refresh_side_panel_layout(app)
         return textual_app.query_one("#story-map-tree", Tree)
 
     @staticmethod
@@ -534,8 +557,7 @@ class NavigationMixin:
             app.call_after_refresh(journal_list.focus)
             return
         panel.add_class("panel-collapsed")
-        panel.refresh(layout=True)
-        app.refresh(layout=True)
+        self._refresh_side_panel_layout(app)
         self._focus_first_available_choice(app)
 
     def action_toggle_story_map(self) -> None:
@@ -553,8 +575,7 @@ class NavigationMixin:
             app.call_after_refresh(tree.focus)
             return
         panel.add_class("panel-collapsed")
-        panel.refresh(layout=True)
-        app.refresh(layout=True)
+        self._refresh_side_panel_layout(app)
         self._focus_first_available_choice(app)
 
     @work(exclusive=True)

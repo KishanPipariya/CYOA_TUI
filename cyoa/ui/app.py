@@ -365,29 +365,37 @@ class CYOAApp(
                     constants.ERROR_NARRATIVE_PREFIX
                 ),
             )
-        if (
-            self.engine is not None
-            and self.engine.state.current_node is not None
-            and not self._loading_suffix_shown
-        ):
-            try:
-                choices_container = self.query_one("#choices-container", Container)
-            except Exception:
-                return
-            focus_target = self._capture_focus_target()
-            choices_container.remove_children()
-            mount_args = (
-                self.engine.state.current_node,
-                choices_container,
-                self.engine.state.current_node.narrative.startswith(
-                    constants.ERROR_NARRATIVE_PREFIX
-                ),
-            )
-            if focus_target is None:
-                self._mount_choice_buttons(*mount_args)
-            else:
-                self._mount_choice_buttons(*mount_args, focus_target=focus_target)
+        self._refresh_choices_for_screen_reader_mode()
         self._refresh_latest_status_message()
+
+    def _refresh_choices_for_screen_reader_mode(self) -> None:
+        if (
+            self.engine is None
+            or self.engine.state.current_node is None
+            or self._loading_suffix_shown
+        ):
+            return
+        try:
+            choices_container = self.query_one("#choices-container", Container)
+        except Exception:
+            return
+        focus_target = self._capture_focus_target()
+        if (
+            focus_target is not None
+            and focus_target.kind == "widget_id"
+            and focus_target.value == "story-container"
+        ):
+            focus_target = None
+        choices_container.remove_children()
+        mount_args = (
+            self.engine.state.current_node,
+            choices_container,
+            self.engine.state.current_node.narrative.startswith(constants.ERROR_NARRATIVE_PREFIX),
+        )
+        if focus_target is None:
+            self._mount_choice_buttons(*mount_args)
+        else:
+            self._mount_choice_buttons(*mount_args, focus_target=focus_target)
 
     def watch_cognitive_load_reduction_mode(self, enabled: bool) -> None:
         self.set_class(enabled, "cognitive-load-mode")
@@ -608,6 +616,10 @@ class CYOAApp(
         story_map_panel.add_class("panel-collapsed")
         journal_panel.refresh(layout=True)
         story_map_panel.refresh(layout=True)
+        try:
+            self.query_one("#workspace", Widget).refresh(layout=True)
+        except Exception:
+            pass
         self.refresh(layout=True)
 
         focused = self._focused_widget()
@@ -962,9 +974,19 @@ class CYOAApp(
         if self._has_rendered_first_scene or not self.is_runtime_active():
             return
         self._has_rendered_first_scene = True
+        self.set_timer(0.02, self._ensure_initial_choice_focus)
         self._post_render_warmup_timer = self.set_timer(
             0.05, self._schedule_optional_runtime_warmup
         )
+
+    def _ensure_initial_choice_focus(self) -> None:
+        if not self.is_runtime_active():
+            return
+        if isinstance(self._focused_widget(), Button):
+            return
+        buttons = self._available_action_buttons()
+        if buttons:
+            buttons[0].focus()
 
     def queue_notification(
         self,

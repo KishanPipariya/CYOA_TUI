@@ -27,6 +27,57 @@ def _missing_chroma_client(*args: object, **kwargs: object) -> object:
     raise ImportError("chromadb is not installed")
 
 
+def _tokenize_memory_text(text: str) -> set[str]:
+    return {
+        token
+        for token in "".join(char.lower() if char.isalnum() else " " for char in text).split()
+        if token
+    }
+
+
+class _InMemoryCollection:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self._docs: dict[str, str] = {}
+        self._insert_order: list[str] = []
+
+    def upsert(self, *, ids: list[str], documents: list[str]) -> None:
+        for doc_id, document in zip(ids, documents, strict=True):
+            if doc_id not in self._docs:
+                self._insert_order.append(doc_id)
+            self._docs[doc_id] = document
+
+    def count(self) -> int:
+        return len(self._docs)
+
+    def query(self, *, query_texts: list[str], n_results: int) -> dict[str, list[list[str]]]:
+        query_tokens = _tokenize_memory_text(query_texts[0]) if query_texts else set()
+        positions = {doc_id: index for index, doc_id in enumerate(self._insert_order)}
+        ranked = sorted(
+            self._insert_order,
+            key=lambda doc_id: (
+                -len(query_tokens & _tokenize_memory_text(self._docs[doc_id])),
+                positions[doc_id],
+            ),
+        )
+        documents = [self._docs[doc_id] for doc_id in ranked[:n_results]]
+        return {"documents": [documents]}
+
+
+class _InMemoryChromaClient:
+    def __init__(self) -> None:
+        self._collections: dict[str, _InMemoryCollection] = {}
+
+    def create_collection(self, *, name: str, metadata: dict[str, str]) -> _InMemoryCollection:
+        del metadata
+        collection = _InMemoryCollection(name)
+        self._collections[name] = collection
+        return collection
+
+    def delete_collection(self, name: str) -> None:
+        self._collections.pop(name, None)
+
+
 @dataclass(frozen=True, slots=True)
 class _ChromaRuntime:
     available: bool
@@ -39,7 +90,7 @@ def _load_chroma_runtime() -> _ChromaRuntime:
 
         return _ChromaRuntime(available=True, client_factory=chroma_module.Client)
     except ImportError:  # pragma: no cover - exercised via fallback behavior
-        return _ChromaRuntime(available=False, client_factory=_missing_chroma_client)
+        return _ChromaRuntime(available=True, client_factory=_InMemoryChromaClient)
 
 
 _CHROMA_RUNTIME = _load_chroma_runtime()
@@ -51,7 +102,11 @@ logger = logging.getLogger(__name__)
 
 def _chroma_client_available() -> bool:
     client_factory = getattr(chromadb, "Client", None)
-    return callable(client_factory) and client_factory is not _missing_chroma_client
+    return callable(client_factory)
+
+
+def _should_fallback_to_in_memory(error: Exception) -> bool:
+    return isinstance(error, ImportError)
 
 
 def _env_flag_enabled(name: str) -> bool:
@@ -170,6 +225,18 @@ class NarrativeMemory:
                 error,
             )
 
+    def _create_client(self) -> Any:
+        try:
+            return chromadb.Client()
+        except Exception as error:  # noqa: BLE001
+            if not _should_fallback_to_in_memory(error):
+                raise
+            logger.warning(
+                "RAG memory: falling back to in-memory client after Chroma client init failed: %s",
+                error,
+            )
+            return _InMemoryChromaClient()
+
     def _ensure_ready(self, *, force: bool = False) -> bool:
         """Create the chroma client and collection on first use. Returns False if unavailable."""
         if not self._available:
@@ -183,12 +250,27 @@ class NarrativeMemory:
         self._init_attempted = True
         try:
             # chromadb.Client() with no settings uses an ephemeral in-memory DB.
-            self._client = chromadb.Client()
+            self._client = self._create_client()
             unique_name = f"{self._collection_name}_{uuid.uuid4().hex[:8]}"
-            self._collection = self._client.create_collection(
-                name=unique_name,
-                metadata={"hnsw:space": "cosine"},
-            )
+            try:
+                self._collection = self._client.create_collection(
+                    name=unique_name,
+                    metadata={"hnsw:space": "cosine"},
+                )
+            except Exception as error:  # noqa: BLE001
+                if isinstance(
+                    self._client, _InMemoryChromaClient
+                ) or not _should_fallback_to_in_memory(error):
+                    raise
+                logger.warning(
+                    "RAG memory: falling back to in-memory collection after Chroma collection init failed: %s",
+                    error,
+                )
+                self._client = _InMemoryChromaClient()
+                self._collection = self._client.create_collection(
+                    name=unique_name,
+                    metadata={"hnsw:space": "cosine"},
+                )
             self._retry_state.record_success()
             logger.info("RAG memory: chroma client initialised (collection: %s)", unique_name)
             return True
@@ -325,6 +407,19 @@ class NPCMemory:
                 error,
             )
 
+    def _create_client(self, npc_name: str) -> Any:
+        try:
+            return chromadb.Client()
+        except Exception as error:  # noqa: BLE001
+            if not _should_fallback_to_in_memory(error):
+                raise
+            logger.warning(
+                "RAG NPC memory: falling back to in-memory client for %s after Chroma client init failed: %s",
+                npc_name,
+                error,
+            )
+            return _InMemoryChromaClient()
+
     def _ensure_ready(self, npc_name: str, *, force: bool = False) -> bool:
         if not self._available:
             return False
@@ -340,14 +435,30 @@ class NPCMemory:
         try:
             if self._client is None:
                 self._init_attempted = True
-                self._client = chromadb.Client()
+                self._client = self._create_client(npc_name)
                 logger.info("RAG NPC memory: chroma client initialised")
 
             unique_name = f"{self._base_name}_{safe_name}_{uuid.uuid4().hex[:8]}"
-            self._collections[safe_name] = self._client.create_collection(
-                name=unique_name,
-                metadata={"hnsw:space": "cosine"},
-            )
+            try:
+                self._collections[safe_name] = self._client.create_collection(
+                    name=unique_name,
+                    metadata={"hnsw:space": "cosine"},
+                )
+            except Exception as error:  # noqa: BLE001
+                if isinstance(
+                    self._client, _InMemoryChromaClient
+                ) or not _should_fallback_to_in_memory(error):
+                    raise
+                logger.warning(
+                    "RAG NPC memory: falling back to in-memory collection for %s after Chroma collection init failed: %s",
+                    npc_name,
+                    error,
+                )
+                self._client = _InMemoryChromaClient()
+                self._collections[safe_name] = self._client.create_collection(
+                    name=unique_name,
+                    metadata={"hnsw:space": "cosine"},
+                )
             self._retry_state.record_success()
             return True
         except Exception as e:  # noqa: BLE001

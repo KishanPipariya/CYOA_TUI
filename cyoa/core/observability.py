@@ -137,6 +137,7 @@ class _FallbackPeriodicExportingMetricReader:
 @dataclass(frozen=True, slots=True)
 class _OpenTelemetryRuntime:
     available: bool
+    otlp_export_available: bool
     metrics_api: Any
     trace_api: Any
     resource_cls: Any
@@ -155,35 +156,16 @@ def _load_open_telemetry_runtime() -> _OpenTelemetryRuntime:
     try:
         from opentelemetry import metrics as runtime_metrics
         from opentelemetry import trace as runtime_trace
-        from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
         from opentelemetry.sdk.metrics import MeterProvider
-        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
         from opentelemetry.trace import Span as OTelSpan
         from opentelemetry.trace import Status as OTelStatus
         from opentelemetry.trace import StatusCode as OTelStatusCode
-
-        return _OpenTelemetryRuntime(
-            available=True,
-            metrics_api=runtime_metrics,
-            trace_api=runtime_trace,
-            resource_cls=Resource,
-            tracer_provider_cls=TracerProvider,
-            meter_provider_cls=MeterProvider,
-            span_exporter_cls=OTLPSpanExporter,
-            metric_exporter_cls=OTLPMetricExporter,
-            span_processor_cls=BatchSpanProcessor,
-            metric_reader_cls=PeriodicExportingMetricReader,
-            span_cls=OTelSpan,
-            status_cls=OTelStatus,
-            status_code_cls=OTelStatusCode,
-        )
     except ImportError:  # pragma: no cover - exercised via fallback behavior
         return _OpenTelemetryRuntime(
             available=False,
+            otlp_export_available=False,
             metrics_api=_FallbackMetricsAPI(),
             trace_api=_FallbackTraceAPI(),
             resource_cls=_FallbackResource,
@@ -198,9 +180,45 @@ def _load_open_telemetry_runtime() -> _OpenTelemetryRuntime:
             status_code_cls=_FallbackStatusCode,
         )
 
+    try:
+        from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        otlp_export_available = True
+        span_exporter_cls = OTLPSpanExporter
+        metric_exporter_cls = OTLPMetricExporter
+        span_processor_cls = BatchSpanProcessor
+        metric_reader_cls = PeriodicExportingMetricReader
+    except ImportError:  # pragma: no cover - exercised via fallback behavior
+        otlp_export_available = False
+        span_exporter_cls = _FallbackOTLPSpanExporter
+        metric_exporter_cls = _FallbackOTLPMetricExporter
+        span_processor_cls = _FallbackBatchSpanProcessor
+        metric_reader_cls = _FallbackPeriodicExportingMetricReader
+
+    return _OpenTelemetryRuntime(
+        available=True,
+        otlp_export_available=otlp_export_available,
+        metrics_api=runtime_metrics,
+        trace_api=runtime_trace,
+        resource_cls=Resource,
+        tracer_provider_cls=TracerProvider,
+        meter_provider_cls=MeterProvider,
+        span_exporter_cls=span_exporter_cls,
+        metric_exporter_cls=metric_exporter_cls,
+        span_processor_cls=span_processor_cls,
+        metric_reader_cls=metric_reader_cls,
+        span_cls=OTelSpan,
+        status_cls=OTelStatus,
+        status_code_cls=OTelStatusCode,
+    )
+
 
 _OTEL_RUNTIME = _load_open_telemetry_runtime()
 _OTEL_AVAILABLE = _OTEL_RUNTIME.available
+_OTLP_EXPORT_AVAILABLE = _OTEL_RUNTIME.otlp_export_available
 otel_metrics = _OTEL_RUNTIME.metrics_api
 otel_trace = _OTEL_RUNTIME.trace_api
 Resource = _OTEL_RUNTIME.resource_cls
@@ -228,6 +246,19 @@ SERVICE_NAME = "cyoa-tui"
 
 def _env_flag_enabled(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _otlp_export_runtime_available() -> bool:
+    """Allow tests to patch OTLP factories even when the optional exporter import failed."""
+    return _OTLP_EXPORT_AVAILABLE or any(
+        candidate is not fallback
+        for candidate, fallback in (
+            (OTLPSpanExporter, _FallbackOTLPSpanExporter),
+            (OTLPMetricExporter, _FallbackOTLPMetricExporter),
+            (BatchSpanProcessor, _FallbackBatchSpanProcessor),
+            (PeriodicExportingMetricReader, _FallbackPeriodicExportingMetricReader),
+        )
+    )
 
 
 def _is_otlp_endpoint_reachable(endpoint: str) -> bool:
@@ -288,7 +319,14 @@ def setup_observability() -> None:
 
     # Check for OTLP endpoint, fallback to console or no-op if you prefer
     # For now we'll use OTLP if an endpoint is set, otherwise maybe just logs?
-    otlp_available = bool(otlp_endpoint and _is_otlp_endpoint_reachable(otlp_endpoint))
+    otlp_available = False
+    if otlp_endpoint:
+        if not _otlp_export_runtime_available():
+            logger.warning(
+                "OTLP endpoint configured but OTLP exporter dependencies are unavailable; tracing and metrics will stay local."
+            )
+        else:
+            otlp_available = _is_otlp_endpoint_reachable(otlp_endpoint)
 
     if otlp_available:
         span_exporter = OTLPSpanExporter()

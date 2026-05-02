@@ -406,6 +406,46 @@ def test_setup_observability_warns_when_optional_dependency_is_missing(
     meter_provider_factory.assert_not_called()
 
 
+def test_setup_observability_without_otlp_exporter_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    tracer_provider = MagicMock()
+    meter_provider = MagicMock()
+    set_tracer_provider = MagicMock()
+    set_meter_provider = MagicMock()
+    create_resource = MagicMock(return_value="resource")
+    tracer_provider_factory = MagicMock(return_value=tracer_provider)
+    meter_provider_factory = MagicMock(return_value=meter_provider)
+
+    monkeypatch.setenv("CYOA_ENABLE_OBSERVABILITY", "true")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel:4318")
+    monkeypatch.setattr(obs.Resource, "create", create_resource)
+    monkeypatch.setattr(obs, "TracerProvider", tracer_provider_factory)
+    monkeypatch.setattr(obs, "MeterProvider", meter_provider_factory)
+    monkeypatch.setattr(obs, "_OTLP_EXPORT_AVAILABLE", False)
+    monkeypatch.setattr(obs, "OTLPSpanExporter", obs._FallbackOTLPSpanExporter)
+    monkeypatch.setattr(obs, "OTLPMetricExporter", obs._FallbackOTLPMetricExporter)
+    monkeypatch.setattr(obs, "BatchSpanProcessor", obs._FallbackBatchSpanProcessor)
+    monkeypatch.setattr(
+        obs,
+        "PeriodicExportingMetricReader",
+        obs._FallbackPeriodicExportingMetricReader,
+    )
+    monkeypatch.setattr(obs.trace, "set_tracer_provider", set_tracer_provider)
+    monkeypatch.setattr(obs.metrics, "set_meter_provider", set_meter_provider)
+
+    with caplog.at_level("WARNING"):
+        obs.setup_observability()
+
+    tracer_provider_factory.assert_called_once_with(resource="resource")
+    meter_provider_factory.assert_called_once_with(resource="resource", metric_readers=[])
+    tracer_provider.add_span_processor.assert_not_called()
+    set_tracer_provider.assert_called_once_with(tracer_provider)
+    set_meter_provider.assert_called_once_with(meter_provider)
+    assert "OTLP exporter dependencies are unavailable" in caplog.text
+
+
 def test_setup_observability_with_otlp_endpoint(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,

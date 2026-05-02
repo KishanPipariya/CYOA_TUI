@@ -17,6 +17,10 @@ from cyoa.llm.broker import StoryContext
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
+def missing_chroma_client_factory():
+    raise ImportError("chromadb backend unavailable")
+
+
 @pytest.fixture(autouse=True)
 def mock_textual_workers(request, monkeypatch):
     """
@@ -590,6 +594,19 @@ class TestNarrativeMemory:
         assert mem._collection.count() == 1
 
     @pytest.mark.asyncio
+    async def test_missing_chroma_client_falls_back_to_in_memory_backend(self, monkeypatch):
+        monkeypatch.setattr("cyoa.db.rag_memory.chromadb.Client", missing_chroma_client_factory)
+
+        mem = NarrativeMemory()
+
+        await mem.add_async("scene-fallback", "A hidden archive sits behind the altar.")
+
+        assert mem._collection is not None
+        assert await mem.query_async("hidden archive", n=1) == [
+            "A hidden archive sits behind the altar."
+        ]
+
+    @pytest.mark.asyncio
     async def test_retries_then_reprobes_after_chroma_init_failures(self, monkeypatch):
         clock = self._FakeClock()
         attempts = {"count": 0}
@@ -727,6 +744,21 @@ class TestNPCMemory:
 
         mem = NPCMemory()
         assert await mem.query_async("UnknownNPC", "anything") == []
+
+    @pytest.mark.asyncio
+    async def test_missing_npc_chroma_client_falls_back_to_in_memory_backend(self, monkeypatch):
+        from cyoa.db.rag_memory import NPCMemory
+
+        monkeypatch.setattr("cyoa.db.rag_memory.chromadb.Client", missing_chroma_client_factory)
+
+        mem = NPCMemory()
+
+        await mem.add_async("Elara", "scene-1", "Elara keeps the archive key.")
+
+        assert mem._collections
+        assert await mem.query_async("Elara", "archive key", n=1) == [
+            "Elara keeps the archive key."
+        ]
 
     @pytest.mark.asyncio
     async def test_npc_memory_recovers_after_operational_failure(self, monkeypatch):

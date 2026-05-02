@@ -318,7 +318,15 @@ class RenderingMixin:
         buttons = [btn for btn in choices_container.query(Button) if not btn.disabled]
         if not buttons:
             return
-        app.call_after_refresh(buttons[0].focus)
+        target = buttons[0]
+
+        def apply_focus() -> None:
+            if target.is_attached and target.visible and target.display and not target.disabled:
+                target.focus()
+
+        apply_focus()
+        app.call_after_refresh(apply_focus)
+        app.set_timer(0.01, apply_focus)
 
     async def _trigger_choice(self, choice_idx: int, selected_button_id: str | None = None) -> None:
         """Handle choice selection and delegate to the engine."""
