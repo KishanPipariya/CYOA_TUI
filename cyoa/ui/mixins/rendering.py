@@ -326,7 +326,8 @@ class RenderingMixin:
 
         apply_focus()
         app.call_after_refresh(apply_focus)
-        app.set_timer(0.01, apply_focus)
+        if hasattr(app, "set_timer"):
+            app.set_timer(0.01, apply_focus)
 
     async def _trigger_choice(self, choice_idx: int, selected_button_id: str | None = None) -> None:
         """Handle choice selection and delegate to the engine."""

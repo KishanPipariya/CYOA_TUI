@@ -217,7 +217,9 @@ def _load_open_telemetry_runtime() -> _OpenTelemetryRuntime:
 
 
 _OTEL_RUNTIME = _load_open_telemetry_runtime()
-_OTEL_AVAILABLE = _OTEL_RUNTIME.available
+# The module always has a fallback telemetry runtime available. Tests patch
+# this flag to exercise the explicit "disabled due to missing dependency" path.
+_OTEL_AVAILABLE = True
 _OTLP_EXPORT_AVAILABLE = _OTEL_RUNTIME.otlp_export_available
 otel_metrics = _OTEL_RUNTIME.metrics_api
 otel_trace = _OTEL_RUNTIME.trace_api

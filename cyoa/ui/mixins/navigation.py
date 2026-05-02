@@ -59,7 +59,8 @@ class NavigationMixin:
 
         apply_focus()
         textual_app.call_after_refresh(apply_focus)
-        textual_app.set_timer(0.01, apply_focus)
+        if hasattr(textual_app, "set_timer"):
+            textual_app.set_timer(0.01, apply_focus)
 
     @staticmethod
     def _focus_first_available_choice(app: object) -> None:
