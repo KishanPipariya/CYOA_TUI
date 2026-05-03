@@ -1382,7 +1382,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         super().__init__(**kwargs)
         self._provider = provider if provider in {"mock", "llama_cpp"} else "mock"
         self._model_path = model_path or ""
-        self._theme_names = available_themes or [theme]
+        self._theme_options = self._normalize_theme_options(available_themes or [theme])
         self._theme_index = self._resolve_theme_index(theme)
         self._dark = dark
         self._high_contrast = high_contrast
@@ -1431,16 +1431,71 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         self._terminal_accessibility_fallback = terminal_accessibility_fallback
         self._initial_feedback = initial_feedback.strip()
 
+    @staticmethod
+    def _normalize_theme_options(available_themes: list[Any]) -> list[dict[str, str]]:
+        normalized: list[dict[str, str]] = []
+        for entry in available_themes:
+            if isinstance(entry, str):
+                theme_id = entry.strip()
+                if not theme_id:
+                    continue
+                normalized.append(
+                    {
+                        "id": theme_id,
+                        "name": theme_id.replace("_", " ").title(),
+                        "description": "",
+                        "campaign_name": "",
+                        "campaign_description": "",
+                    }
+                )
+                continue
+            if not isinstance(entry, dict):
+                continue
+            theme_id = str(entry.get("id") or "").strip()
+            if not theme_id:
+                continue
+            normalized.append(
+                {
+                    "id": theme_id,
+                    "name": str(entry.get("name") or theme_id).strip() or theme_id,
+                    "description": str(entry.get("description") or "").strip(),
+                    "campaign_name": str(entry.get("campaign_name") or "").strip(),
+                    "campaign_description": str(entry.get("campaign_description") or "").strip(),
+                }
+            )
+        return normalized or [
+            {
+                "id": "dark_dungeon",
+                "name": "Dark Dungeon",
+                "description": "",
+                "campaign_name": "",
+                "campaign_description": "",
+            }
+        ]
+
     def _resolve_theme_index(self, theme: str) -> int:
-        try:
-            return self._theme_names.index(theme)
-        except ValueError:
-            self._theme_names = [theme, *self._theme_names]
-            return 0
+        for index, option in enumerate(self._theme_options):
+            if option["id"] == theme:
+                return index
+        self._theme_options = [
+            {
+                "id": theme,
+                "name": theme.replace("_", " ").title(),
+                "description": "",
+                "campaign_name": "",
+                "campaign_description": "",
+            },
+            *self._theme_options,
+        ]
+        return 0
 
     @property
     def _current_theme(self) -> str:
-        return self._theme_names[self._theme_index]
+        return self._current_theme_option["id"]
+
+    @property
+    def _current_theme_option(self) -> dict[str, str]:
+        return self._theme_options[self._theme_index]
 
     def compose(self) -> ComposeResult:
         with DialogFrame(
@@ -1449,7 +1504,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             yield Static("SETTINGS", id="settings-kicker")
             yield Label("[b]Adventure Settings[/b]", classes="dialog-title")
             yield Static(
-                "Dark mode and typewriter updates apply immediately. Runtime provider, model path, theme pack, and diagnostics apply on restart.",
+                "Dark mode and typewriter updates apply immediately. Runtime provider, model path, story pack, and diagnostics apply on restart.",
                 classes="dialog-message",
             )
 
@@ -1475,11 +1530,12 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
                 classes="settings-value",
             )
 
-            yield Label("Theme Pack", classes="settings-label")
+            yield Label("Story Pack", classes="settings-label")
             with Horizontal(classes="settings-row settings-section"):
                 yield Button("Previous", id="btn-settings-theme-prev")
                 yield Button("Next", id="btn-settings-theme-next")
             yield Label("", id="settings-theme-value", classes="settings-value")
+            yield Label("", id="settings-theme-summary", classes="settings-value")
 
             yield Label("Appearance", classes="settings-label")
             with Horizontal(classes="settings-row settings-section"):
@@ -1756,9 +1812,19 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
 
         self._set_selected("btn-settings-diagnostics-on", self._diagnostics_enabled)
         self._set_selected("btn-settings-diagnostics-off", not self._diagnostics_enabled)
+        current_theme = self._current_theme_option
         self.query_one("#settings-theme-value", Label).update(
-            f"{self._current_theme} ({self._theme_index + 1}/{len(self._theme_names)})"
+            f"{current_theme['name']} ({self._theme_index + 1}/{len(self._theme_options)})"
         )
+        theme_summary = current_theme["description"] or "No pack description is available."
+        if current_theme["campaign_name"]:
+            theme_summary = (
+                f"{theme_summary} Campaign: {current_theme['campaign_name']}. "
+                f"{current_theme['campaign_description'] or 'Includes chapter-based progression.'}"
+            )
+        else:
+            theme_summary = f"{theme_summary} Standalone adventure."
+        self.query_one("#settings-theme-summary", Label).update(theme_summary)
         self._refresh_accessibility_profile_report()
         self._refresh_safety_profile_report()
 
@@ -1932,9 +1998,9 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         elif button_id == "btn-settings-provider-llama":
             self._provider = "llama_cpp"
         elif button_id == "btn-settings-theme-prev":
-            self._theme_index = (self._theme_index - 1) % len(self._theme_names)
+            self._theme_index = (self._theme_index - 1) % len(self._theme_options)
         elif button_id == "btn-settings-theme-next":
-            self._theme_index = (self._theme_index + 1) % len(self._theme_names)
+            self._theme_index = (self._theme_index + 1) % len(self._theme_options)
         elif button_id == "btn-settings-dark-on":
             self._dark = True
         elif button_id == "btn-settings-dark-off":

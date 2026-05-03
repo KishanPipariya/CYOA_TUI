@@ -1,0 +1,120 @@
+name = "Dark Dungeon: Escape Campaign"
+description = "A structured prison-break campaign that escalates from the cell block to the outer gate."
+accent_color = "blue"
+spinner_frames = ["[💀]", "[🦴]", "[💀]", "[🩸]"]
+goals = ["Escape the prison depth", "Identify who chained you here"]
+directives = ["Honor inventory and stat-based choice requirements.", "Track grim faction fallout."]
+opening_inventory = ["Rusted Shackle Pin"]
+story_flags = ["cell_awakening"]
+content_tags = ["dark_fantasy", "dungeon", "escape", "campaign"]
+persona = "You are a brutal dark fantasy narrator. Choices should reflect scarcity, danger, and consequences."
+
+prompt = """You are a dark fantasy interactive fiction engine.
+Describe the starting scenario where the player wakes up in a cold, unfamiliar dungeon cell.
+Provide 2-3 choices for what they can do next.
+You MUST provide a creative 'title' for this new adventure in the JSON response.
+When the story reaches a definitive conclusion (victory, death, escape, etc), set 'is_ending' to true and provide an empty choices list.
+Ensure your output is strictly valid JSON matching the requested schema.
+"""
+
+[opening_stats]
+health = 90
+gold = 0
+reputation = -1
+
+[[opening_objectives]]
+id = "escape_cell"
+text = "Find a way out of the dungeon cell."
+status = "active"
+
+[faction_reputation]
+"Dungeon Wardens" = -2
+
+[npc_affinity]
+"Unknown Prisoner" = 1
+
+[campaign]
+id = "dark_escape"
+name = "Dark Escape"
+description = "A three-chapter prison-break arc that tracks the climb from confinement to the storm beyond the walls."
+starting_act_id = "act_one"
+starting_chapter_id = "cell_block"
+
+[[campaign.acts]]
+id = "act_one"
+title = "The Prison Depths"
+summary = "Break free, navigate the wardens, and force a path to the outer gate."
+
+[[campaign.acts.chapters]]
+id = "cell_block"
+title = "Cell Block"
+summary = "Survey the prison, win a moment of leverage, and force the first escape."
+directives = [
+  "Keep the early scenes claustrophobic and survival-focused.",
+  "Make the player earn even small positional advantages."
+]
+
+[[campaign.acts.chapters.milestones]]
+id = "take_stock"
+title = "Take stock of the prison"
+summary = "The player has had enough time to grasp the immediate danger."
+min_turn = 2
+
+[[campaign.acts.chapters.milestones]]
+id = "force_an_opening"
+title = "Force an opening"
+summary = "The player has created a viable break from the cell block."
+min_turn = 4
+
+[[campaign.acts.chapters]]
+id = "warden_halls"
+title = "Warden Halls"
+summary = "Push through the patrol routes before the prison can lock down around you."
+directives = [
+  "Widen the scope from cell survival to pursuit and routing pressure.",
+  "Let faction hostility and prior choices shape who helps or hunts the player."
+]
+
+[[campaign.acts.chapters.milestones]]
+id = "cross_the_halls"
+title = "Cross the halls"
+summary = "The player has broken past the first response line."
+min_turn = 6
+
+[[campaign.acts.chapters.milestones]]
+id = "find_the_gate_route"
+title = "Find the gate route"
+summary = "The player has identified a final path toward the prison edge."
+min_turn = 8
+
+[[campaign.acts.chapters]]
+id = "outer_gate"
+title = "Outer Gate"
+summary = "Choose the final break for freedom or die at the threshold."
+directives = [
+  "Drive the final chapter toward irreversible consequences.",
+  "Treat the ending as a culmination of scarcity, suspicion, and hard tradeoffs."
+]
+
+[[campaign.acts.chapters.milestones]]
+id = "reach_the_threshold"
+title = "Reach the threshold"
+summary = "The player is finally in sight of the prison boundary."
+min_turn = 10
+
+[[campaign.acts.chapters.milestones]]
+id = "decide_the_escape"
+title = "Decide the escape"
+summary = "The run is ready to resolve into an ending."
+min_turn = 12
+
+[ui]
+main_surface = "#0b0d12"
+action_dock_surface = "#131722"
+side_panel_surface = "#141923"
+status_surface = "#171d29"
+story_card_surface = "#171b25"
+story_card_muted_surface = "#10141c"
+player_choice_surface = "#1d2b40"
+choice_surface = "#223149"
+choice_locked_surface = "#1a1d24"

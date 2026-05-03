@@ -46,7 +46,7 @@ from cyoa.core.preflight import (
     check_terminal_conditions,
 )
 from cyoa.core.support import reveal_in_file_manager, support_paths
-from cyoa.core.theme_loader import list_themes
+from cyoa.core.theme_loader import list_themes, load_theme
 from cyoa.core.user_config import (
     FIRST_RUN_ACCESSIBILITY_PRESET_OPTIONS,
     StartupAccessibilityRecommendation,
@@ -1718,6 +1718,32 @@ class CYOAApp(
             except UserConfigSaveError as exc:
                 self._show_settings_screen(payload, feedback_message=str(exc))
 
+        available_story_packs: list[dict[str, Any]] = []
+        for theme_name in list_themes():
+            loaded_theme = load_theme(theme_name)
+            campaign = (
+                loaded_theme.get("campaign")
+                if isinstance(loaded_theme.get("campaign"), dict)
+                else None
+            )
+            available_story_packs.append(
+                {
+                    "id": theme_name,
+                    "name": str(loaded_theme.get("name") or theme_name),
+                    "description": str(loaded_theme.get("description") or "").strip(),
+                    "campaign_name": (
+                        str(campaign.get("name")).strip()
+                        if isinstance(campaign, dict) and campaign.get("name")
+                        else ""
+                    ),
+                    "campaign_description": (
+                        str(campaign.get("description")).strip()
+                        if isinstance(campaign, dict) and campaign.get("description")
+                        else ""
+                    ),
+                }
+            )
+
         self._push_modal_screen(
             SettingsScreen(
                 provider=pick("provider", config.provider),
@@ -1766,7 +1792,7 @@ class CYOAApp(
                 typewriter=bool(pick("typewriter", self.typewriter_enabled)),
                 typewriter_speed=str(pick("typewriter_speed", self.typewriter_speed)),
                 diagnostics_enabled=bool(pick("diagnostics_enabled", config.diagnostics_enabled)),
-                available_themes=list_themes(),
+                available_themes=available_story_packs,
                 terminal_accessibility_fallback=self._terminal_accessibility_fallback,
                 initial_feedback=feedback_message,
             ),

@@ -485,6 +485,35 @@ async def test_accessibility_matrix_covers_story_notifications_and_settings(
 
 
 @pytest.mark.asyncio
+async def test_settings_story_pack_summary_surfaces_campaign_metadata(
+    mock_app_dependencies,
+) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(110, 36)) as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+
+        app.action_show_settings()
+        await pilot.pause(0.2)
+        assert "Standalone adventure." in app.screen.query_one(
+            "#settings-theme-summary",
+            Label,
+        ).render().plain
+
+        app.screen.query_one("#btn-settings-theme-next", Button).press()
+        await pilot.pause(0.2)
+
+        theme_value = app.screen.query_one("#settings-theme-value", Label).render().plain
+        theme_summary = app.screen.query_one("#settings-theme-summary", Label).render().plain
+        assert "Dark Dungeon: Escape Campaign" in theme_value
+        assert "Campaign: Dark Escape." in theme_summary
+        assert "chapter-based progression" in theme_summary or "three-chapter prison-break" in theme_summary
+
+
+@pytest.mark.asyncio
 async def test_inventory_updates_on_item_gain_and_loss(mock_app_dependencies):
     """Test that the inventory display and app state update correctly when items are gained or lost."""
     app = CYOAApp(model_path="dummy_path.gguf")

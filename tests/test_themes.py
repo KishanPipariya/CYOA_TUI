@@ -210,6 +210,16 @@ def test_validate_theme_accepts_campaign_bundle():
     assert theme["campaign"]["acts"][0]["chapters"][0]["milestones"][0]["id"] == "escape_cell"
 
 
+def test_shipped_campaign_theme_is_selectable() -> None:
+    assert "dark_dungeon_campaign" in list_themes()
+
+    theme = load_theme("dark_dungeon_campaign")
+
+    assert theme["name"] == "Dark Dungeon: Escape Campaign"
+    assert theme["campaign"]["id"] == "dark_escape"
+    assert theme["campaign"]["acts"][0]["chapters"][0]["id"] == "cell_block"
+
+
 def test_validate_theme_rejects_invalid_ui_bundle():
     with pytest.raises(ThemeValidationError, match="ui must be an object"):
         validate_theme(
