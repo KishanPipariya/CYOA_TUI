@@ -498,10 +498,15 @@ async def test_settings_story_pack_summary_surfaces_campaign_metadata(
 
         app.action_show_settings()
         await pilot.pause(0.2)
-        assert "Standalone adventure." in app.screen.query_one(
-            "#settings-theme-summary",
-            Label,
-        ).render().plain
+        assert (
+            "Standalone adventure."
+            in app.screen.query_one(
+                "#settings-theme-summary",
+                Label,
+            )
+            .render()
+            .plain
+        )
 
         app.screen.query_one("#btn-settings-theme-next", Button).press()
         await pilot.pause(0.2)
@@ -510,7 +515,10 @@ async def test_settings_story_pack_summary_surfaces_campaign_metadata(
         theme_summary = app.screen.query_one("#settings-theme-summary", Label).render().plain
         assert "Dark Dungeon: Escape Campaign" in theme_value
         assert "Campaign: Dark Escape." in theme_summary
-        assert "chapter-based progression" in theme_summary or "three-chapter prison-break" in theme_summary
+        assert (
+            "chapter-based progression" in theme_summary
+            or "three-chapter prison-break" in theme_summary
+        )
 
 
 @pytest.mark.asyncio
