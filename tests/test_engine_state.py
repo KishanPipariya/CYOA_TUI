@@ -7,6 +7,7 @@ import pytest
 from cyoa.core.engine import StoryEngine
 from cyoa.core.events import Events, bus
 from cyoa.core.models import (
+    CampaignPack,
     Choice,
     ChoiceCheck,
     Companion,
@@ -352,6 +353,114 @@ def test_engine_save_and_load_roundtrip():
         success=True,
         stakes="The seal lashes back.",
     )
+
+
+def test_game_state_tracks_campaign_progress_and_advances_chapters():
+    state = GameState()
+    state.seed_world_state(
+        campaign=CampaignPack(
+            id="dark_escape",
+            name="Dark Escape",
+            description="Break out and reach the courtyard.",
+            acts=[
+                {
+                    "id": "act_one",
+                    "title": "The Depths",
+                    "chapters": [
+                        {
+                            "id": "cell_block",
+                            "title": "Cell Block",
+                            "directives": ["Keep early scenes claustrophobic."],
+                            "milestones": [
+                                {
+                                    "id": "door_open",
+                                    "title": "Open the cell door",
+                                    "required_story_flags": ["cell_door_open"],
+                                }
+                            ],
+                        },
+                        {
+                            "id": "courtyard",
+                            "title": "Courtyard",
+                            "directives": ["Widen the scope and add pursuit pressure."],
+                            "milestones": [
+                                {
+                                    "id": "reach_courtyard",
+                                    "title": "Reach the courtyard",
+                                    "required_story_flags": ["courtyard_reached"],
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ],
+        )
+    )
+
+    assert state.campaign_progress is not None
+    assert state.campaign_progress.active_chapter_id == "cell_block"
+    assert state.active_chapter_directives() == ["Keep early scenes claustrophobic."]
+
+    state.story_flags.add("cell_door_open")
+
+    assert state._update_campaign_progress() is True
+    assert state.campaign_progress.active_chapter_id == "courtyard"
+    assert state.active_chapter_directives() == ["Widen the scope and add pursuit pressure."]
+    chapter_progress = state.campaign_progress.chapter_progress_for("cell_block")
+    assert chapter_progress is not None
+    assert chapter_progress.completed_milestone_ids == ["door_open"]
+    assert chapter_progress.completed_turn == 1
+
+
+def test_engine_save_and_load_roundtrip_preserves_campaign_progress():
+    broker, _provider = _make_broker_with_mock_provider()
+    engine = StoryEngine(broker=broker, starting_prompt="Start")
+    engine.story_context = StoryContext("Start")
+    engine.state.seed_world_state(
+        campaign=CampaignPack(
+            id="dark_escape",
+            name="Dark Escape",
+            description="Break out and reach the courtyard.",
+            acts=[
+                {
+                    "id": "act_one",
+                    "title": "The Depths",
+                    "chapters": [
+                        {
+                            "id": "cell_block",
+                            "title": "Cell Block",
+                            "directives": ["Keep early scenes claustrophobic."],
+                            "milestones": [
+                                {
+                                    "id": "door_open",
+                                    "title": "Open the cell door",
+                                    "required_story_flags": ["cell_door_open"],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        )
+    )
+    engine.state.story_flags.add("cell_door_open")
+    assert engine.state._update_campaign_progress() is True
+    engine._sync_story_context_state()
+
+    data = engine.get_save_data()
+
+    loaded = StoryEngine(broker=broker, starting_prompt="IgnoreThis")
+    loaded.load_save_data(data)
+
+    assert loaded.state.campaign is not None
+    assert loaded.state.campaign_progress is not None
+    assert loaded.state.campaign.id == "dark_escape"
+    assert loaded.state.campaign_progress.active_chapter_id == "cell_block"
+    saved_progress = loaded.state.campaign_progress.chapter_progress_for("cell_block")
+    assert saved_progress is not None
+    assert saved_progress.completed_milestone_ids == ["door_open"]
+    assert loaded.story_context is not None
+    assert loaded.story_context.chapter_directives == ["Keep early scenes claustrophobic."]
 
 
 def test_engine_save_payload_uses_current_ui_state_contract():

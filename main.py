@@ -333,6 +333,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "faction_reputation": theme.get("faction_reputation", {}),
                 "npc_affinity": theme.get("npc_affinity", {}),
                 "story_flags": theme.get("story_flags", []),
+                "campaign": theme.get("campaign"),
             }
             initial_prompt_config = {
                 "goals": theme.get("goals", []),

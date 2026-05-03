@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from cyoa.core.models import (
+    CampaignPack,
+    CampaignProgress,
     Companion,
     LoreEntry,
     Objective,
@@ -62,6 +64,8 @@ class GameStateSnapshot:
     lore_entries: list[LoreEntry]
     companions: list[Companion]
     world_time: WorldTime
+    campaign: CampaignPack | None
+    campaign_progress: CampaignProgress | None
     story_context: StoryContextMemento = field(default_factory=StoryContextMemento)
 
     @classmethod
@@ -96,6 +100,12 @@ class GameStateSnapshot:
             lore_entries=[entry.model_copy() for entry in state.lore_entries],
             companions=[companion.model_copy() for companion in state.companions],
             world_time=state.world_time.model_copy(),
+            campaign=state.campaign.model_copy() if state.campaign is not None else None,
+            campaign_progress=(
+                state.campaign_progress.model_copy()
+                if state.campaign_progress is not None
+                else None
+            ),
             story_context=StoryContextMemento.from_payload(story_context_history),
         )
 
@@ -122,6 +132,10 @@ class GameStateSnapshot:
             lore_entries=[entry.model_copy() for entry in self.lore_entries],
             companions=[companion.model_copy() for companion in self.companions],
             world_time=self.world_time.model_copy(),
+            campaign=self.campaign.model_copy() if self.campaign is not None else None,
+            campaign_progress=(
+                self.campaign_progress.model_copy() if self.campaign_progress is not None else None
+            ),
             story_context=StoryContextMemento(history=self.story_context.to_payload()),
         )
 
@@ -150,6 +164,10 @@ class GameStateSnapshot:
         state.lore_entries = [entry.model_copy() for entry in self.lore_entries]
         state.companions = [companion.model_copy() for companion in self.companions]
         state.world_time = self.world_time.model_copy()
+        state.campaign = self.campaign.model_copy() if self.campaign is not None else None
+        state.campaign_progress = (
+            self.campaign_progress.model_copy() if self.campaign_progress is not None else None
+        )
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -174,5 +192,9 @@ class GameStateSnapshot:
             "lore_entries": [entry.model_dump() for entry in self.lore_entries],
             "companions": [companion.model_dump() for companion in self.companions],
             "world_time": self.world_time.model_dump(),
+            "campaign": self.campaign.model_dump() if self.campaign else None,
+            "campaign_progress": (
+                self.campaign_progress.model_dump() if self.campaign_progress else None
+            ),
             "story_context_history": self.story_context.to_payload(),
         }

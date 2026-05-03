@@ -320,10 +320,13 @@ class DirectiveComponent(PromptComponent, PromptComponentMixin):
 
     def transform(self, context: Any, messages: list[dict[str, str]]) -> list[dict[str, str]]:
         directives = getattr(context, "directives", [])
-        if not directives:
+        chapter_directives = getattr(context, "chapter_directives", [])
+        if not directives and not chapter_directives:
             return messages
 
         lines = ["## Active Directives"]
+        for directive in chapter_directives:
+            lines.append(f"! [Chapter] {directive}")
         for directive in directives:
             lines.append(f"! {directive}")
 

@@ -158,6 +158,58 @@ def test_validate_theme_accepts_richer_content_bundle():
     assert theme["ui"]["choice_surface"] == "#20303d"
 
 
+def test_validate_theme_accepts_campaign_bundle():
+    theme = validate_theme(
+        {
+            "name": "Campaign Demo",
+            "description": "Structured campaign theme",
+            "prompt": "Start",
+            "accent_color": "blue",
+            "spinner_frames": ["-", "|"],
+            "campaign": {
+                "id": "demo_campaign",
+                "name": "Demo Campaign",
+                "description": "A campaign with chapters.",
+                "acts": [
+                    {
+                        "id": "act_one",
+                        "title": "Act One",
+                        "chapters": [
+                            {
+                                "id": "chapter_one",
+                                "title": "Chapter One",
+                                "directives": ["Keep the player trapped underground."],
+                                "milestones": [
+                                    {
+                                        "id": "escape_cell",
+                                        "title": "Escape the cell",
+                                        "required_story_flags": ["cell_open"],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+            "ui": {
+                "main_surface": "#111111",
+                "action_dock_surface": "#121212",
+                "side_panel_surface": "#131313",
+                "status_surface": "#141414",
+                "story_card_surface": "#151515",
+                "story_card_muted_surface": "#0e0e0e",
+                "player_choice_surface": "#171717",
+                "choice_surface": "#24384d",
+                "choice_locked_surface": "#1a1a1a",
+            },
+        },
+        "campaign_demo",
+    )
+
+    assert theme["campaign"]["id"] == "demo_campaign"
+    assert theme["campaign"]["acts"][0]["chapters"][0]["milestones"][0]["id"] == "escape_cell"
+
+
 def test_validate_theme_rejects_invalid_ui_bundle():
     with pytest.raises(ThemeValidationError, match="ui must be an object"):
         validate_theme(

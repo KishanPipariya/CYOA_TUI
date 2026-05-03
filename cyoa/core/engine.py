@@ -6,6 +6,7 @@ from typing import Any
 
 from cyoa.core.events import Events, bus
 from cyoa.core.models import (
+    CampaignPack,
     Choice,
     Companion,
     LoreEntry,
@@ -605,6 +606,17 @@ class StoryEngine:
                     continue
         return companions
 
+    @staticmethod
+    def _coerce_campaign_seed(raw_value: object) -> CampaignPack | None:
+        if isinstance(raw_value, CampaignPack):
+            return raw_value.model_copy()
+        if not isinstance(raw_value, dict):
+            return None
+        try:
+            return CampaignPack(**raw_value)
+        except Exception:
+            return None
+
     def _apply_initial_state(self) -> None:
         self.state.seed_world_state(
             inventory=self.initial_world_state.get("inventory"),
@@ -616,6 +628,7 @@ class StoryEngine:
             story_flags=set(self.initial_world_state.get("story_flags", [])),
             lore_entries=self._coerce_lore_entry_seed(self.initial_world_state.get("lore_entries")),
             world_time=self.initial_world_state.get("world_time"),
+            campaign=self._coerce_campaign_seed(self.initial_world_state.get("campaign")),
         )
         if self.story_context:
             goals = self.initial_prompt_config.get("goals")
@@ -644,6 +657,7 @@ class StoryEngine:
             lore_entries=self.state.lore_entries,
             companions=self.state.companions,
             world_time=self.state.world_time,
+            chapter_directives=self.state.active_chapter_directives(),
         )
 
     def _find_choice_definition(self, choice_text: str) -> Choice | None:

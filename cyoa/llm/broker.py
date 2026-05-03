@@ -122,6 +122,7 @@ class StoryContext:
         # User/System goals and directives (injected into prompt via pipeline)
         self.goals: list[str] = []
         self.directives: list[str] = []
+        self.chapter_directives: list[str] = []
         self.objectives: list[Objective] = []
         self.faction_reputation: dict[str, int] = {}
         self.npc_affinity: dict[str, int] = {}
@@ -237,26 +238,36 @@ class StoryContext:
         lore_entries: list[LoreEntry] | None = None,
         companions: list[Companion] | None = None,
         world_time: WorldTime | None = None,
+        chapter_directives: list[str] | None = None,
     ) -> None:
         """Keep prompt state aligned with the engine's long-lived world state."""
-        if inventory is not None:
-            self.inventory = list(inventory)
-        if player_stats is not None:
-            self.player_stats = dict(player_stats)
-        if objectives is not None:
-            self.objectives = [objective.model_copy() for objective in objectives]
-        if faction_reputation is not None:
-            self.faction_reputation = dict(faction_reputation)
-        if npc_affinity is not None:
-            self.npc_affinity = dict(npc_affinity)
-        if story_flags is not None:
-            self.story_flags = set(story_flags)
-        if lore_entries is not None:
-            self.lore_entries = [entry.model_copy() for entry in lore_entries]
-        if companions is not None:
-            self.companions = [companion.model_copy() for companion in companions]
-        if world_time is not None:
-            self.world_time = world_time.model_copy()
+        updates: tuple[tuple[object, callable[[], object], str], ...] = (
+            (inventory, lambda: list(inventory), "inventory"),
+            (player_stats, lambda: dict(player_stats), "player_stats"),
+            (
+                objectives,
+                lambda: [objective.model_copy() for objective in objectives],
+                "objectives",
+            ),
+            (
+                faction_reputation,
+                lambda: dict(faction_reputation),
+                "faction_reputation",
+            ),
+            (npc_affinity, lambda: dict(npc_affinity), "npc_affinity"),
+            (story_flags, lambda: set(story_flags), "story_flags"),
+            (lore_entries, lambda: [entry.model_copy() for entry in lore_entries], "lore_entries"),
+            (
+                companions,
+                lambda: [companion.model_copy() for companion in companions],
+                "companions",
+            ),
+            (world_time, lambda: world_time.model_copy(), "world_time"),
+            (chapter_directives, lambda: list(chapter_directives), "chapter_directives"),
+        )
+        for value, copier, attribute in updates:
+            if value is not None:
+                setattr(self, attribute, copier())
 
     def set_hierarchical_summary(
         self,
@@ -325,6 +336,7 @@ class StoryContext:
         new_ctx.arc_summary = self.arc_summary
         new_ctx.goals = list(self.goals)
         new_ctx.directives = list(self.directives)
+        new_ctx.chapter_directives = list(self.chapter_directives)
         new_ctx.objectives = [objective.model_copy() for objective in self.objectives]
         new_ctx.faction_reputation = dict(self.faction_reputation)
         new_ctx.npc_affinity = dict(self.npc_affinity)

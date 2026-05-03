@@ -7,6 +7,8 @@ from typing import Any, cast
 
 from textual.color import Color
 
+from cyoa.core.models import CampaignPack
+
 logger = logging.getLogger(__name__)
 
 THEMES_DIR = Path(__file__).parent.parent.parent / "themes"
@@ -249,6 +251,18 @@ def _validate_required_ui_theme(
     validated["ui"] = normalized
 
 
+def _validate_campaign(theme: dict[str, Any], source: str, validated: dict[str, Any]) -> None:
+    campaign = theme.get("campaign")
+    if campaign is None:
+        return
+    if not isinstance(campaign, dict):
+        raise ThemeValidationError(f"{source}: campaign must be an object.")
+    try:
+        validated["campaign"] = CampaignPack(**campaign).model_dump()
+    except Exception as exc:
+        raise ThemeValidationError(f"{source}: invalid campaign configuration: {exc}") from exc
+
+
 def validate_theme(theme: dict[str, Any], theme_name: str) -> dict[str, Any]:
     """Validate and normalize a single theme payload."""
     source = f"Theme '{theme_name}'"
@@ -269,6 +283,7 @@ def validate_theme(theme: dict[str, Any], theme_name: str) -> dict[str, Any]:
     _validate_optional_mappings(theme, source, validated)
     _validate_opening_objectives(theme, source, validated)
     _validate_opening_companions(theme, source, validated)
+    _validate_campaign(theme, source, validated)
     _validate_required_ui_theme(theme, source, validated)
     return validated
 

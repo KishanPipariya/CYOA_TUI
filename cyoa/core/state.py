@@ -5,6 +5,9 @@ from typing import Any, ClassVar
 from cyoa.core.events import Events, bus
 from cyoa.core.mementos import GameStateSnapshot, StoryContextMemento
 from cyoa.core.models import (
+    CampaignChapter,
+    CampaignPack,
+    CampaignProgress,
     Companion,
     LoreEntry,
     Objective,
@@ -52,6 +55,8 @@ class GameState:
         self.lore_entries: list[LoreEntry] = []
         self.companions: list[Companion] = []
         self.world_time: WorldTime = WorldTime()
+        self.campaign: CampaignPack | None = None
+        self.campaign_progress: CampaignProgress | None = None
         self._undo_history: deque[GameStateSnapshot] = deque(maxlen=MAX_HISTORY_DEPTH)
         self._redo_history: deque[GameStateSnapshot] = deque(maxlen=MAX_HISTORY_DEPTH)
         self._bookmarks: dict[str, GameStateSnapshot] = {}
@@ -76,6 +81,8 @@ class GameState:
         self.lore_entries = []
         self.companions = []
         self.world_time = WorldTime()
+        self.campaign = None
+        self.campaign_progress = None
         self._undo_history.clear()
         self._redo_history.clear()
         self._bookmarks = {}
@@ -109,7 +116,8 @@ class GameState:
 
         world_state_changed = self._apply_world_updates(node)
         time_changed = self._apply_time_advance(node.time_advance_hours)
-        if world_state_changed or time_changed:
+        campaign_changed = self._update_campaign_progress()
+        if world_state_changed or time_changed or campaign_changed:
             bus.emit_runtime(Events.WORLD_STATE_UPDATED, state=self.get_world_state())
 
         # 3. Advance state
@@ -215,6 +223,10 @@ class GameState:
             "lore_entries": [entry.model_dump() for entry in self.lore_entries],
             "companions": [companion.model_dump() for companion in self.companions],
             "world_time": self.world_time.model_dump(),
+            "campaign": self.campaign.model_dump() if self.campaign else None,
+            "campaign_progress": (
+                self.campaign_progress.model_dump() if self.campaign_progress else None
+            ),
             "undo_history": [snapshot.to_payload() for snapshot in self._undo_history],
             "redo_history": [snapshot.to_payload() for snapshot in self._redo_history],
             "bookmarks": {
@@ -252,6 +264,11 @@ class GameState:
         self.lore_entries = self._coerce_lore_entries(data.get("lore_entries"))
         self.companions = self._coerce_companions(data.get("companions"))
         self.world_time = self._coerce_world_time(data.get("world_time"))
+        self.campaign = self._coerce_campaign(data.get("campaign"))
+        self.campaign_progress = self._coerce_campaign_progress(
+            data.get("campaign_progress"),
+            campaign=self.campaign,
+        )
         self._undo_history = deque(
             self._coerce_snapshot_list(data.get("undo_history")), maxlen=MAX_HISTORY_DEPTH
         )
@@ -367,6 +384,10 @@ class GameState:
             "lore_entries": [entry.model_dump() for entry in self.lore_entries],
             "companions": [companion.model_dump() for companion in self.companions],
             "world_time": self.world_time.model_dump(),
+            "campaign": self.campaign.model_dump() if self.campaign else None,
+            "campaign_progress": (
+                self.campaign_progress.model_dump() if self.campaign_progress else None
+            ),
         }
 
     def seed_world_state(
@@ -381,8 +402,43 @@ class GameState:
         lore_entries: list[LoreEntry] | None = None,
         companions: list[Companion] | None = None,
         world_time: WorldTime | dict[str, int] | None = None,
+        campaign: CampaignPack | dict[str, Any] | None = None,
+        campaign_progress: CampaignProgress | dict[str, Any] | None = None,
     ) -> None:
         """Apply initial state from a theme or imported save payload."""
+        self._seed_core_world_state(
+            inventory=inventory,
+            player_stats=player_stats,
+            objectives=objectives,
+            faction_reputation=faction_reputation,
+            npc_affinity=npc_affinity,
+            story_flags=story_flags,
+            lore_entries=lore_entries,
+            companions=companions,
+            world_time=world_time,
+        )
+        if campaign is not None:
+            self.campaign = self._coerce_campaign(campaign)
+        if campaign_progress is not None or self.campaign is not None:
+            self.campaign_progress = self._coerce_campaign_progress(
+                campaign_progress,
+                campaign=self.campaign,
+            )
+        self._update_campaign_progress()
+
+    def _seed_core_world_state(
+        self,
+        *,
+        inventory: list[str] | None,
+        player_stats: dict[str, int] | None,
+        objectives: list[Objective] | None,
+        faction_reputation: dict[str, int] | None,
+        npc_affinity: dict[str, int] | None,
+        story_flags: set[str] | None,
+        lore_entries: list[LoreEntry] | None,
+        companions: list[Companion] | None,
+        world_time: WorldTime | dict[str, int] | None,
+    ) -> None:
         if inventory is not None:
             self.inventory = list(dict.fromkeys(inventory))
         if player_stats is not None:
@@ -401,6 +457,17 @@ class GameState:
             self.companions = [companion.model_copy() for companion in companions]
         if world_time is not None:
             self.world_time = self._coerce_world_time(world_time)
+
+    def active_campaign_chapter(self) -> CampaignChapter | None:
+        if self.campaign is None or self.campaign_progress is None:
+            return None
+        return self.campaign.get_chapter(self.campaign_progress.active_chapter_id)
+
+    def active_chapter_directives(self) -> list[str]:
+        chapter = self.active_campaign_chapter()
+        if chapter is None:
+            return []
+        return list(chapter.directives)
 
     def _apply_objective_updates(self, objectives_updated: list[Objective]) -> bool:
         changed = False
@@ -528,6 +595,68 @@ class GameState:
         changed = self._apply_companion_updates(node.companions_updated) or changed
         return changed
 
+    def _update_campaign_progress(self) -> bool:
+        chapter = self._ensure_active_campaign_chapter()
+        if chapter is None:
+            return False
+
+        progress = self.campaign_progress.ensure_chapter_progress(
+            chapter.id,
+            started_turn=self.turn_count,
+        )
+        changed = False
+        for milestone in chapter.milestones:
+            if milestone.id in progress.completed_milestone_ids:
+                continue
+            if milestone.is_complete(
+                story_flags=self.story_flags,
+                objectives=self.objectives,
+                turn_count=self.turn_count,
+            ):
+                progress.completed_milestone_ids.append(milestone.id)
+                changed = True
+
+        if chapter.milestones and len(progress.completed_milestone_ids) == len(chapter.milestones):
+            if progress.completed_turn is None:
+                progress.completed_turn = self.turn_count
+                changed = True
+            next_ref = self.campaign.next_chapter_ref(chapter.id)
+            if next_ref is not None:
+                next_act_id, next_chapter_id = next_ref
+                if (
+                    self.campaign_progress.active_act_id != next_act_id
+                    or self.campaign_progress.active_chapter_id != next_chapter_id
+                ):
+                    self.campaign_progress.active_act_id = next_act_id
+                    self.campaign_progress.active_chapter_id = next_chapter_id
+                    self.campaign_progress.ensure_chapter_progress(
+                        next_chapter_id,
+                        started_turn=self.turn_count,
+                    )
+                    changed = True
+            elif self.campaign_progress.completed_turn is None:
+                self.campaign_progress.completed_turn = self.turn_count
+                changed = True
+
+        return changed
+
+    def _ensure_active_campaign_chapter(self) -> CampaignChapter | None:
+        if self.campaign is None:
+            self.campaign_progress = None
+            return None
+        if (
+            self.campaign_progress is None
+            or self.campaign_progress.campaign_id != self.campaign.id
+            or self.campaign.get_chapter_ref(self.campaign_progress.active_chapter_id) is None
+        ):
+            self.campaign_progress = CampaignProgress.from_campaign(
+                self.campaign,
+                started_turn=self.turn_count,
+            )
+        if self.campaign_progress is None:
+            return None
+        return self.campaign.get_chapter(self.campaign_progress.active_chapter_id)
+
     def _coerce_objectives(self, value: Any) -> list[Objective]:
         if not isinstance(value, list):
             return []
@@ -566,6 +695,37 @@ class GameState:
             except Exception:
                 continue
         return companions
+
+    def _coerce_campaign(self, value: Any) -> CampaignPack | None:
+        if isinstance(value, CampaignPack):
+            return value.model_copy()
+        if not isinstance(value, dict):
+            return None
+        try:
+            return CampaignPack(**value)
+        except Exception:
+            return None
+
+    def _coerce_campaign_progress(
+        self,
+        value: Any,
+        *,
+        campaign: CampaignPack | None,
+    ) -> CampaignProgress | None:
+        if campaign is None:
+            return None
+        if isinstance(value, CampaignProgress):
+            progress = value.model_copy()
+        elif isinstance(value, dict):
+            try:
+                progress = CampaignProgress(**value)
+            except Exception:
+                progress = None
+        else:
+            progress = None
+        if progress is None or progress.campaign_id != campaign.id:
+            return CampaignProgress.from_campaign(campaign, started_turn=self.turn_count)
+        return progress
 
     def _coerce_resolved_choice_check(self, value: Any) -> ResolvedChoiceCheck | None:
         if not isinstance(value, dict):
@@ -622,6 +782,8 @@ class GameState:
             except Exception:
                 node = None
 
+        campaign = self._coerce_campaign(value.get("campaign"))
+
         return GameStateSnapshot(
             turn_count=self._coerce_positive_int(value.get("turn_count"), default=1),
             current_node=node,
@@ -654,6 +816,11 @@ class GameState:
             lore_entries=self._coerce_lore_entries(value.get("lore_entries")),
             companions=self._coerce_companions(value.get("companions")),
             world_time=self._coerce_world_time(value.get("world_time")),
+            campaign=campaign,
+            campaign_progress=self._coerce_campaign_progress(
+                value.get("campaign_progress"),
+                campaign=campaign,
+            ),
             story_context=StoryContextMemento.from_payload(value.get("story_context_history")),
         )
 

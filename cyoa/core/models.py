@@ -65,6 +65,360 @@ class Companion(BaseModel):
         return self
 
 
+class CampaignMilestone(BaseModel):
+    id: str = Field(description="Stable milestone identifier within a campaign chapter.")
+    title: str = Field(description="Player-facing milestone title.")
+    summary: str | None = Field(
+        default=None,
+        description="Optional note describing what the milestone represents.",
+    )
+    required_story_flags: list[str] = Field(
+        default_factory=list,
+        description="Story flags that must all be active before the milestone is complete.",
+    )
+    required_objective_ids: list[str] = Field(
+        default_factory=list,
+        description="Objective identifiers that must be completed before the milestone is met.",
+    )
+    min_turn: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional minimum turn before the milestone may complete.",
+    )
+
+    @model_validator(mode="after")
+    def normalize_fields(self) -> "CampaignMilestone":
+        self.id = self.id.strip()
+        self.title = self.title.strip()
+        if not self.id:
+            raise ValueError("Campaign milestone id cannot be empty.")
+        if not self.title:
+            raise ValueError("Campaign milestone title cannot be empty.")
+        if self.summary is not None:
+            normalized_summary = self.summary.strip()
+            self.summary = normalized_summary or None
+        self.required_story_flags = [
+            flag.strip() for flag in self.required_story_flags if flag.strip()
+        ]
+        self.required_objective_ids = [
+            objective_id.strip()
+            for objective_id in self.required_objective_ids
+            if objective_id.strip()
+        ]
+        if (
+            not self.required_story_flags
+            and not self.required_objective_ids
+            and self.min_turn is None
+        ):
+            raise ValueError("Campaign milestones require at least one completion condition.")
+        return self
+
+    def is_complete(
+        self,
+        *,
+        story_flags: set[str],
+        objectives: Sequence[Objective],
+        turn_count: int,
+    ) -> bool:
+        if self.min_turn is not None and turn_count < self.min_turn:
+            return False
+        if self.required_story_flags and not set(self.required_story_flags).issubset(story_flags):
+            return False
+        if self.required_objective_ids:
+            completed_objectives = {
+                objective.id for objective in objectives if objective.status == "completed"
+            }
+            if not set(self.required_objective_ids).issubset(completed_objectives):
+                return False
+        return True
+
+
+class CampaignChapter(BaseModel):
+    id: str = Field(description="Stable chapter identifier.")
+    title: str = Field(description="Player-facing chapter title.")
+    summary: str | None = Field(
+        default=None,
+        description="Optional chapter summary for campaign browsers or HUD surfaces.",
+    )
+    directives: list[str] = Field(
+        default_factory=list,
+        description="Prompt directives that apply while this chapter is active.",
+    )
+    milestones: list[CampaignMilestone] = Field(
+        default_factory=list,
+        description="Ordered milestones that define chapter progress.",
+    )
+
+    @model_validator(mode="after")
+    def normalize_fields(self) -> "CampaignChapter":
+        self.id = self.id.strip()
+        self.title = self.title.strip()
+        if not self.id:
+            raise ValueError("Campaign chapter id cannot be empty.")
+        if not self.title:
+            raise ValueError("Campaign chapter title cannot be empty.")
+        if self.summary is not None:
+            normalized_summary = self.summary.strip()
+            self.summary = normalized_summary or None
+        self.directives = [directive.strip() for directive in self.directives if directive.strip()]
+        milestone_ids: set[str] = set()
+        for milestone in self.milestones:
+            if milestone.id in milestone_ids:
+                raise ValueError(f"Duplicate campaign milestone id '{milestone.id}'.")
+            milestone_ids.add(milestone.id)
+        return self
+
+
+class CampaignAct(BaseModel):
+    id: str = Field(description="Stable act identifier.")
+    title: str = Field(description="Player-facing act title.")
+    summary: str | None = Field(
+        default=None,
+        description="Optional act summary for campaign browsers or tooltips.",
+    )
+    chapters: list[CampaignChapter] = Field(
+        description="Ordered chapters within this act.",
+        json_schema_extra={"minItems": 1},
+    )
+
+    @model_validator(mode="after")
+    def normalize_fields(self) -> "CampaignAct":
+        self.id = self.id.strip()
+        self.title = self.title.strip()
+        if not self.id:
+            raise ValueError("Campaign act id cannot be empty.")
+        if not self.title:
+            raise ValueError("Campaign act title cannot be empty.")
+        if self.summary is not None:
+            normalized_summary = self.summary.strip()
+            self.summary = normalized_summary or None
+        if not self.chapters:
+            raise ValueError("Campaign acts require at least one chapter.")
+        chapter_ids: set[str] = set()
+        for chapter in self.chapters:
+            if chapter.id in chapter_ids:
+                raise ValueError(
+                    f"Duplicate campaign chapter id '{chapter.id}' inside act '{self.id}'."
+                )
+            chapter_ids.add(chapter.id)
+        return self
+
+
+class CampaignPack(BaseModel):
+    id: str = Field(description="Stable campaign identifier.")
+    name: str = Field(description="Player-facing campaign name.")
+    description: str = Field(description="Short campaign description.")
+    acts: list[CampaignAct] = Field(
+        description="Ordered campaign acts.",
+        json_schema_extra={"minItems": 1},
+    )
+    starting_act_id: str | None = Field(
+        default=None,
+        description="Optional explicit starting act identifier.",
+    )
+    starting_chapter_id: str | None = Field(
+        default=None,
+        description="Optional explicit starting chapter identifier.",
+    )
+
+    @model_validator(mode="after")
+    def normalize_fields(self) -> "CampaignPack":
+        self.id = self.id.strip()
+        self.name = self.name.strip()
+        self.description = self.description.strip()
+        if not self.id:
+            raise ValueError("Campaign id cannot be empty.")
+        if not self.name:
+            raise ValueError("Campaign name cannot be empty.")
+        if not self.description:
+            raise ValueError("Campaign description cannot be empty.")
+        if not self.acts:
+            raise ValueError("Campaigns require at least one act.")
+        if self.starting_act_id is not None:
+            self.starting_act_id = self.starting_act_id.strip() or None
+        if self.starting_chapter_id is not None:
+            self.starting_chapter_id = self.starting_chapter_id.strip() or None
+
+        act_ids, chapter_to_act = self._campaign_indexes()
+        self._validate_starting_position(act_ids, chapter_to_act)
+        return self
+
+    def _campaign_indexes(self) -> tuple[set[str], dict[str, str]]:
+        act_ids: set[str] = set()
+        chapter_to_act: dict[str, str] = {}
+        for act in self.acts:
+            if act.id in act_ids:
+                raise ValueError(f"Duplicate campaign act id '{act.id}'.")
+            act_ids.add(act.id)
+            for chapter in act.chapters:
+                owner = chapter_to_act.get(chapter.id)
+                if owner is not None:
+                    raise ValueError(
+                        f"Duplicate campaign chapter id '{chapter.id}' across acts '{owner}' and '{act.id}'."
+                    )
+                chapter_to_act[chapter.id] = act.id
+        return act_ids, chapter_to_act
+
+    def _validate_starting_position(
+        self,
+        act_ids: set[str],
+        chapter_to_act: dict[str, str],
+    ) -> None:
+        if self.starting_act_id is not None and self.starting_act_id not in act_ids:
+            raise ValueError(f"Unknown starting_act_id '{self.starting_act_id}'.")
+        if self.starting_chapter_id is None:
+            return
+        owning_act_id = chapter_to_act.get(self.starting_chapter_id)
+        if owning_act_id is None:
+            raise ValueError(f"Unknown starting_chapter_id '{self.starting_chapter_id}'.")
+        if self.starting_act_id is not None and owning_act_id != self.starting_act_id:
+            raise ValueError("starting_act_id and starting_chapter_id must point to the same act.")
+
+    def starting_position(self) -> tuple[str, str]:
+        if self.starting_chapter_id is not None:
+            chapter_ref = self.get_chapter_ref(self.starting_chapter_id)
+            if chapter_ref is not None:
+                return chapter_ref
+
+        first_act = self.get_act(self.starting_act_id) if self.starting_act_id else self.acts[0]
+        return first_act.id, first_act.chapters[0].id
+
+    def get_act(self, act_id: str | None) -> CampaignAct | None:
+        if act_id is None:
+            return None
+        for act in self.acts:
+            if act.id == act_id:
+                return act
+        return None
+
+    def get_chapter(self, chapter_id: str | None) -> CampaignChapter | None:
+        if chapter_id is None:
+            return None
+        for act in self.acts:
+            for chapter in act.chapters:
+                if chapter.id == chapter_id:
+                    return chapter
+        return None
+
+    def get_chapter_ref(self, chapter_id: str | None) -> tuple[str, str] | None:
+        if chapter_id is None:
+            return None
+        for act in self.acts:
+            for chapter in act.chapters:
+                if chapter.id == chapter_id:
+                    return act.id, chapter.id
+        return None
+
+    def next_chapter_ref(self, chapter_id: str | None) -> tuple[str, str] | None:
+        ordered_refs = [(act.id, chapter.id) for act in self.acts for chapter in act.chapters]
+        for index, ref in enumerate(ordered_refs):
+            if ref[1] == chapter_id:
+                return ordered_refs[index + 1] if index + 1 < len(ordered_refs) else None
+        return None
+
+
+class CampaignChapterProgress(BaseModel):
+    chapter_id: str = Field(description="Stable chapter identifier.")
+    completed_milestone_ids: list[str] = Field(
+        default_factory=list,
+        description="Milestones already completed within this chapter.",
+    )
+    started_turn: int | None = Field(
+        default=None,
+        ge=1,
+        description="Turn when the chapter first became active.",
+    )
+    completed_turn: int | None = Field(
+        default=None,
+        ge=1,
+        description="Turn when the chapter was completed.",
+    )
+
+    @model_validator(mode="after")
+    def normalize_fields(self) -> "CampaignChapterProgress":
+        self.chapter_id = self.chapter_id.strip()
+        if not self.chapter_id:
+            raise ValueError("Campaign chapter progress requires a chapter id.")
+        self.completed_milestone_ids = [
+            milestone_id.strip()
+            for milestone_id in self.completed_milestone_ids
+            if milestone_id.strip()
+        ]
+        return self
+
+
+class CampaignProgress(BaseModel):
+    campaign_id: str = Field(description="Stable campaign identifier.")
+    active_act_id: str = Field(description="Currently active act identifier.")
+    active_chapter_id: str = Field(description="Currently active chapter identifier.")
+    chapters: list[CampaignChapterProgress] = Field(
+        default_factory=list,
+        description="Per-chapter progress history.",
+    )
+    started_turn: int = Field(
+        default=1,
+        ge=1,
+        description="Turn when the campaign run began.",
+    )
+    completed_turn: int | None = Field(
+        default=None,
+        ge=1,
+        description="Turn when the campaign finished, if it has.",
+    )
+
+    @model_validator(mode="after")
+    def normalize_fields(self) -> "CampaignProgress":
+        self.campaign_id = self.campaign_id.strip()
+        self.active_act_id = self.active_act_id.strip()
+        self.active_chapter_id = self.active_chapter_id.strip()
+        if not self.campaign_id:
+            raise ValueError("Campaign progress requires a campaign id.")
+        if not self.active_act_id:
+            raise ValueError("Campaign progress requires an active act id.")
+        if not self.active_chapter_id:
+            raise ValueError("Campaign progress requires an active chapter id.")
+        chapter_ids: set[str] = set()
+        for chapter in self.chapters:
+            if chapter.chapter_id in chapter_ids:
+                raise ValueError(
+                    f"Duplicate campaign progress entry for chapter '{chapter.chapter_id}'."
+                )
+            chapter_ids.add(chapter.chapter_id)
+        return self
+
+    @classmethod
+    def from_campaign(cls, campaign: CampaignPack, *, started_turn: int = 1) -> "CampaignProgress":
+        act_id, chapter_id = campaign.starting_position()
+        return cls(
+            campaign_id=campaign.id,
+            active_act_id=act_id,
+            active_chapter_id=chapter_id,
+            chapters=[CampaignChapterProgress(chapter_id=chapter_id, started_turn=started_turn)],
+            started_turn=started_turn,
+        )
+
+    def chapter_progress_for(self, chapter_id: str) -> CampaignChapterProgress | None:
+        for chapter in self.chapters:
+            if chapter.chapter_id == chapter_id:
+                return chapter
+        return None
+
+    def ensure_chapter_progress(
+        self,
+        chapter_id: str,
+        *,
+        started_turn: int,
+    ) -> CampaignChapterProgress:
+        existing = self.chapter_progress_for(chapter_id)
+        if existing is not None:
+            if existing.started_turn is None:
+                existing.started_turn = started_turn
+            return existing
+        created = CampaignChapterProgress(chapter_id=chapter_id, started_turn=started_turn)
+        self.chapters.append(created)
+        return created
+
+
 class WorldTime(BaseModel):
     day: int = Field(default=1, ge=1, description="Current in-world day number.")
     hour: int = Field(
