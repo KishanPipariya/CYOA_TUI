@@ -14,8 +14,8 @@ from cyoa.core.user_config import (
 )
 
 
-def _args(**overrides: str | None) -> argparse.Namespace:
-    values = {
+def _args(**overrides: object) -> argparse.Namespace:
+    values: dict[str, object] = {
         "model": None,
         "theme": "dark_dungeon",
         "prompt": None,

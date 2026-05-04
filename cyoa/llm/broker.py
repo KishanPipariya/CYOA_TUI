@@ -241,33 +241,33 @@ class StoryContext:
         chapter_directives: list[str] | None = None,
     ) -> None:
         """Keep prompt state aligned with the engine's long-lived world state."""
-        updates: tuple[tuple[object, callable[[], object], str], ...] = (
-            (inventory, lambda: list(inventory), "inventory"),
-            (player_stats, lambda: dict(player_stats), "player_stats"),
+        updates: tuple[tuple[Any, Callable[[Any], object], str], ...] = (
+            (inventory, list, "inventory"),
+            (player_stats, dict, "player_stats"),
             (
                 objectives,
-                lambda: [objective.model_copy() for objective in objectives],
+                lambda current: [objective.model_copy() for objective in current],
                 "objectives",
             ),
+            (faction_reputation, dict, "faction_reputation"),
+            (npc_affinity, dict, "npc_affinity"),
+            (story_flags, set, "story_flags"),
             (
-                faction_reputation,
-                lambda: dict(faction_reputation),
-                "faction_reputation",
+                lore_entries,
+                lambda current: [entry.model_copy() for entry in current],
+                "lore_entries",
             ),
-            (npc_affinity, lambda: dict(npc_affinity), "npc_affinity"),
-            (story_flags, lambda: set(story_flags), "story_flags"),
-            (lore_entries, lambda: [entry.model_copy() for entry in lore_entries], "lore_entries"),
             (
                 companions,
-                lambda: [companion.model_copy() for companion in companions],
+                lambda current: [companion.model_copy() for companion in current],
                 "companions",
             ),
-            (world_time, lambda: world_time.model_copy(), "world_time"),
-            (chapter_directives, lambda: list(chapter_directives), "chapter_directives"),
+            (world_time, lambda current: current.model_copy(), "world_time"),
+            (chapter_directives, list, "chapter_directives"),
         )
         for value, copier, attribute in updates:
             if value is not None:
-                setattr(self, attribute, copier())
+                setattr(self, attribute, copier(value))
 
     def set_hierarchical_summary(
         self,

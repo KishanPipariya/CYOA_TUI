@@ -1,6 +1,6 @@
 from pathlib import Path
-from types import SimpleNamespace
 
+from cyoa.core.model_download import ModelRecommendation
 from cyoa.core.preflight import (
     DISK_HEADROOM_GB,
     check_local_model_preflight,
@@ -24,8 +24,10 @@ def test_terminal_preflight_blocks_dumb_term() -> None:
 
 def test_local_model_preflight_blocks_for_low_disk(monkeypatch) -> None:
     monkeypatch.setattr("cyoa.core.preflight._free_disk_gb", lambda _path: 1.0)
-    recommendation = SimpleNamespace(
+    recommendation = ModelRecommendation(
         label="7B",
+        filename="demo.gguf",
+        repo_id="Qwen/demo",
         ram_gb=16.0,
         minimum_ram_gb=12.0,
         approx_size_gb=5.0,
@@ -45,8 +47,10 @@ def test_local_model_preflight_blocks_for_low_disk(monkeypatch) -> None:
 
 def test_local_model_preflight_reports_success(monkeypatch) -> None:
     monkeypatch.setattr("cyoa.core.preflight._free_disk_gb", lambda _path: 50.0)
-    recommendation = SimpleNamespace(
+    recommendation = ModelRecommendation(
         label="3B",
+        filename="demo.gguf",
+        repo_id="Qwen/demo",
         ram_gb=12.0,
         minimum_ram_gb=8.0,
         approx_size_gb=2.5,

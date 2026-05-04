@@ -280,7 +280,11 @@ class CampaignPack(BaseModel):
             if chapter_ref is not None:
                 return chapter_ref
 
-        first_act = self.get_act(self.starting_act_id) if self.starting_act_id else self.acts[0]
+        first_act = self.acts[0]
+        if self.starting_act_id is not None:
+            resolved_act = self.get_act(self.starting_act_id)
+            if resolved_act is not None:
+                first_act = resolved_act
         return first_act.id, first_act.chapters[0].id
 
     def get_act(self, act_id: str | None) -> CampaignAct | None:

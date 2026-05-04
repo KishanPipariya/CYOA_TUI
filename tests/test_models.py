@@ -1,5 +1,3 @@
-from collections import UserDict
-
 import pytest
 from pydantic import ValidationError
 
@@ -180,7 +178,7 @@ def test_choice_availability_reason_accepts_mapping_like_companion_payloads() ->
             [],
             {},
             set(),
-            [UserDict({"name": "Mira", "status": "active", "affinity": 3})],
+            [Companion(name="Mira", status="active", affinity=3)],
         )
         is None
     )

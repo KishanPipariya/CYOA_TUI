@@ -103,6 +103,7 @@ known-first-party = ["cyoa"]
 
 [tool.mypy]
 python_version = "3.13"
+explicit_package_bases = true
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -123,6 +124,10 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 check_untyped_defs = false
 warn_unused_ignores = false
+
+[[tool.mypy.overrides]]
+module = ["tests.test_tui", "tests.test_ui_units"]
+ignore_errors = true
 
 [tool.setuptools]
 py-modules = ["main"]

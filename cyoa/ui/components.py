@@ -1373,7 +1373,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         typewriter: bool,
         typewriter_speed: str,
         diagnostics_enabled: bool,
-        available_themes: list[str],
+        available_themes: list[Any],
         terminal_accessibility_fallback: TerminalAccessibilityFallback | None = None,
         high_contrast: bool = False,
         initial_feedback: str = "",

@@ -597,10 +597,12 @@ class GameState:
 
     def _update_campaign_progress(self) -> bool:
         chapter = self._ensure_active_campaign_chapter()
-        if chapter is None:
+        progress_state = self.campaign_progress
+        campaign = self.campaign
+        if chapter is None or progress_state is None or campaign is None:
             return False
 
-        progress = self.campaign_progress.ensure_chapter_progress(
+        progress = progress_state.ensure_chapter_progress(
             chapter.id,
             started_turn=self.turn_count,
         )
@@ -620,22 +622,22 @@ class GameState:
             if progress.completed_turn is None:
                 progress.completed_turn = self.turn_count
                 changed = True
-            next_ref = self.campaign.next_chapter_ref(chapter.id)
+            next_ref = campaign.next_chapter_ref(chapter.id)
             if next_ref is not None:
                 next_act_id, next_chapter_id = next_ref
                 if (
-                    self.campaign_progress.active_act_id != next_act_id
-                    or self.campaign_progress.active_chapter_id != next_chapter_id
+                    progress_state.active_act_id != next_act_id
+                    or progress_state.active_chapter_id != next_chapter_id
                 ):
-                    self.campaign_progress.active_act_id = next_act_id
-                    self.campaign_progress.active_chapter_id = next_chapter_id
-                    self.campaign_progress.ensure_chapter_progress(
+                    progress_state.active_act_id = next_act_id
+                    progress_state.active_chapter_id = next_chapter_id
+                    progress_state.ensure_chapter_progress(
                         next_chapter_id,
                         started_turn=self.turn_count,
                     )
                     changed = True
-            elif self.campaign_progress.completed_turn is None:
-                self.campaign_progress.completed_turn = self.turn_count
+            elif progress_state.completed_turn is None:
+                progress_state.completed_turn = self.turn_count
                 changed = True
 
         return changed
@@ -653,8 +655,6 @@ class GameState:
                 self.campaign,
                 started_turn=self.turn_count,
             )
-        if self.campaign_progress is None:
-            return None
         return self.campaign.get_chapter(self.campaign_progress.active_chapter_id)
 
     def _coerce_objectives(self, value: Any) -> list[Objective]:
