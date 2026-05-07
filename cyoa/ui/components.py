@@ -294,9 +294,15 @@ class ButtonGroupScreen(ModalScreen[Any]):
         return [button for button in self.query(Button) if not button.disabled]
 
     def _focus_first_action_button(self) -> None:
-        buttons = self._action_buttons()
-        if buttons:
-            self.call_after_refresh(buttons[0].focus)
+        def apply_focus() -> None:
+            buttons = self._action_buttons()
+            if not buttons:
+                return
+            if isinstance(self.focused, Button) and self.focused in buttons:
+                return
+            buttons[0].focus()
+
+        self.call_after_refresh(apply_focus)
 
     def _move_action_focus(self, step: int) -> None:
         buttons = self._action_buttons()
