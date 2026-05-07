@@ -728,13 +728,21 @@ class CYOAApp(
         fallback: str = "choices",
     ) -> None:
         def apply_focus() -> None:
-            widget = self._resolve_focus_target_widget(target)
-            if widget is None:
-                widget = self._fallback_focus_widget(fallback)
+            try:
+                widget = self._resolve_focus_target_widget(target)
+                if widget is None:
+                    widget = self._fallback_focus_widget(fallback)
+            except ScreenStackError:
+                return
             if widget is not None and self._widget_can_receive_focus(widget):
                 widget.focus()
 
         self.call_after_refresh(apply_focus)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self.set_timer(0.01, apply_focus)
 
     def _has_open_modal_screen(self) -> bool:
         try:

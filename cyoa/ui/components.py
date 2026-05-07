@@ -1494,6 +1494,10 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         return self._current_theme_option["id"]
 
     @property
+    def _theme_names(self) -> list[str]:
+        return [option["id"] for option in self._theme_options]
+
+    @property
     def _current_theme_option(self) -> dict[str, str]:
         return self._theme_options[self._theme_index]
 
@@ -1813,8 +1817,9 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         self._set_selected("btn-settings-diagnostics-on", self._diagnostics_enabled)
         self._set_selected("btn-settings-diagnostics-off", not self._diagnostics_enabled)
         current_theme = self._current_theme_option
+        theme_label = f"{current_theme['name']} id: {current_theme['id']}"
         self.query_one("#settings-theme-value", Label).update(
-            f"{current_theme['name']} ({self._theme_index + 1}/{len(self._theme_options)})"
+            f"{theme_label} ({self._theme_index + 1}/{len(self._theme_options)})"
         )
         theme_summary = current_theme["description"] or "No pack description is available."
         if current_theme["campaign_name"]:

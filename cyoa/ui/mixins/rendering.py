@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Any, cast
 from uuid import uuid4
@@ -29,6 +30,27 @@ def _detect_scene_art(narrative: str) -> str | None:
         if any(kw in lower for kw in keywords):
             return SCENE_ART.get(scene_key)
     return None
+
+
+def _safe_focused_widget(app: Any) -> object | None:
+    try:
+        return getattr(app, "focused", None)
+    except Exception:
+        return None
+
+
+def _is_other_attached_choice_button(
+    focused: object | None,
+    *,
+    target: Button,
+    buttons: list[Button],
+) -> bool:
+    return (
+        isinstance(focused, Button)
+        and focused is not target
+        and focused in buttons
+        and focused.is_attached
+    )
 
 
 class RenderingMixin:
@@ -321,13 +343,33 @@ class RenderingMixin:
         target = buttons[0]
 
         def apply_focus() -> None:
-            if target.is_attached and target.visible and target.display and not target.disabled:
-                target.focus()
+            if _is_other_attached_choice_button(
+                _safe_focused_widget(app), target=target, buttons=buttons
+            ):
+                return
+            if not target.disabled:
+                try:
+                    target.focus()
+                except Exception:
+                    return
+
+        def retry_focus(remaining_attempts: int) -> None:
+            apply_focus()
+            focused = _safe_focused_widget(app)
+            if focused is target or _is_other_attached_choice_button(
+                focused, target=target, buttons=buttons
+            ):
+                return
+            if remaining_attempts <= 0 or not hasattr(app, "set_timer"):
+                return
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            app.set_timer(0.03, lambda: retry_focus(remaining_attempts - 1))
 
         apply_focus()
-        app.call_after_refresh(apply_focus)
-        if hasattr(app, "set_timer"):
-            app.set_timer(0.01, apply_focus)
+        app.call_after_refresh(lambda: retry_focus(5))
 
     async def _trigger_choice(self, choice_idx: int, selected_button_id: str | None = None) -> None:
         """Handle choice selection and delegate to the engine."""
