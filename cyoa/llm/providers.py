@@ -11,11 +11,13 @@ from typing import Any, cast
 
 from cyoa.core.observability import LLMObservedSession
 
-llama_cpp: Any | None
+llama_cpp: Any | None = None
 try:
-    import llama_cpp
+    import llama_cpp as _llama_cpp
 except ImportError:  # pragma: no cover - covered via constructor behavior
-    llama_cpp = None
+    pass
+else:
+    llama_cpp = _llama_cpp
 
 Llama: Any | None = getattr(llama_cpp, "Llama", None) if llama_cpp is not None else None
 
@@ -33,7 +35,9 @@ def _fallback_token_estimate(text: str) -> int:
     return len(text) // 4
 
 
-def count_messages_tokens(messages: list[dict[str, str]], token_counter: Callable[[str], int]) -> int:
+def count_messages_tokens(
+    messages: list[dict[str, str]], token_counter: Callable[[str], int]
+) -> int:
     """Helper to count tokens in a list of chat messages using a counter function.
 
     Summing tokens from role and content is a good approximation for most models.
@@ -229,7 +233,9 @@ class LlamaCppProvider(LLMProvider):
         temperature: float,
         cancel_event: threading.Event,
     ) -> Iterator[Any]:
-        params = self._prepare_stream_params(messages, schema, max_tokens, temperature, cancel_event)
+        params = self._prepare_stream_params(
+            messages, schema, max_tokens, temperature, cancel_event
+        )
         try:
             return cast(Iterator[Any], self.llm.create_chat_completion(**cast(Any, params)))
         except RuntimeError as exc:
@@ -247,7 +253,9 @@ class LlamaCppProvider(LLMProvider):
                 temperature,
                 cancel_event,
             )
-            return cast(Iterator[Any], self.llm.create_chat_completion(**cast(Any, fallback_params)))
+            return cast(
+                Iterator[Any], self.llm.create_chat_completion(**cast(Any, fallback_params))
+            )
 
     def _start_generation_session(self) -> LLMObservedSession:
         return LLMObservedSession(model_name=self.model_path, task="generation").start()
@@ -309,7 +317,9 @@ class LlamaCppProvider(LLMProvider):
 
     def _extract_stream_token(self, chunk: Any) -> str:
         if not isinstance(chunk, dict):
-            logger.warning("Ignoring unexpected llama.cpp stream chunk type: %s", type(chunk).__name__)
+            logger.warning(
+                "Ignoring unexpected llama.cpp stream chunk type: %s", type(chunk).__name__
+            )
             return ""
         try:
             delta = chunk["choices"][0].get("delta", {})
@@ -479,6 +489,7 @@ class LlamaCppProvider(LLMProvider):
 
     async def load_state(self, state: Any) -> None:
         """Load a previously saved KV-cache state."""
+
         def _run() -> None:
             with self._lock:
                 self.llm.load_state(state)
@@ -509,6 +520,7 @@ class LlamaCppProvider(LLMProvider):
             if acquired:
                 self._lock.release()
 
+
 class MockProvider(LLMProvider):
     """A lightweight mock provider that returns canned responses.
     Useful for testing and development when the heavy model files are missing.
@@ -532,7 +544,9 @@ class MockProvider(LLMProvider):
         session = LLMObservedSession(model_name=self.model_name, task="generate_text").start()
         # Simple summary fallback
         if "summar" in str(messages[-1].get("content", "")).lower():
-            content = "The journey continues through the digital mists, where reality is but a memory."
+            content = (
+                "The journey continues through the digital mists, where reality is but a memory."
+            )
         else:
             content = "This is a mock narrative generated because the real model is unavailable. You are in a safe, simulated environment."
 
