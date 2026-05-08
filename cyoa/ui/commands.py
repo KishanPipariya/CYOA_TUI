@@ -203,8 +203,16 @@ class ExportStoryCommand:
         markdown_path, accessible_path, json_path = owner._write_export_files(
             payload, owner._resolve_save_title(host) or "adventure"
         )
+        vault_path = (
+            f"{json_path.removesuffix('.timeline.json')}_vault"
+            if json_path.endswith(".timeline.json")
+            else "the Obsidian vault folder"
+        )
         app.notify(
-            (f"Exported story to {markdown_path}, {accessible_path}, and {json_path}"),
+            (
+                f"Exported story to {markdown_path}, {accessible_path}, "
+                f"{json_path}, and {vault_path}"
+            ),
             severity="information",
             timeout=4,
         )

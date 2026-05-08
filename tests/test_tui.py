@@ -30,6 +30,7 @@ from cyoa.ui.components import (
     LoadGameScreen,
     LoreCodexScreen,
     NotificationHistoryScreen,
+    ReplayScreen,
     RunArchiveScreen,
     SaveListItem,
     SceneRecapScreen,
@@ -2555,9 +2556,11 @@ async def test_export_story_writes_markdown_accessible_text_and_timeline_json(
         markdown_files = list((tmp_path / "exports").glob("*.md"))
         accessible_files = list((tmp_path / "exports").glob("*.accessible.txt"))
         json_files = list((tmp_path / "exports").glob("*.timeline.json"))
+        vault_dirs = list((tmp_path / "exports").glob("*_vault"))
         assert len(markdown_files) == 1
         assert len(accessible_files) == 1
         assert len(json_files) == 1
+        assert len(vault_dirs) == 1
         assert "## Story" in markdown_files[0].read_text(encoding="utf-8")
         accessible_text = accessible_files[0].read_text(encoding="utf-8")
         assert "Transcript:" in accessible_text
@@ -2566,6 +2569,38 @@ async def test_export_story_writes_markdown_accessible_text_and_timeline_json(
         timeline = json.loads(json_files[0].read_text(encoding="utf-8"))
         assert timeline["turn_count"] == 2
         assert timeline["story_segments"]
+        assert timeline["obsidian_vault"] == str(vault_dirs[0])
+        assert "[[Turn 01]]" in (vault_dirs[0] / "Index.md").read_text(encoding="utf-8")
+        turn_note = (vault_dirs[0] / "Turn 01.md").read_text(encoding="utf-8")
+        assert "You awaken in a test dungeon." in turn_note
+        assert "Go North" in turn_note
+
+
+@pytest.mark.asyncio
+async def test_replay_screen_steps_through_current_recording(mock_app_dependencies):
+    app = CYOAApp(model_path="dummy_path.gguf")
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        await pilot.press("1")
+        await _wait_for_pilot(pilot, lambda: app.turn_count == 2, timeout=5.0)
+
+        app.action_show_replay()
+        await _wait_for_pilot(pilot, lambda: isinstance(app.screen, ReplayScreen))
+        await _wait_for_pilot(
+            pilot,
+            lambda: (
+                isinstance(app.screen, ReplayScreen)
+                and bool(list(app.screen.query("#replay-text")))
+                and "test dungeon" in app.screen.query_one("#replay-text", Markdown)._markdown
+            ),
+        )
+        assert isinstance(app.screen, ReplayScreen)
+        replay_text = app.screen.query_one("#replay-text", Markdown)._markdown
+        assert "You awaken in a test dungeon." in replay_text
+
+        await pilot.press("n")
+        replay_text = app.screen.query_one("#replay-text", Markdown)._markdown
+        assert "Choice: Go North" in replay_text
 
 
 @pytest.mark.asyncio

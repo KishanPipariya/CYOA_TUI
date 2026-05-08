@@ -401,6 +401,54 @@ def _choice_export_text(text: str) -> str:
     return cleaned
 
 
+def build_replay_steps(payload: dict[str, object]) -> list[dict[str, object]]:
+    """Build linear replay steps from a saved story payload."""
+    ui_state = payload.get("ui_state")
+    if not isinstance(ui_state, dict):
+        return []
+
+    story_segments = ui_state.get("story_segments")
+    if not isinstance(story_segments, list):
+        return []
+
+    steps: list[dict[str, object]] = []
+    turn_number = 0
+    for segment in story_segments:
+        if not isinstance(segment, dict):
+            continue
+        kind = segment.get("kind")
+        raw_text = segment.get("text")
+        if kind not in {"story_turn", "player_choice", "branch_marker"}:
+            continue
+        if not isinstance(raw_text, str) or not raw_text.strip():
+            continue
+
+        text = _clean_export_text(raw_text)
+        if kind == "story_turn":
+            turn_number += 1
+            title = f"Turn {turn_number}"
+            label = "Scene"
+        elif kind == "player_choice":
+            title = f"Choice after Turn {max(turn_number, 1)}"
+            label = "Choice"
+            text = f"Choice: {_choice_export_text(text)}"
+        else:
+            title = f"Branch Marker {len(steps) + 1}"
+            label = "Branch"
+
+        steps.append(
+            {
+                "title": title,
+                "label": label,
+                "text": text,
+                "turn": turn_number,
+                "index": len(steps) + 1,
+            }
+        )
+
+    return steps
+
+
 def _build_accessible_progress_lines(
     *,
     inventory: list[str],

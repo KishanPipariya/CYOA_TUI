@@ -82,6 +82,7 @@ __all__ = [
     "EndingsDiscoveredScreen",
     "HiddenAchievementsScreen",
     "RunArchiveScreen",
+    "ReplayScreen",
     "SceneRecapScreen",
     "AccessibleSummaryScreen",
     "SceneListItem",
@@ -2464,6 +2465,117 @@ class RunArchiveScreen(ModalScreen[None]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-run-archive-close":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class ReplayScreen(ModalScreen[None]):
+    """Modal screen for stepping through a recorded playthrough."""
+
+    DEFAULT_CSS = """
+    ReplayScreen {
+        align: center middle;
+        background: $background 80%;
+    }
+    #replay-dialog {
+        width: 78;
+        height: 80%;
+        max-width: 96%;
+    }
+    #replay-status {
+        margin-bottom: 1;
+    }
+    #replay-text {
+        height: 1fr;
+    }
+    #replay-buttons {
+        width: 1fr;
+        margin-top: 1;
+    }
+    #replay-buttons Button {
+        width: 1fr;
+    }
+    """
+
+    BINDINGS = [
+        ("escape", "close", "Close"),
+        ("left", "previous_step", "Previous"),
+        ("right", "next_step", "Next"),
+        ("p", "previous_step", "Previous"),
+        ("n", "next_step", "Next"),
+        ("home", "first_step", "First"),
+        ("end", "last_step", "Last"),
+    ]
+
+    def __init__(self, steps: list[dict[str, object]], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._steps = steps or [
+            {
+                "title": "Replay",
+                "label": "Empty",
+                "text": "No recorded story turns are available yet.",
+                "index": 1,
+            }
+        ]
+        self._index = 0
+
+    def compose(self) -> ComposeResult:
+        with DialogFrame(
+            id="replay-dialog", classes="dialog-frame dialog-frame-scroll dialog-frame-accent"
+        ):
+            yield Label("[b]Replay[/b]", id="replay-title", classes="dialog-title")
+            yield Static("", id="replay-status", classes="dialog-entry")
+            with Container(id="replay-content", classes="dialog-content"):
+                yield Markdown("", id="replay-text")
+            with DialogActions(id="replay-buttons", classes="dialog-actions"):
+                yield Button("Previous", id="btn-replay-previous")
+                yield Button("Next", id="btn-replay-next", variant="primary")
+                yield Button("Close [b](Esc)[/b]", id="btn-replay-close", variant="error")
+
+    def on_mount(self) -> None:
+        self.call_after_refresh(self._render_step)
+        self.call_after_refresh(lambda: self.query_one("#btn-replay-next", Button).focus())
+
+    def _render_step(self) -> None:
+        step = self._steps[self._index]
+        title = str(step.get("title") or "Replay Step")
+        label = str(step.get("label") or "Step")
+        text = str(step.get("text") or "")
+        self.query_one("#replay-status", Static).update(
+            f"{label} {self._index + 1} of {len(self._steps)}: {title}"
+        )
+        self.query_one("#replay-text", Markdown).update(f"## {title}\n\n{text}")
+        self.query_one("#btn-replay-previous", Button).disabled = self._index <= 0
+        self.query_one("#btn-replay-next", Button).disabled = self._index >= len(self._steps) - 1
+
+    def action_previous_step(self) -> None:
+        if self._index <= 0:
+            return
+        self._index -= 1
+        self._render_step()
+
+    def action_next_step(self) -> None:
+        if self._index >= len(self._steps) - 1:
+            return
+        self._index += 1
+        self._render_step()
+
+    def action_first_step(self) -> None:
+        self._index = 0
+        self._render_step()
+
+    def action_last_step(self) -> None:
+        self._index = len(self._steps) - 1
+        self._render_step()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-replay-previous":
+            self.action_previous_step()
+        elif event.button.id == "btn-replay-next":
+            self.action_next_step()
+        elif event.button.id == "btn-replay-close":
             self.dismiss(None)
 
     def action_close(self) -> None:

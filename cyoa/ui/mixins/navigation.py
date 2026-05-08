@@ -20,6 +20,7 @@ from cyoa.ui.components import (
     JournalListItem,
     LoreCodexScreen,
     NotificationHistoryScreen,
+    ReplayScreen,
     RunArchiveScreen,
     SceneRecapScreen,
 )
@@ -33,6 +34,7 @@ from cyoa.ui.presenters import (
     build_endings_discovered_summary,
     build_hidden_achievements_summary,
     build_journal_summary,
+    build_replay_steps,
     build_run_archive_summary,
     build_story_map_summary,
     format_branch_restore_text,
@@ -315,6 +317,21 @@ class NavigationMixin:
         cast(Any, app)._push_modal_screen(
             RunArchiveScreen(build_run_archive_summary(persistence._load_run_archive()))
         )
+
+    def action_show_replay(self) -> None:
+        """Show replay controls for the current recorded playthrough."""
+        app = as_textual_app(self)
+        host = as_mixin_host(self)
+        if host.engine is None or host.engine.state.current_node is None:
+            cast(Any, app)._push_modal_screen(ReplayScreen([]))
+            return
+
+        payload = cast(Any, self)._build_save_payload(
+            host,
+            app,
+            include_restore_points=False,
+        )
+        cast(Any, app)._push_modal_screen(ReplayScreen(build_replay_steps(payload)))
 
     def action_show_journal_summary(self) -> None:
         """Show a linear summary of journal entries for text-first review."""

@@ -797,12 +797,127 @@ class PersistenceMixin:
         markdown = self._render_markdown_export(payload)
         accessible_text = self._render_accessible_export(payload)
         timeline_payload = self._build_timeline_export(payload)
+        vault_path = self._write_obsidian_vault(payload, safe_title)
+        timeline_payload["obsidian_vault"] = vault_path
         with open_private_text_file(markdown_path, "w") as f:
             f.write(markdown)
         with open_private_text_file(accessible_path, "w") as f:
             f.write(accessible_text)
         self._write_json_payload(json_path, timeline_payload)
         return markdown_path, accessible_path, json_path
+
+    @staticmethod
+    def _obsidian_safe_name(value: str) -> str:
+        """Return a conservative Markdown filename stem for vault exports."""
+        safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in value).strip()
+        return safe or "Untitled"
+
+    def _write_obsidian_vault(self, payload: dict[str, object], safe_title: str) -> str:
+        """Write an Obsidian-style Markdown vault with one note per scene."""
+        vault_dir = os.path.join(self._exports_dir(), f"{safe_title}_vault")
+        os.makedirs(vault_dir, exist_ok=True)
+
+        ui_state = self._coerce_ui_state(payload.get("ui_state"))
+        story_segments = self._coerce_story_segments(ui_state.get("story_segments"))
+        story_title = str(payload.get("story_title") or "Untitled Adventure")
+        records: list[dict[str, object]] = []
+        current_turn = 0
+
+        for segment in story_segments:
+            kind = segment["kind"]
+            text = segment["text"].strip()
+            if not text:
+                continue
+            if kind == "story_turn":
+                current_turn += 1
+                records.append(
+                    {
+                        "kind": "turn",
+                        "turn": current_turn,
+                        "title": f"Turn {current_turn:02d}",
+                        "text": text,
+                        "choices": [],
+                    }
+                )
+                continue
+            if kind == "player_choice" and records:
+                choices = records[-1].setdefault("choices", [])
+                if isinstance(choices, list):
+                    choices.append(text)
+                continue
+            records.append(
+                {
+                    "kind": "branch",
+                    "turn": current_turn,
+                    "title": f"Branch Marker {len(records) + 1:02d}",
+                    "text": text,
+                    "choices": [],
+                }
+            )
+
+        note_names = [self._obsidian_safe_name(str(record["title"])) for record in records]
+        index_lines = [
+            f"# {story_title}",
+            "",
+            "## Playthrough",
+        ]
+        if not records:
+            index_lines.append("- No recorded story turns are available.")
+        else:
+            index_lines.extend(f"- [[{name}]]" for name in note_names)
+
+        state_lines = self._obsidian_state_lines(payload)
+        if state_lines:
+            index_lines.extend(["", "## Final State", *state_lines])
+
+        with open_private_text_file(os.path.join(vault_dir, "Index.md"), "w") as handle:
+            handle.write("\n".join(index_lines).strip() + "\n")
+
+        for index, record in enumerate(records):
+            note_name = note_names[index]
+            previous_link = f"[[{note_names[index - 1]}]]" if index > 0 else ""
+            next_link = f"[[{note_names[index + 1]}]]" if index < len(note_names) - 1 else ""
+            lines = [
+                "---",
+                f"story: {story_title}",
+                f"turn: {record.get('turn') or 0}",
+                f"kind: {record.get('kind')}",
+                "---",
+                "",
+                f"# {record['title']}",
+                "",
+                str(record["text"]),
+            ]
+            choices = record.get("choices")
+            if isinstance(choices, list) and choices:
+                lines.extend(["", "## Choice"])
+                lines.extend(f"- {choice}" for choice in choices if isinstance(choice, str))
+            nav_links = [link for link in (previous_link, "[[Index]]", next_link) if link]
+            lines.extend(["", "## Links", " | ".join(nav_links)])
+            with open_private_text_file(os.path.join(vault_dir, f"{note_name}.md"), "w") as handle:
+                handle.write("\n".join(lines).strip() + "\n")
+
+        return vault_dir
+
+    @staticmethod
+    def _obsidian_state_lines(payload: dict[str, object]) -> list[str]:
+        """Build compact final-state bullets for the vault index note."""
+        lines: list[str] = []
+        turn_count = payload.get("turn_count")
+        if isinstance(turn_count, int):
+            lines.append(f"- Turns: {turn_count}")
+        inventory = payload.get("inventory")
+        if isinstance(inventory, list):
+            carried = ", ".join(str(item) for item in inventory if isinstance(item, str))
+            lines.append(f"- Inventory: {carried or 'Empty'}")
+        player_stats = payload.get("player_stats")
+        if isinstance(player_stats, dict) and player_stats:
+            stats = ", ".join(f"{key}: {value}" for key, value in sorted(player_stats.items()))
+            lines.append(f"- Stats: {stats}")
+        flags = payload.get("story_flags")
+        if isinstance(flags, list) and flags:
+            lines.append("- Flags: " + ", ".join(str(flag) for flag in flags))
+        return lines
 
     def _render_markdown_export(self, payload: dict[str, object]) -> str:
         """Render a readable Markdown export from a save payload."""

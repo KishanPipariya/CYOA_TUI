@@ -208,6 +208,14 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Panels And Help",
     ),
     AppBindingSpec(
+        "show_replay",
+        "shift+p",
+        "show_replay",
+        "Replay",
+        "Open replay mode",
+        "Panels And Help",
+    ),
+    AppBindingSpec(
         "show_journal_summary",
         "[",
         "show_journal_summary",

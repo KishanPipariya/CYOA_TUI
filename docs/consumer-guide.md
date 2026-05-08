@@ -121,9 +121,9 @@ Dark mode and typewriter changes apply immediately. Provider, runtime profile, m
 - `o` opens Settings, where you can change provider, theme, keybindings, verbosity, and accessibility options.
 - `j` and `m` toggle the journal and story map side panels.
 - `i` opens the inventory inspector, `shift+r` opens the scene recap, `c` opens the character sheet, and `z` opens the lore codex.
-- `[` opens the journal summary and `]` opens the story-map summary in a text-first review format.
+- `shift+p` opens replay mode, while `[` opens the journal summary and `]` opens the story-map summary in a text-first review format.
 - `n` repeats the latest status update and `shift+n` opens notification history.
-- `s` saves, `l` loads, and `e` exports the current run as markdown, accessible markdown, and JSON.
+- `s` saves, `l` loads, and `e` exports the current run as markdown, accessible text, JSON, and an Obsidian-style scene vault.
 - `u` and `y` undo or redo the latest turn change.
 - `b` branches from a past scene, `k` creates a bookmark, and `p` restores a bookmark.
 - `g` cycles the active generation preset and `x` edits comma-separated directives for the current run.
