@@ -17,5 +17,5 @@ bash scripts/run_smoke.sh
 echo "pre-push: running Ruff across the repository"
 uv run ruff check .
 
-echo "pre-push: running mypy on cyoa"
-uv run mypy cyoa
+echo "pre-push: running mypy across the repository"
+uv run mypy .
