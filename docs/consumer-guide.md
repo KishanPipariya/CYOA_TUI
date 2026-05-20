@@ -30,6 +30,10 @@ If you downloaded a packaged release archive:
 3. Run `chmod +x cyoa-tui` if needed.
 4. Run `./cyoa-tui`
 
+### Windows
+
+Packaged Windows binaries are not published for v0.1.0. Use the source workflow below from PowerShell, Windows Terminal, or WSL with Python 3.13 or newer.
+
 ### Run from source
 
 If you are running directly from the repository:

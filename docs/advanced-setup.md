@@ -82,7 +82,7 @@ uv run python scripts/build_binary.py
 
 Artifacts are emitted under `dist/pyinstaller/cyoa-tui/`.
 
-## Validation And Quality Gates
+## Validation and Quality Gates
 
 ```bash
 uv run python scripts/validate_themes.py
@@ -98,4 +98,4 @@ uv run mypy cyoa
 
 - [CodeWiki](../CODEWIKI.md)
 - [Architecture Flow](../workflow.md)
-- [Loading Art](../loading_art.md)
+- [Loading Art](../cyoa/resources/loading_art.md)

@@ -21,6 +21,7 @@ def test_build_pyinstaller_command_includes_required_assets() -> None:
     ]
     assert "textual" in command
     assert str(project_root / "main.py") == command[-1]
-    assert any("themes" in part for part in command)
+    assert any("cyoa/themes" in part for part in command)
+    assert any("cyoa/resources" in part for part in command)
     assert any("cyoa/llm/templates" in part for part in command)
     assert any("cyoa/ui/styles.tcss" in part for part in command)

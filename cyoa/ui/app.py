@@ -1538,7 +1538,7 @@ class CYOAApp(
             )
         except ModelDownloadCancelled:
             if self.is_runtime_active():
-                screen.mark_failed("Download cancelled before the model finished saving.")
+                screen.mark_failed("Download canceled before the model finished saving.")
             self._model_download_cancel_event = None
             return
         except ModelDownloadError as exc:

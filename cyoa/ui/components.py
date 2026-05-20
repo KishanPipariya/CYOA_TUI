@@ -954,7 +954,7 @@ class FirstRunSetupScreen(ButtonGroupScreen):
             id="first-run-dialog", classes="dialog-frame dialog-frame-accent dialog-frame-scroll"
         ):
             yield Static("FIRST RUN SETUP", id="first-run-kicker")
-            yield Label("[b]Choose How To Start[/b]", id="first-run-title", classes="dialog-title")
+            yield Label("[b]Choose How to Start[/b]", id="first-run-title", classes="dialog-title")
             yield Static(
                 "Pick a runtime path before the adventure begins. This choice is saved for later launches.",
                 id="first-run-message",
@@ -1196,7 +1196,7 @@ class ModelDownloadScreen(ButtonGroupScreen):
             classes="dialog-frame dialog-frame-accent dialog-frame-scroll",
         ):
             yield Static("LOCAL MODEL SETUP", id="model-download-kicker")
-            yield Label("[b]Download A Recommended Model[/b]", classes="dialog-title")
+            yield Label("[b]Download a Recommended Model[/b]", classes="dialog-title")
             yield Static(
                 (
                     f"Recommended for this machine: {self._recommendation.label} "
@@ -1267,7 +1267,7 @@ class ModelDownloadScreen(ButtonGroupScreen):
         self.query_one("#model-download-detail", Label).update(progress.detail)
 
     def mark_cancelling(self) -> None:
-        self.query_one("#model-download-stage", Label).update("Cancelling")
+        self.query_one("#model-download-stage", Label).update("Canceling")
         self.query_one("#model-download-detail", Label).update(
             "Stopping after the current transfer step finishes."
         )

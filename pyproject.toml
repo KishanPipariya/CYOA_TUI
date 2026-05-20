@@ -8,6 +8,21 @@ version = "0.1.0"
 description = "Terminal-first AI choose-your-own-adventure fiction with Textual and local LLM support."
 readme = "README.md"
 requires-python = ">=3.13"
+authors = [{ name = "Kishan Pipariya" }]
+license = "MIT"
+keywords = ["interactive-fiction", "tui", "textual", "local-llm", "choose-your-own-adventure"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Framework :: Pydantic",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Games/Entertainment",
+    "Topic :: Terminals",
+]
 scripts = { cyoa-tui = "cyoa.cli:main" }
 dependencies = [
     "jinja2>=3.1.6",
@@ -50,6 +65,11 @@ all = [
     "opentelemetry-sdk>=1.40.0",
     "opentelemetry-semantic-conventions>=0.61b0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/KishanPipariya/CYOA_TUI"
+Repository = "https://github.com/KishanPipariya/CYOA_TUI"
+Issues = "https://github.com/KishanPipariya/CYOA_TUI/issues"
 
 [dependency-groups]
 dev = [
@@ -134,3 +154,8 @@ py-modules = ["main"]
 
 [tool.setuptools.packages.find]
 include = ["cyoa*"]
+
+[tool.setuptools.package-data]
+cyoa = ["resources/*.md", "themes/*.toml", "themes/*.json"]
+"cyoa.llm" = ["templates/*.j2"]
+"cyoa.ui" = ["*.tcss"]

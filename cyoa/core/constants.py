@@ -4,10 +4,10 @@ Centralised constants and configuration for the CYOA TUI project.
 
 import os
 import sys
+from importlib import resources
 from pathlib import Path
 
 APP_NAME = "cyoa-tui"
-_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _platform_home() -> Path:
@@ -119,10 +119,11 @@ SCENE_KEYWORDS: dict[str, list[str]] = {
 
 # --- UI & Rendering ---
 
-# Load the ASCII art for the initial screen
+# Load the ASCII art for the initial screen.
 try:
-    with (_REPO_ROOT / "loading_art.md").open(encoding="utf-8") as f:
-        LOADING_ART = f.read()
+    LOADING_ART = (
+        resources.files("cyoa").joinpath("resources/loading_art.md").read_text(encoding="utf-8")
+    )
 except FileNotFoundError:
     LOADING_ART = "# Welcome to the Adventure\n\n*Loading the AI model... Please wait.*"
 

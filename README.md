@@ -17,6 +17,8 @@ uv sync
 uv run cyoa-tui
 ```
 
+Source installs require Python 3.13 or newer.
+
 If you want local GGUF support from source, install the optional extra first:
 
 ```bash
@@ -46,7 +48,7 @@ On first launch, choose one of these options:
 - `Quick Demo` for instant play with the built-in mock backend
 - `Download Local Model` to save a recommended GGUF into the app data folder
 
-If you already have a packaged release build, unpack it and run `./cyoa-tui` from a terminal.
+If you already have a packaged release build, unpack it and run `./cyoa-tui` from a terminal. The v0.1.0 packaged builds target macOS and Linux; Windows users should run from source for this release.
 
 ## What you get
 
@@ -79,7 +81,7 @@ Contributor and infrastructure details live in [Advanced Setup](docs/advanced-se
 
 - [CODEWIKI.md](CODEWIKI.md)
 - [workflow.md](workflow.md)
-- [loading_art.md](loading_art.md)
+- [loading_art.md](cyoa/resources/loading_art.md)
 
 ## License
 

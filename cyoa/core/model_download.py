@@ -119,13 +119,14 @@ def download_recommended_model(
     cancel_event: threading.Event | None = None,
 ) -> DownloadResult:
     """Download the recommended GGUF into the durable user models directory."""
+
     def publish(percent: int, stage: str, detail: str) -> None:
         if progress_callback is not None:
             progress_callback(DownloadProgress(percent=percent, stage=stage, detail=detail))
 
     def check_cancel() -> None:
         if cancel_event is not None and cancel_event.is_set():
-            raise ModelDownloadCancelled("Model download cancelled.")
+            raise ModelDownloadCancelled("Model download canceled.")
 
     publish(5, "Inspecting system", "Checking available memory and recommending a local model.")
     check_cancel()
@@ -148,7 +149,11 @@ def download_recommended_model(
         raise ModelDownloadError(f"Unable to prepare the model directory: {exc}.") from exc
 
     check_cancel()
-    publish(35, "Connecting to Hugging Face", f"Fetching {recommendation.label} from {recommendation.repo_id}.")
+    publish(
+        35,
+        "Connecting to Hugging Face",
+        f"Fetching {recommendation.label} from {recommendation.repo_id}.",
+    )
 
     try:
         from huggingface_hub import hf_hub_download
@@ -165,7 +170,7 @@ def download_recommended_model(
             local_dir_use_symlinks=False,
         )
     except KeyboardInterrupt as exc:
-        raise ModelDownloadCancelled("Model download cancelled.") from exc
+        raise ModelDownloadCancelled("Model download canceled.") from exc
     except Exception as exc:
         raise ModelDownloadError(
             "Download failed. Check your network connection, free disk space, and Hugging Face access, then try again."

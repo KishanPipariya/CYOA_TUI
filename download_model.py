@@ -22,7 +22,9 @@ def main() -> int:
 
     try:
         result = download_recommended_model(
-            progress_callback=lambda progress: logger.info("%s: %s", progress.stage, progress.detail)
+            progress_callback=lambda progress: logger.info(
+                "%s: %s", progress.stage, progress.detail
+            )
         )
         update_user_config(
             provider="llama_cpp",
@@ -41,7 +43,7 @@ def main() -> int:
         return 0
 
     except ModelDownloadCancelled:
-        logger.warning("Download cancelled.")
+        logger.warning("Download canceled.")
         return 1
     except ModelDownloadError as exc:
         logger.error("Download Error: %s", exc)

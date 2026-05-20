@@ -141,6 +141,7 @@ celerybeat.pid
 # Environments
 .env
 .envrc
+.config.json
 .venv
 env/
 venv/
@@ -216,6 +217,10 @@ __marimo__/
 # Models
 *.gguf
 models/
+
+saves/
+story.md
+log.txt
 
 tasks.md
 BACKLOG.md

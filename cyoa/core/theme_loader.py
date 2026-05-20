@@ -11,7 +11,7 @@ from cyoa.core.models import CampaignPack
 
 logger = logging.getLogger(__name__)
 
-THEMES_DIR = Path(__file__).parent.parent.parent / "themes"
+THEMES_DIR = Path(__file__).resolve().parents[1] / "themes"
 
 _themes_cached_config: dict[str, Any] | None = None
 _MIN_MUTED_SURFACE_CONTRAST = 1.05
