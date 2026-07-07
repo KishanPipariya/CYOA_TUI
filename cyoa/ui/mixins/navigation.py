@@ -659,7 +659,7 @@ class NavigationMixin:
         frac_md = Markdown(fracture_label, classes="player-choice")
         container.mount(frac_md, before="#scene-art")
 
-        new_turn = Markdown("", classes="story-turn")
+        new_turn = Markdown("", classes="story-turn pending-turn")
         container.mount(new_turn, before="#scene-art")
         host._current_turn_widget = new_turn
         host._current_turn_text = ""

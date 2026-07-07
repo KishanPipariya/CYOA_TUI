@@ -718,6 +718,123 @@ async def test_choice_selection_via_keyboard(mock_app_dependencies):
 
 
 @pytest.mark.asyncio
+async def test_final_narrative_sync_keeps_earlier_story_text_without_separator(
+    mock_app_dependencies,
+):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        app.action_skip_typewriter()
+
+        earlier_story = "Earlier story text that should remain visible."
+        final_narrative = "The current scene resolves."
+        app._current_story = f"{earlier_story}\n\n{final_narrative}"
+        app._current_turn_text = final_narrative
+        app._story_segments = [
+            {"kind": "story_turn", "text": earlier_story},
+            {"kind": "story_turn", "text": final_narrative},
+        ]
+        story_container = app.query_one("#story-container", VerticalScroll)
+        app._current_turn_widget.update(earlier_story)
+        current_turn_widget = Markdown(final_narrative, classes="story-turn")
+        story_container.mount(current_turn_widget, before="#scene-art")
+        app._current_turn_widget = current_turn_widget
+
+        node = StoryNode(
+            narrative=final_narrative,
+            choices=[Choice(text="Continue"), Choice(text="Wait")],
+        )
+        app.display_node(node)
+
+        assert earlier_story in app._current_story
+        assert final_narrative in app._current_story
+
+        story_turns = list(story_container.query(".story-turn"))
+        assert len(story_turns) >= 2
+        assert app._story_segments[-2:] == [
+            {"kind": "story_turn", "text": earlier_story},
+            {"kind": "story_turn", "text": final_narrative},
+        ]
+
+
+@pytest.mark.asyncio
+async def test_choices_do_not_mount_against_blank_typewriter_story(
+    mock_app_dependencies,
+):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test() as pilot:
+        await pilot.pause(1.0)
+        app.action_skip_typewriter()
+
+        narrative = "A full scene arrives without streaming."
+        app.typewriter_enabled = True
+        app.reduced_motion = False
+        app._loading_suffix_shown = True
+        app._current_story = ""
+        app._current_turn_text = ""
+        app._reset_story_segments("")
+        app._current_turn_widget.update("")
+        app.query_one("#choices-container", Container).remove_children()
+
+        app.display_node(
+            StoryNode(
+                narrative=narrative,
+                choices=[Choice(text="Continue"), Choice(text="Wait")],
+            )
+        )
+
+        buttons = list(app.query_one("#choices-container", Container).query(Button))
+        story_turns = list(app.query_one("#story-container", VerticalScroll).query(".story-turn"))
+
+        assert buttons
+        assert app._current_turn_text == narrative
+        assert app._current_story == narrative
+        assert app._story_segments[-1] == {"kind": "story_turn", "text": narrative}
+        assert story_turns[-1].region.height >= 3
+
+
+@pytest.mark.asyncio
+async def test_pending_story_turn_is_hidden_until_narrative_arrives(
+    mock_app_dependencies,
+):
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(72, 24)) as pilot:
+        await pilot.pause(1.0)
+        app.action_skip_typewriter()
+
+        assert app.engine is not None
+        release_choice = asyncio.Event()
+
+        async def slow_choice(_choice_text: str) -> None:
+            await release_choice.wait()
+
+        app.engine.make_choice = AsyncMock(side_effect=slow_choice)
+        choices_container = app.query_one("#choices-container", Container)
+        first_choice = list(choices_container.query(Button))[0]
+
+        choice_task = asyncio.create_task(
+            app._trigger_choice(0, selected_button_id=first_choice.id)
+        )
+        await _wait_for_pilot(
+            pilot,
+            lambda: list(app.query_one("#story-container", VerticalScroll).query(".story-turn"))[
+                -1
+            ].has_class("pending-turn"),
+        )
+
+        story_turns = list(app.query_one("#story-container", VerticalScroll).query(".story-turn"))
+        assert story_turns[-1].has_class("pending-turn")
+        assert story_turns[-1].region.height == 0
+        assert app._current_turn_text == ""
+
+        release_choice.set()
+        await asyncio.wait_for(choice_task, timeout=1.0)
+
+
+@pytest.mark.asyncio
 async def test_choice_selection_via_click(mock_app_dependencies):
     """Test clicking a choice button triggers the next step as expected."""
     app = CYOAApp(model_path="dummy_path.gguf")
@@ -1781,6 +1898,7 @@ async def test_main_game_layout_fits_standard_terminal(mock_app_dependencies) ->
         ):
             _assert_region_within_screen(widget, app.size)
 
+        assert story_container.region.bottom <= action_panel.region.y
         assert status_bar.region.x >= action_panel.region.x
         assert status_bar.region.right <= action_panel.region.right
         assert status_bar.region.y >= action_panel.region.y
@@ -1842,10 +1960,39 @@ async def test_main_game_layout_fits_compact_terminal(mock_app_dependencies) -> 
 
         buttons = list(choices_container.query(Button))
         assert buttons
+        assert story_container.region.height >= 6
         _assert_region_within_screen(buttons[0], app.size)
 
         for story_widget in story_container.query(".story-turn"):
             _assert_horizontal_region_within_parent(story_widget, story_container)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", [(72, 24), (72, 20)])
+async def test_compact_choices_keep_story_panel_open_on_short_terminal(
+    size: tuple[int, int],
+    mock_app_dependencies,
+) -> None:
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause(1.0)
+        app.action_skip_typewriter()
+
+        story_container = app.query_one("#story-container", VerticalScroll)
+        choices_container = app.query_one("#choices-container", Container)
+        buttons = list(choices_container.query(Button))
+        story_turns = list(story_container.query(".story-turn"))
+
+        assert app.compact_layout is True
+        assert buttons
+        assert story_turns
+        assert not choices_container.has_class("loading-state")
+        _assert_region_within_screen(choices_container, app.size)
+        assert story_container.region.height >= 6
+        assert story_turns[-1].region.height >= 3
+        assert choices_container.region.y > story_container.region.y
+        assert story_container.region.bottom <= choices_container.region.y
 
 
 @pytest.mark.asyncio
@@ -1945,6 +2092,10 @@ async def test_narrow_terminal_rescue_mode_uses_single_column_panel_drawers(
 
         assert not journal_panel.has_class("panel-collapsed")
         assert map_panel.has_class("panel-collapsed")
+        story_container = app.query_one("#story-container", VerticalScroll)
+        action_panel = app.query_one("#action-panel", Container)
+        assert story_container.region.bottom <= action_panel.region.y
+        assert action_panel.region.bottom <= journal_panel.region.y
         _assert_region_within_screen(journal_panel, app.size)
         assert journal_panel.region.x <= main_container.region.x + 1
         assert journal_panel.region.right >= main_container.region.right - 1
@@ -1954,6 +2105,10 @@ async def test_narrow_terminal_rescue_mode_uses_single_column_panel_drawers(
 
         assert journal_panel.has_class("panel-collapsed")
         assert not map_panel.has_class("panel-collapsed")
+        story_container = app.query_one("#story-container", VerticalScroll)
+        action_panel = app.query_one("#action-panel", Container)
+        assert story_container.region.bottom <= action_panel.region.y
+        assert action_panel.region.bottom <= map_panel.region.y
         _assert_region_within_screen(map_panel, app.size)
         assert map_panel.region.x <= main_container.region.x + 1
         assert map_panel.region.right >= main_container.region.right - 1

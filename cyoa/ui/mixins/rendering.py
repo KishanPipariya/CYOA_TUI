@@ -83,6 +83,7 @@ class RenderingMixin:
             host._typewriter_queue.put_nowait(partial)
             return
 
+        current_turn_widget.remove_class("pending-turn")
         if not host.typewriter_enabled or host.reduced_motion:
             host._current_story += partial
             host._current_turn_text += partial
@@ -166,6 +167,7 @@ class RenderingMixin:
 
         # 4. Update the widget
         try:
+            host._current_turn_widget.remove_class("pending-turn")
             host._current_turn_widget.update(host._current_turn_text)
         except Exception as e:
             logger.debug("Failed to update current turn widget: %s", e)
@@ -216,22 +218,20 @@ class RenderingMixin:
                 host._current_turn_text = ""
                 host._reset_story_segments("")
 
-            if not host.typewriter_enabled:
-                host._current_story += narrative
-                host._current_turn_text += narrative
-                host._update_current_story_segment(host._current_turn_text)
-            else:
-                host._typewriter_queue.put_nowait(narrative)
+            host._current_story += narrative
+            host._current_turn_text += narrative
+            host._update_current_story_segment(host._current_turn_text)
         else:
             # Streaming happened. Sync to the finalized narrative.
             host.action_skip_typewriter()
 
-            last_sep = host._current_story.rfind("\n\n---\n\n")
-            if last_sep != -1:
-                prefix = host._current_story[: last_sep + len("\n\n---\n\n")]
-                host._current_story = prefix + narrative
-            else:
-                host._current_story = narrative
+            if host._current_turn_text != narrative:
+                last_sep = host._current_story.rfind("\n\n---\n\n")
+                if last_sep != -1:
+                    prefix = host._current_story[: last_sep + len("\n\n---\n\n")]
+                    host._current_story = prefix + narrative
+                else:
+                    host._current_story = narrative
 
             host._current_turn_text = narrative
             host._update_current_story_segment(host._current_turn_text)
@@ -413,7 +413,7 @@ class RenderingMixin:
         choice_md = Markdown(choice_message, classes="player-choice")
         container.mount(choice_md, before="#scene-art")
 
-        new_turn = Markdown("", classes="story-turn")
+        new_turn = Markdown("", classes="story-turn pending-turn")
         container.mount(new_turn, before="#scene-art")
         host._current_turn_widget = new_turn
         host._current_turn_text = ""

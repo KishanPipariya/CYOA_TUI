@@ -281,13 +281,15 @@ Toast.-error {
 }
 
 #action-panel {
-    height: auto;
+    height: 75%;
+    min-height: 16;
+    max-height: 28;
     border-top: solid $secondary 35%;
     margin: 1 0 0 0;
     padding: 1 1 0 1;
     background: $panel 80%;
     layout: vertical;
-    overflow: hidden;
+    overflow-y: auto;
 }
 
 #action-dock {
@@ -326,7 +328,7 @@ Toast.-error {
 
 .compact-layout #journal-panel, .compact-layout #story-map-panel {
     width: 1fr;
-    height: 10;
+    height: 7;
     min-height: 7;
     padding: 0 1 1 1;
     border-left: none;
@@ -457,12 +459,17 @@ Toast.-error {
 }
 
 .story-turn {
+    min-height: 3;
     background: $panel 88%;
     color: $text;
     padding: 1 2;
     margin: 0 0 1 0;
     border-left: solid $accent 45%;
     border-right: solid $secondary 12%;
+}
+
+.story-turn.pending-turn {
+    display: none;
 }
 
 .player-choice {
@@ -681,7 +688,7 @@ Button {
 
 #choices-container Button {
     margin-bottom: 1;
-    min-height: 4;
+    min-height: 3;
     padding: 0;
     background: $panel 92%;
     color: $text;
@@ -946,11 +953,12 @@ Footer > .footer--highlight {
 }
 
 .compact-layout #story-container {
-    min-height: 6;
+    min-height: 3;
     padding: 1 0 0 0;
 }
 
 .compact-layout .story-turn {
+    min-height: 3;
     padding: 1 1;
 }
 
@@ -965,8 +973,9 @@ Footer > .footer--highlight {
 }
 
 .compact-layout #action-panel {
-    height: 14;
-    min-height: 12;
+    height: 50%;
+    min-height: 6;
+    max-height: 14;
     margin-top: 0;
     padding-left: 0;
     padding-right: 0;
@@ -1003,12 +1012,24 @@ Footer > .footer--highlight {
 }
 
 .compact-layout #status-bar {
-    height: auto;
+    height: 3;
     width: 100%;
-    min-height: 4;
-    max-height: 6;
+    min-height: 3;
+    max-height: 3;
     padding-right: 0;
-    overflow-y: auto;
+    overflow: hidden;
+}
+
+.compact-layout StatusDisplay {
+    padding: 0 1;
+}
+
+.compact-layout #status-meta-row,
+.compact-layout #inventory-label,
+.compact-layout #objectives-label,
+.compact-layout #directives-label,
+.compact-layout #latest-status-label {
+    display: none;
 }
 
 .compact-layout #choices-container {
@@ -1021,7 +1042,8 @@ Footer > .footer--highlight {
 
 .compact-layout.text-scale-large #action-panel,
 .compact-layout.text-scale-xlarge #action-panel {
-    height: 16;
+    height: 45%;
+    max-height: 16;
 }
 
 /* ── Reading Preferences ───────────────────────────────────── */
