@@ -1849,6 +1849,73 @@ async def test_main_game_layout_fits_compact_terminal(mock_app_dependencies) -> 
 
 
 @pytest.mark.asyncio
+async def test_multiline_choices_do_not_overlap_in_compact_layout(
+    mock_app_dependencies, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def long_choice_generator(*args, **kwargs):
+        mock_gen = MagicMock()
+        node = StoryNode(
+            narrative="The corridor narrows.",
+            choices=[
+                Choice(
+                    text=(
+                        "Study the carved warning, compare it with the map, "
+                        "and mark the safest passage before moving on"
+                    )
+                ),
+                Choice(
+                    text="Force the sealed bronze door before the patrol returns",
+                    requirements=ChoiceRequirement(
+                        items=["Bronze key with an inscription that identifies the inner lock"],
+                    ),
+                ),
+                Choice(
+                    text=(
+                        "Signal the lookout, extinguish the lantern, and wait for the shift change"
+                    )
+                ),
+            ],
+            title="Compact Layout Check",
+        )
+        mock_gen.generate_next_node_async = AsyncMock(return_value=node)
+        mock_gen.update_story_summaries_async = AsyncMock()
+        mock_gen.save_state_async = AsyncMock(return_value=b"state")
+        mock_gen.load_state_async = AsyncMock()
+        mock_gen.token_budget = 2048
+        mock_gen.provider = MagicMock()
+        mock_gen.provider.count_tokens = MagicMock(return_value=10)
+        return mock_gen
+
+    monkeypatch.setattr("cyoa.ui.app.ModelBroker", long_choice_generator)
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(100, 34)) as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+        choices_container = app.query_one("#choices-container", Container)
+        await _wait_for_pilot(
+            pilot,
+            lambda: (
+                len(list(choices_container.query(Button))) == 3
+                and all(button.region.height > 0 for button in choices_container.query(Button))
+            ),
+        )
+
+        buttons = list(choices_container.query(Button))
+        assert len(buttons) == 3
+
+        for button in buttons:
+            _assert_horizontal_region_within_parent(button, choices_container)
+            explicit_label_lines = str(button.label).count("\n") + 1
+            assert button.region.height >= explicit_label_lines + 2
+
+        for previous, current in zip(buttons, buttons[1:], strict=False):
+            assert current.region.y >= previous.region.bottom
+
+
+@pytest.mark.asyncio
 async def test_narrow_terminal_rescue_mode_uses_single_column_panel_drawers(
     mock_app_dependencies,
 ) -> None:
