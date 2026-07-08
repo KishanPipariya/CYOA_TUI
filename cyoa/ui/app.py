@@ -54,7 +54,6 @@ from cyoa.core.user_config import (
     UserConfigSaveError,
     accessibility_preset_overrides,
     build_safety_profile_report,
-    infer_accessibility_preset,
     infer_startup_accessibility_recommendation,
     infer_terminal_accessibility_fallback,
     input_timing_profile_details,
@@ -99,6 +98,17 @@ from cyoa.ui.presenters import (
     build_world_state_summary,
     format_status_message,
     loading_story_text,
+)
+from cyoa.ui.settings_controller import (
+    SettingsRuntimeState,
+    build_settings_screen_state,
+    build_story_pack_options,
+    clear_settings_runtime_env,
+    resolve_backend_test_request,
+    resolve_option_setting,
+    resolve_provider_setting,
+    resolve_settings_payload,
+    set_diagnostics_env,
 )
 from cyoa.ui.settings_types import (
     SettingsAction,
@@ -1752,12 +1762,6 @@ class CYOAApp(
         *,
         feedback_message: str = "",
     ) -> None:
-        config = self._user_config
-        draft = draft_settings or {}
-
-        def pick(key: str, fallback: Any) -> Any:
-            return draft.get(key, fallback)
-
         def on_saved(payload: SettingsResult | None) -> None:
             if not payload:
                 return
@@ -1770,83 +1774,60 @@ class CYOAApp(
             except UserConfigSaveError as exc:
                 self._show_settings_screen(payload, feedback_message=str(exc))
 
-        available_story_packs: list[dict[str, Any]] = []
-        for theme_name in list_themes():
-            loaded_theme = load_theme(theme_name)
-            campaign = (
-                loaded_theme.get("campaign")
-                if isinstance(loaded_theme.get("campaign"), dict)
-                else None
-            )
-            available_story_packs.append(
-                {
-                    "id": theme_name,
-                    "name": str(loaded_theme.get("name") or theme_name),
-                    "description": str(loaded_theme.get("description") or "").strip(),
-                    "campaign_name": (
-                        str(campaign.get("name")).strip()
-                        if isinstance(campaign, dict) and campaign.get("name")
-                        else ""
-                    ),
-                    "campaign_description": (
-                        str(campaign.get("description")).strip()
-                        if isinstance(campaign, dict) and campaign.get("description")
-                        else ""
-                    ),
-                }
-            )
+        screen_state = build_settings_screen_state(
+            self._user_config,
+            SettingsRuntimeState(
+                dark=bool(self.dark),
+                high_contrast=bool(self.high_contrast_mode),
+                reduced_motion=bool(self.reduced_motion),
+                screen_reader_mode=bool(self.screen_reader_mode),
+                cognitive_load_reduction_mode=bool(self.cognitive_load_reduction_mode),
+                text_scale=str(self.text_scale),
+                line_width=str(self.line_width),
+                line_spacing=str(self.line_spacing),
+                notification_verbosity=str(self.notification_verbosity),
+                scene_recap_verbosity=str(self.scene_recap_verbosity),
+                runtime_metadata_verbosity=str(self.runtime_metadata_verbosity),
+                locked_choice_verbosity=str(self.locked_choice_verbosity),
+                typewriter=bool(self.typewriter_enabled),
+                typewriter_speed=str(self.typewriter_speed),
+                runtime_provider=self._runtime_diagnostics.get("provider"),
+                terminal_accessibility_fallback=self._terminal_accessibility_fallback,
+            ),
+            draft_settings,
+            available_themes=build_story_pack_options(
+                list_theme_names=list_themes,
+                load_theme_data=load_theme,
+            ),
+            feedback_message=feedback_message,
+        )
 
         self._push_modal_screen(
             SettingsScreen(
-                provider=pick("provider", config.provider),
-                model_path=pick("model_path", config.model_path),
-                theme=pick("theme", config.theme),
-                dark=bool(pick("dark", self.dark)),
-                high_contrast=bool(pick("high_contrast", self.high_contrast_mode)),
-                reduced_motion=bool(pick("reduced_motion", self.reduced_motion)),
-                screen_reader_mode=bool(pick("screen_reader_mode", self.screen_reader_mode)),
-                cognitive_load_reduction_mode=bool(
-                    pick(
-                        "cognitive_load_reduction_mode",
-                        self.cognitive_load_reduction_mode,
-                    )
-                ),
-                text_scale=str(pick("text_scale", self.text_scale)),
-                line_width=str(pick("line_width", self.line_width)),
-                line_spacing=str(pick("line_spacing", self.line_spacing)),
-                notification_verbosity=str(
-                    pick("notification_verbosity", self.notification_verbosity)
-                ),
-                scene_recap_verbosity=str(
-                    pick("scene_recap_verbosity", self.scene_recap_verbosity)
-                ),
-                runtime_metadata_verbosity=str(
-                    pick("runtime_metadata_verbosity", self.runtime_metadata_verbosity)
-                ),
-                locked_choice_verbosity=str(
-                    pick("locked_choice_verbosity", self.locked_choice_verbosity)
-                ),
-                input_timing_profile=str(
-                    pick(
-                        "input_timing_profile",
-                        getattr(config, "input_timing_profile", "default"),
-                    )
-                ),
-                confirm_high_impact_actions=bool(
-                    pick(
-                        "confirm_high_impact_actions",
-                        getattr(config, "confirm_high_impact_actions", False),
-                    )
-                ),
-                keybindings=cast(
-                    dict[str, str], pick("keybindings", getattr(config, "keybindings", {}))
-                ),
-                typewriter=bool(pick("typewriter", self.typewriter_enabled)),
-                typewriter_speed=str(pick("typewriter_speed", self.typewriter_speed)),
-                diagnostics_enabled=bool(pick("diagnostics_enabled", config.diagnostics_enabled)),
-                available_themes=available_story_packs,
-                terminal_accessibility_fallback=self._terminal_accessibility_fallback,
-                initial_feedback=feedback_message,
+                provider=screen_state.provider,
+                model_path=screen_state.model_path,
+                theme=screen_state.theme,
+                dark=screen_state.dark,
+                high_contrast=screen_state.high_contrast,
+                reduced_motion=screen_state.reduced_motion,
+                screen_reader_mode=screen_state.screen_reader_mode,
+                cognitive_load_reduction_mode=screen_state.cognitive_load_reduction_mode,
+                text_scale=screen_state.text_scale,
+                line_width=screen_state.line_width,
+                line_spacing=screen_state.line_spacing,
+                notification_verbosity=screen_state.notification_verbosity,
+                scene_recap_verbosity=screen_state.scene_recap_verbosity,
+                runtime_metadata_verbosity=screen_state.runtime_metadata_verbosity,
+                locked_choice_verbosity=screen_state.locked_choice_verbosity,
+                input_timing_profile=screen_state.input_timing_profile,
+                confirm_high_impact_actions=screen_state.confirm_high_impact_actions,
+                keybindings=screen_state.keybindings,
+                typewriter=screen_state.typewriter,
+                typewriter_speed=screen_state.typewriter_speed,
+                diagnostics_enabled=screen_state.diagnostics_enabled,
+                available_themes=screen_state.available_themes,
+                terminal_accessibility_fallback=screen_state.terminal_accessibility_fallback,
+                initial_feedback=screen_state.initial_feedback,
             ),
             on_saved,
         )
@@ -1889,8 +1870,7 @@ class CYOAApp(
 
     @staticmethod
     def _resolve_provider_setting(payload: Mapping[str, Any]) -> str:
-        provider = str(payload.get("provider") or "mock").strip().lower()
-        return provider if provider in {"mock", "llama_cpp"} else "mock"
+        return resolve_provider_setting(payload)
 
     @staticmethod
     def _resolve_option_setting(
@@ -1899,183 +1879,60 @@ class CYOAApp(
         current_value: str,
         allowed: tuple[str, ...],
     ) -> str:
-        candidate = str(payload.get(key) or current_value).strip()
-        return candidate if candidate in allowed else current_value
+        return resolve_option_setting(payload, key, current_value, allowed)
 
     @staticmethod
     def _set_diagnostics_env(enabled: bool) -> None:
-        if enabled:
-            os.environ["CYOA_ENABLE_RAG"] = "1"
-            return
-        os.environ.pop("CYOA_ENABLE_RAG", None)
+        set_diagnostics_env(enabled)
 
     def _apply_settings(self, payload: SettingsPayload | Mapping[str, Any]) -> None:
         """Persist settings and apply the runtime-safe subset immediately."""
         previous_config = self._user_config
-        provider = self._resolve_provider_setting(payload)
-        keybinding_overrides = resolve_keybinding_overrides(
-            payload.get("keybindings", getattr(self._user_config, "keybindings", {}))
-        )
-
-        raw_model_path = payload.get("model_path")
-        model_path = (
-            raw_model_path.strip()
-            if isinstance(raw_model_path, str) and raw_model_path.strip()
-            else None
-        )
-        theme_name = (
-            str(payload.get("theme") or self._user_config.theme).strip() or self._user_config.theme
-        )
-        dark = bool(payload.get("dark", self._user_config.dark))
-        high_contrast = bool(
-            payload.get("high_contrast", getattr(self._user_config, "high_contrast", False))
-        )
-        reduced_motion = bool(
-            payload.get("reduced_motion", getattr(self._user_config, "reduced_motion", False))
-        )
-        screen_reader_mode = bool(
-            payload.get(
-                "screen_reader_mode", getattr(self._user_config, "screen_reader_mode", False)
-            )
-        )
-        cognitive_load_reduction_mode = bool(
-            payload.get(
-                "cognitive_load_reduction_mode",
-                getattr(self._user_config, "cognitive_load_reduction_mode", False),
-            )
-        )
-        text_scale = self._resolve_option_setting(
+        resolved = resolve_settings_payload(
             payload,
-            "text_scale",
-            getattr(self._user_config, "text_scale", "standard"),
-            constants.TEXT_SCALE_OPTIONS,
-        )
-        line_width = self._resolve_option_setting(
-            payload,
-            "line_width",
-            getattr(self._user_config, "line_width", "standard"),
-            constants.READING_WIDTH_OPTIONS,
-        )
-        line_spacing = self._resolve_option_setting(
-            payload,
-            "line_spacing",
-            getattr(self._user_config, "line_spacing", "standard"),
-            constants.LINE_SPACING_OPTIONS,
-        )
-        notification_verbosity = self._resolve_option_setting(
-            payload,
-            "notification_verbosity",
-            getattr(self._user_config, "notification_verbosity", "standard"),
-            constants.VERBOSITY_OPTIONS,
-        )
-        scene_recap_verbosity = self._resolve_option_setting(
-            payload,
-            "scene_recap_verbosity",
-            getattr(self._user_config, "scene_recap_verbosity", "standard"),
-            constants.VERBOSITY_OPTIONS,
-        )
-        runtime_metadata_verbosity = self._resolve_option_setting(
-            payload,
-            "runtime_metadata_verbosity",
-            getattr(self._user_config, "runtime_metadata_verbosity", "standard"),
-            constants.VERBOSITY_OPTIONS,
-        )
-        locked_choice_verbosity = self._resolve_option_setting(
-            payload,
-            "locked_choice_verbosity",
-            getattr(self._user_config, "locked_choice_verbosity", "standard"),
-            constants.VERBOSITY_OPTIONS,
-        )
-        input_timing_profile = self._resolve_option_setting(
-            payload,
-            "input_timing_profile",
-            getattr(self._user_config, "input_timing_profile", "default"),
-            constants.INPUT_TIMING_PROFILE_OPTIONS,
-        )
-        confirm_high_impact_actions = bool(
-            payload.get(
-                "confirm_high_impact_actions",
-                getattr(self._user_config, "confirm_high_impact_actions", False),
-            )
-        )
-        typewriter = bool(payload.get("typewriter", self._user_config.typewriter))
-        typewriter_speed = self._resolve_option_setting(
-            payload,
-            "typewriter_speed",
-            self._user_config.typewriter_speed,
-            tuple(constants.TYPEWRITER_SPEEDS),
-        )
-        diagnostics_enabled = bool(
-            payload.get("diagnostics_enabled", self._user_config.diagnostics_enabled)
-        )
-        accessibility_preset = infer_accessibility_preset(
-            high_contrast=high_contrast,
-            reduced_motion=reduced_motion,
-            screen_reader_mode=screen_reader_mode,
+            previous_config,
+            runtime_provider=self._runtime_diagnostics.get("provider"),
         )
 
         self._user_config = update_user_config(
             raise_on_error=True,
-            provider=provider,
-            model_path=model_path,
-            theme=theme_name,
-            dark=dark,
-            high_contrast=high_contrast,
-            reduced_motion=reduced_motion,
-            screen_reader_mode=screen_reader_mode,
-            cognitive_load_reduction_mode=cognitive_load_reduction_mode,
-            text_scale=text_scale,
-            line_width=line_width,
-            line_spacing=line_spacing,
-            notification_verbosity=notification_verbosity,
-            scene_recap_verbosity=scene_recap_verbosity,
-            runtime_metadata_verbosity=runtime_metadata_verbosity,
-            locked_choice_verbosity=locked_choice_verbosity,
-            input_timing_profile=input_timing_profile,
-            confirm_high_impact_actions=confirm_high_impact_actions,
-            keybindings=keybinding_overrides,
-            typewriter=typewriter,
-            typewriter_speed=typewriter_speed,
-            diagnostics_enabled=diagnostics_enabled,
-            accessibility_preset=accessibility_preset,
+            **resolved.user_config_changes,
         )
 
-        self._set_diagnostics_env(diagnostics_enabled)
+        self._set_diagnostics_env(bool(resolved.user_config_changes["diagnostics_enabled"]))
 
-        self.dark = dark
-        self._pending_accessibility_preset = accessibility_preset
+        self.dark = bool(resolved.user_config_changes["dark"])
+        self._pending_accessibility_preset = resolved.accessibility_preset
         self._apply_live_accessibility_settings(
-            high_contrast=high_contrast,
-            reduced_motion=reduced_motion,
-            screen_reader_mode=screen_reader_mode,
+            high_contrast=bool(resolved.user_config_changes["high_contrast"]),
+            reduced_motion=bool(resolved.user_config_changes["reduced_motion"]),
+            screen_reader_mode=bool(resolved.user_config_changes["screen_reader_mode"]),
         )
-        self.cognitive_load_reduction_mode = cognitive_load_reduction_mode
-        self.text_scale = text_scale
-        self.line_width = line_width
-        self.line_spacing = line_spacing
-        self.notification_verbosity = notification_verbosity
-        self.scene_recap_verbosity = scene_recap_verbosity
-        self.runtime_metadata_verbosity = runtime_metadata_verbosity
-        self.locked_choice_verbosity = locked_choice_verbosity
+        self.cognitive_load_reduction_mode = bool(
+            resolved.user_config_changes["cognitive_load_reduction_mode"]
+        )
+        self.text_scale = str(resolved.user_config_changes["text_scale"])
+        self.line_width = str(resolved.user_config_changes["line_width"])
+        self.line_spacing = str(resolved.user_config_changes["line_spacing"])
+        self.notification_verbosity = str(resolved.user_config_changes["notification_verbosity"])
+        self.scene_recap_verbosity = str(resolved.user_config_changes["scene_recap_verbosity"])
+        self.runtime_metadata_verbosity = str(
+            resolved.user_config_changes["runtime_metadata_verbosity"]
+        )
+        self.locked_choice_verbosity = str(resolved.user_config_changes["locked_choice_verbosity"])
         self._timed_input_history.clear()
-        self.typewriter_enabled = typewriter
-        self.typewriter_speed = typewriter_speed
-        self._keybinding_overrides = keybinding_overrides
+        self.typewriter_enabled = bool(resolved.user_config_changes["typewriter"])
+        self.typewriter_speed = str(resolved.user_config_changes["typewriter_speed"])
+        self._keybinding_overrides = resolved.keybinding_overrides
         self.set_keymap(self._keybinding_overrides)
         if not self.typewriter_enabled and not (self.reduced_motion or self.screen_reader_mode):
             self.action_skip_typewriter()
 
-        pending_changes: list[str] = []
-        if theme_name != previous_config.theme:
-            pending_changes.append("theme")
-        if provider != self._runtime_diagnostics.get("provider"):
-            pending_changes.append("provider")
-        if provider == "llama_cpp" and model_path != previous_config.model_path:
-            pending_changes.append("model path")
-
         message = "Settings saved."
-        if pending_changes:
-            message = f"Settings saved. Restart to apply: {', '.join(pending_changes)}."
+        if resolved.pending_restart_changes:
+            message = (
+                f"Settings saved. Restart to apply: {', '.join(resolved.pending_restart_changes)}."
+            )
         self.notify(message, severity="information", timeout=4)
 
     def _reset_settings_to_safe_defaults(self) -> None:
@@ -2084,8 +1941,7 @@ class CYOAApp(
             getattr(self._user_config, "keybindings", {})
         )
         self.set_keymap(self._keybinding_overrides)
-        os.environ.pop("CYOA_ENABLE_RAG", None)
-        os.environ.pop("LLM_MODEL_PATH", None)
+        clear_settings_runtime_env()
 
         self.dark = self._user_config.dark
         self._pending_accessibility_preset = getattr(
@@ -2306,13 +2162,8 @@ class CYOAApp(
         self,
         draft_settings: SettingsDraft | Mapping[str, Any] | None = None,
     ) -> None:
-        config = self._user_config
-        draft = draft_settings or {}
-        provider = (
-            self._resolve_provider_setting(draft_settings)
-            if draft_settings is not None
-            else (config.provider or "mock").strip().lower()
-        )
+        request = resolve_backend_test_request(self._user_config, draft_settings)
+        provider = request.provider
 
         if provider == "mock":
             self.notify("Quick Demo backend is ready.", severity="information", timeout=4)
@@ -2326,12 +2177,7 @@ class CYOAApp(
             )
             return
 
-        raw_model_path = draft.get("model_path", config.model_path)
-        model_path = (
-            raw_model_path.strip()
-            if isinstance(raw_model_path, str) and raw_model_path.strip()
-            else None
-        )
+        model_path = request.model_path
         if not model_path:
             self.notify(
                 "Local Model is selected, but no GGUF path is saved.",

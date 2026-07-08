@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,15 @@ __all__ = [
 
 class SettingsScreen(ModalScreen[SettingsResult | None]):
     """Modal settings screen for persisted consumer-facing preferences."""
+
+    _DISMISS_BUTTON_IDS = {
+        "btn-settings-save",
+        "btn-settings-cancel",
+        "btn-settings-test-backend",
+        "btn-settings-capture-snapshot",
+        "btn-settings-reveal-saves",
+        "btn-settings-reset",
+    }
 
     DEFAULT_CSS = """
     SettingsScreen {
@@ -723,101 +733,133 @@ class SettingsScreen(ModalScreen[SettingsResult | None]):
         }
         return payload
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:  # noqa: C901
+    def _dismiss_test_backend_action(self) -> None:
+        payload = self._build_settings_payload(
+            validate_keybindings(self._collect_keybinding_values()).overrides,
+            require_model_path=False,
+        )
+        if payload is None:
+            return
+        action_payload: SettingsActionPayload = {
+            "action": "test_backend",
+            "draft_settings": payload,
+        }
+        self.dismiss(action_payload)
+
+    def _dismiss_cancel_action(self) -> None:
+        self.dismiss(None)
+
+    def _dismiss_capture_snapshot_action(self) -> None:
+        self.dismiss({"action": "capture_accessibility_snapshot"})
+
+    def _dismiss_reveal_saves_action(self) -> None:
+        self.dismiss({"action": "reveal_saves"})
+
+    def _dismiss_reset_settings_action(self) -> None:
+        self.dismiss({"action": "reset_settings"})
+
+    def _button_handlers(self) -> dict[str, Callable[[], None]]:
+        return {
+            "btn-settings-save": self._dismiss_with_value,
+            "btn-settings-cancel": self._dismiss_cancel_action,
+            "btn-settings-test-backend": self._dismiss_test_backend_action,
+            "btn-settings-capture-snapshot": self._dismiss_capture_snapshot_action,
+            "btn-settings-reveal-saves": self._dismiss_reveal_saves_action,
+            "btn-settings-reset": self._dismiss_reset_settings_action,
+            "btn-settings-provider-mock": lambda: setattr(self, "_provider", "mock"),
+            "btn-settings-provider-llama": lambda: setattr(self, "_provider", "llama_cpp"),
+            "btn-settings-theme-prev": self._select_previous_theme,
+            "btn-settings-theme-next": self._select_next_theme,
+            "btn-settings-dark-on": lambda: setattr(self, "_dark", True),
+            "btn-settings-dark-off": lambda: setattr(self, "_dark", False),
+            "btn-settings-contrast-standard": lambda: setattr(self, "_high_contrast", False),
+            "btn-settings-contrast-high": lambda: setattr(self, "_high_contrast", True),
+            "btn-settings-motion-standard": lambda: setattr(self, "_reduced_motion", False),
+            "btn-settings-motion-reduced": lambda: setattr(self, "_reduced_motion", True),
+            "btn-settings-screen-reader-on": lambda: setattr(self, "_screen_reader_mode", True),
+            "btn-settings-screen-reader-off": lambda: setattr(self, "_screen_reader_mode", False),
+            "btn-settings-cognitive-standard": lambda: setattr(
+                self, "_cognitive_load_reduction_mode", False
+            ),
+            "btn-settings-cognitive-reduced": lambda: setattr(
+                self, "_cognitive_load_reduction_mode", True
+            ),
+            "btn-settings-confirm-standard": lambda: setattr(
+                self, "_confirm_high_impact_actions", False
+            ),
+            "btn-settings-confirm-expanded": lambda: setattr(
+                self, "_confirm_high_impact_actions", True
+            ),
+            "btn-settings-typewriter-on": lambda: setattr(self, "_typewriter", True),
+            "btn-settings-typewriter-off": lambda: setattr(self, "_typewriter", False),
+            "btn-settings-diagnostics-on": lambda: setattr(self, "_diagnostics_enabled", True),
+            "btn-settings-diagnostics-off": lambda: setattr(self, "_diagnostics_enabled", False),
+        }
+
+    def _prefix_button_handlers(self) -> tuple[tuple[str, Callable[[str], None]], ...]:
+        return (
+            (
+                "btn-settings-scale-",
+                lambda value: setattr(self, "_text_scale", value),
+            ),
+            (
+                "btn-settings-width-",
+                lambda value: setattr(self, "_line_width", value),
+            ),
+            (
+                "btn-settings-spacing-",
+                lambda value: setattr(self, "_line_spacing", value),
+            ),
+            (
+                "btn-settings-notification-verbosity-",
+                lambda value: setattr(self, "_notification_verbosity", value),
+            ),
+            (
+                "btn-settings-recap-verbosity-",
+                lambda value: setattr(self, "_scene_recap_verbosity", value),
+            ),
+            (
+                "btn-settings-runtime-verbosity-",
+                lambda value: setattr(self, "_runtime_metadata_verbosity", value),
+            ),
+            (
+                "btn-settings-locked-choice-verbosity-",
+                lambda value: setattr(self, "_locked_choice_verbosity", value),
+            ),
+            (
+                "btn-settings-input-timing-",
+                lambda value: setattr(self, "_input_timing_profile", value),
+            ),
+            (
+                "btn-settings-speed-",
+                lambda value: setattr(self, "_typewriter_speed", value),
+            ),
+        )
+
+    def _select_previous_theme(self) -> None:
+        self._theme_index = (self._theme_index - 1) % len(self._theme_options)
+
+    def _select_next_theme(self) -> None:
+        self._theme_index = (self._theme_index + 1) % len(self._theme_options)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id
-        if button_id == "btn-settings-save":
-            self._dismiss_with_value()
+        if button_id is None:
             return
-        if button_id == "btn-settings-cancel":
-            self.dismiss(None)
+        handler = self._button_handlers().get(button_id)
+        if handler is not None:
+            if button_id not in self._DISMISS_BUTTON_IDS:
+                self._set_settings_feedback("")
+            handler()
+            if button_id not in self._DISMISS_BUTTON_IDS:
+                self._refresh_state()
             return
-        if button_id == "btn-settings-test-backend":
-            payload = self._build_settings_payload(
-                validate_keybindings(self._collect_keybinding_values()).overrides,
-                require_model_path=False,
-            )
-            if payload is None:
-                return
-            action_payload: SettingsActionPayload = {
-                "action": "test_backend",
-                "draft_settings": payload,
-            }
-            self.dismiss(action_payload)
-            return
-        if button_id == "btn-settings-capture-snapshot":
-            self.dismiss({"action": "capture_accessibility_snapshot"})
-            return
-        if button_id == "btn-settings-reveal-saves":
-            self.dismiss({"action": "reveal_saves"})
-            return
-        if button_id == "btn-settings-reset":
-            self.dismiss({"action": "reset_settings"})
-            return
+
         self._set_settings_feedback("")
-        if button_id == "btn-settings-provider-mock":
-            self._provider = "mock"
-        elif button_id == "btn-settings-provider-llama":
-            self._provider = "llama_cpp"
-        elif button_id == "btn-settings-theme-prev":
-            self._theme_index = (self._theme_index - 1) % len(self._theme_options)
-        elif button_id == "btn-settings-theme-next":
-            self._theme_index = (self._theme_index + 1) % len(self._theme_options)
-        elif button_id == "btn-settings-dark-on":
-            self._dark = True
-        elif button_id == "btn-settings-dark-off":
-            self._dark = False
-        elif button_id == "btn-settings-contrast-standard":
-            self._high_contrast = False
-        elif button_id == "btn-settings-contrast-high":
-            self._high_contrast = True
-        elif button_id == "btn-settings-motion-standard":
-            self._reduced_motion = False
-        elif button_id == "btn-settings-motion-reduced":
-            self._reduced_motion = True
-        elif button_id == "btn-settings-screen-reader-on":
-            self._screen_reader_mode = True
-        elif button_id == "btn-settings-screen-reader-off":
-            self._screen_reader_mode = False
-        elif button_id == "btn-settings-cognitive-standard":
-            self._cognitive_load_reduction_mode = False
-        elif button_id == "btn-settings-cognitive-reduced":
-            self._cognitive_load_reduction_mode = True
-        elif button_id and button_id.startswith("btn-settings-scale-"):
-            self._text_scale = button_id.removeprefix("btn-settings-scale-")
-        elif button_id and button_id.startswith("btn-settings-width-"):
-            self._line_width = button_id.removeprefix("btn-settings-width-")
-        elif button_id and button_id.startswith("btn-settings-spacing-"):
-            self._line_spacing = button_id.removeprefix("btn-settings-spacing-")
-        elif button_id and button_id.startswith("btn-settings-notification-verbosity-"):
-            self._notification_verbosity = button_id.removeprefix(
-                "btn-settings-notification-verbosity-"
-            )
-        elif button_id and button_id.startswith("btn-settings-recap-verbosity-"):
-            self._scene_recap_verbosity = button_id.removeprefix("btn-settings-recap-verbosity-")
-        elif button_id and button_id.startswith("btn-settings-runtime-verbosity-"):
-            self._runtime_metadata_verbosity = button_id.removeprefix(
-                "btn-settings-runtime-verbosity-"
-            )
-        elif button_id and button_id.startswith("btn-settings-locked-choice-verbosity-"):
-            self._locked_choice_verbosity = button_id.removeprefix(
-                "btn-settings-locked-choice-verbosity-"
-            )
-        elif button_id and button_id.startswith("btn-settings-input-timing-"):
-            self._input_timing_profile = button_id.removeprefix("btn-settings-input-timing-")
-        elif button_id == "btn-settings-confirm-standard":
-            self._confirm_high_impact_actions = False
-        elif button_id == "btn-settings-confirm-expanded":
-            self._confirm_high_impact_actions = True
-        elif button_id == "btn-settings-typewriter-on":
-            self._typewriter = True
-        elif button_id == "btn-settings-typewriter-off":
-            self._typewriter = False
-        elif button_id == "btn-settings-diagnostics-on":
-            self._diagnostics_enabled = True
-        elif button_id == "btn-settings-diagnostics-off":
-            self._diagnostics_enabled = False
-        elif button_id and button_id.startswith("btn-settings-speed-"):
-            self._typewriter_speed = button_id.rsplit("-", 1)[-1]
+        for prefix, prefix_handler in self._prefix_button_handlers():
+            if button_id.startswith(prefix):
+                prefix_handler(button_id.removeprefix(prefix))
+                break
         self._refresh_state()
 
     def on_input_changed(self, event: Input.Changed) -> None:

@@ -79,6 +79,11 @@ from cyoa.ui.presenters import (
     identify_newly_unlocked_hidden_achievements,
     loading_story_text,
 )
+from cyoa.ui.settings_controller import (
+    SettingsRuntimeState,
+    build_settings_screen_state,
+    resolve_settings_payload,
+)
 
 
 class DummyTypewriterHost(TypewriterMixin):
@@ -2241,6 +2246,127 @@ def test_cyoa_app_apply_settings_updates_runtime_and_config(monkeypatch: pytest.
             os.environ.pop("CYOA_ENABLE_RAG", None)
         else:
             os.environ["CYOA_ENABLE_RAG"] = previous_env
+
+
+def test_settings_controller_resolves_payload_and_pending_restart_changes() -> None:
+    config = SimpleNamespace(
+        provider="mock",
+        model_path=None,
+        theme="dark_dungeon",
+        dark=True,
+        high_contrast=False,
+        reduced_motion=False,
+        screen_reader_mode=False,
+        cognitive_load_reduction_mode=False,
+        text_scale="standard",
+        line_width="standard",
+        line_spacing="standard",
+        notification_verbosity="standard",
+        scene_recap_verbosity="standard",
+        runtime_metadata_verbosity="standard",
+        locked_choice_verbosity="standard",
+        input_timing_profile="default",
+        confirm_high_impact_actions=False,
+        keybindings={},
+        typewriter=True,
+        typewriter_speed="normal",
+        diagnostics_enabled=False,
+    )
+
+    resolved = resolve_settings_payload(
+        {
+            "provider": "llama_cpp",
+            "model_path": " /tmp/model.gguf ",
+            "theme": "space_explorer",
+            "text_scale": "invalid",
+            "line_width": "focused",
+            "line_spacing": "relaxed",
+            "notification_verbosity": "minimal",
+            "scene_recap_verbosity": "detailed",
+            "runtime_metadata_verbosity": "minimal",
+            "locked_choice_verbosity": "detailed",
+            "input_timing_profile": "steady",
+            "confirm_high_impact_actions": True,
+            "keybindings": {"show_settings": "f2"},
+            "typewriter": False,
+            "typewriter_speed": "fast",
+            "diagnostics_enabled": True,
+        },
+        config,
+        runtime_provider="mock",
+    )
+
+    assert resolved.user_config_changes["provider"] == "llama_cpp"
+    assert resolved.user_config_changes["model_path"] == "/tmp/model.gguf"
+    assert resolved.user_config_changes["text_scale"] == "standard"
+    assert resolved.user_config_changes["line_width"] == "focused"
+    assert resolved.user_config_changes["input_timing_profile"] == "steady"
+    assert resolved.user_config_changes["confirm_high_impact_actions"] is True
+    assert resolved.keybinding_overrides == {"show_settings": "f2"}
+    assert resolved.pending_restart_changes == ["theme", "provider", "model path"]
+
+
+def test_settings_controller_builds_screen_state_from_draft() -> None:
+    config = SimpleNamespace(
+        provider="mock",
+        model_path=None,
+        theme="dark_dungeon",
+        input_timing_profile="default",
+        confirm_high_impact_actions=False,
+        keybindings={"show_help": "f1"},
+        diagnostics_enabled=False,
+    )
+    runtime = SettingsRuntimeState(
+        dark=True,
+        high_contrast=False,
+        reduced_motion=False,
+        screen_reader_mode=False,
+        cognitive_load_reduction_mode=False,
+        text_scale="standard",
+        line_width="standard",
+        line_spacing="standard",
+        notification_verbosity="standard",
+        scene_recap_verbosity="standard",
+        runtime_metadata_verbosity="standard",
+        locked_choice_verbosity="standard",
+        typewriter=True,
+        typewriter_speed="normal",
+        runtime_provider="mock",
+        terminal_accessibility_fallback=None,
+    )
+
+    state = build_settings_screen_state(
+        config,
+        runtime,
+        {
+            "provider": "llama_cpp",
+            "model_path": "/tmp/model.gguf",
+            "theme": "space_explorer",
+            "high_contrast": True,
+            "keybindings": {"show_settings": "f2"},
+            "diagnostics_enabled": True,
+        },
+        available_themes=[
+            {
+                "id": "space_explorer",
+                "name": "Space Explorer",
+                "description": "",
+                "campaign_name": "",
+                "campaign_description": "",
+            }
+        ],
+        feedback_message="Unable to save settings.",
+    )
+
+    assert state.provider == "llama_cpp"
+    assert state.model_path == "/tmp/model.gguf"
+    assert state.theme == "space_explorer"
+    assert state.dark is True
+    assert state.high_contrast is True
+    assert state.keybindings == {"show_settings": "f2"}
+    assert state.diagnostics_enabled is True
+    assert state.available_themes[0]["id"] == "space_explorer"
+    assert state.initial_feedback == "Unable to save settings."
 
 
 def test_cyoa_app_handle_settings_action_routes_requests() -> None:
