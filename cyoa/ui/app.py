@@ -4,7 +4,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
@@ -100,10 +100,37 @@ from cyoa.ui.presenters import (
     format_status_message,
     loading_story_text,
 )
+from cyoa.ui.settings_types import (
+    SettingsAction,
+    SettingsActionPayload,
+    SettingsDraft,
+    SettingsPayload,
+    SettingsResult,
+)
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CYOAApp"]
+__all__ = [
+    "CYOAApp",
+    "CYOAAppConfig",
+    "SettingsAction",
+    "SettingsDraft",
+    "SettingsPayload",
+]
+
+
+@dataclass(slots=True)
+class CYOAAppConfig:
+    model_path: str
+    starting_prompt: str = constants.DEFAULT_STARTING_PROMPT
+    spinner_frames: list[str] | None = None
+    accent_color: str | None = None
+    ui_theme: dict[str, str] | None = None
+    initial_world_state: dict[str, object] | None = None
+    initial_prompt_config: dict[str, object] | None = None
+    runtime_diagnostics: dict[str, str] | None = None
+    startup_accessibility_overrides: dict[str, bool] | None = None
+    allow_headless_startup_recovery: bool = False
 
 
 @dataclass(slots=True)
@@ -163,7 +190,7 @@ class CYOAApp(
 
     def __init__(
         self,
-        model_path: str,
+        model_path: str | CYOAAppConfig,
         starting_prompt: str = constants.DEFAULT_STARTING_PROMPT,
         spinner_frames: list[str] | None = None,
         accent_color: str | None = None,
@@ -176,16 +203,32 @@ class CYOAApp(
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self.model_path = model_path
-        self.starting_prompt = starting_prompt
-        self.spinner_frames = spinner_frames or ["[-]", "[\\]", "[|]", "[/]"]
-        self._accent_color = accent_color
-        self._ui_theme = ui_theme or {}
-        self._initial_world_state = initial_world_state or {}
-        self._initial_prompt_config = initial_prompt_config or {}
-        self._runtime_diagnostics = runtime_diagnostics or {}
-        self._startup_accessibility_overrides = startup_accessibility_overrides or {}
-        self._allow_headless_startup_recovery = allow_headless_startup_recovery
+        app_config = (
+            model_path
+            if isinstance(model_path, CYOAAppConfig)
+            else CYOAAppConfig(
+                model_path=model_path,
+                starting_prompt=starting_prompt,
+                spinner_frames=spinner_frames,
+                accent_color=accent_color,
+                ui_theme=ui_theme,
+                initial_world_state=initial_world_state,
+                initial_prompt_config=initial_prompt_config,
+                runtime_diagnostics=runtime_diagnostics,
+                startup_accessibility_overrides=startup_accessibility_overrides,
+                allow_headless_startup_recovery=allow_headless_startup_recovery,
+            )
+        )
+        self.model_path = app_config.model_path
+        self.starting_prompt = app_config.starting_prompt
+        self.spinner_frames = app_config.spinner_frames or ["[-]", "[\\]", "[|]", "[/]"]
+        self._accent_color = app_config.accent_color
+        self._ui_theme = app_config.ui_theme or {}
+        self._initial_world_state = app_config.initial_world_state or {}
+        self._initial_prompt_config = app_config.initial_prompt_config or {}
+        self._runtime_diagnostics = app_config.runtime_diagnostics or {}
+        self._startup_accessibility_overrides = app_config.startup_accessibility_overrides or {}
+        self._allow_headless_startup_recovery = app_config.allow_headless_startup_recovery
         self._user_config = load_user_config()
         self._terminal_accessibility_fallback = infer_terminal_accessibility_fallback(
             term=os.getenv("TERM"),
@@ -1705,7 +1748,7 @@ class CYOAApp(
 
     def _show_settings_screen(
         self,
-        draft_settings: dict[str, Any] | None = None,
+        draft_settings: SettingsDraft | Mapping[str, Any] | None = None,
         *,
         feedback_message: str = "",
     ) -> None:
@@ -1715,11 +1758,12 @@ class CYOAApp(
         def pick(key: str, fallback: Any) -> Any:
             return draft.get(key, fallback)
 
-        def on_saved(payload: dict[str, Any] | None) -> None:
+        def on_saved(payload: SettingsResult | None) -> None:
             if not payload:
                 return
             if "action" in payload:
-                self._handle_settings_action(str(payload["action"]), payload)
+                action_payload = cast(SettingsActionPayload, payload)
+                self._handle_settings_action(action_payload["action"], action_payload)
                 return
             try:
                 self._apply_settings(payload)
@@ -1809,13 +1853,15 @@ class CYOAApp(
 
     def _handle_settings_action(
         self,
-        action: str,
-        payload: dict[str, Any] | None = None,
+        action: SettingsAction | str,
+        payload: SettingsActionPayload | Mapping[str, Any] | None = None,
     ) -> None:
         if action == "test_backend":
             draft_settings = payload.get("draft_settings") if payload else None
             self.run_worker(
-                self._run_backend_connection_test(cast(dict[str, Any] | None, draft_settings)),
+                self._run_backend_connection_test(
+                    cast(SettingsDraft | Mapping[str, Any] | None, draft_settings)
+                ),
                 exclusive=False,
                 group="settings",
             )
@@ -1842,13 +1888,13 @@ class CYOAApp(
             self._reset_settings_to_safe_defaults()
 
     @staticmethod
-    def _resolve_provider_setting(payload: dict[str, Any]) -> str:
+    def _resolve_provider_setting(payload: Mapping[str, Any]) -> str:
         provider = str(payload.get("provider") or "mock").strip().lower()
         return provider if provider in {"mock", "llama_cpp"} else "mock"
 
     @staticmethod
     def _resolve_option_setting(
-        payload: dict[str, Any],
+        payload: Mapping[str, Any],
         key: str,
         current_value: str,
         allowed: tuple[str, ...],
@@ -1863,7 +1909,7 @@ class CYOAApp(
             return
         os.environ.pop("CYOA_ENABLE_RAG", None)
 
-    def _apply_settings(self, payload: dict[str, Any]) -> None:
+    def _apply_settings(self, payload: SettingsPayload | Mapping[str, Any]) -> None:
         """Persist settings and apply the runtime-safe subset immediately."""
         previous_config = self._user_config
         provider = self._resolve_provider_setting(payload)
@@ -2258,7 +2304,7 @@ class CYOAApp(
 
     async def _run_backend_connection_test(
         self,
-        draft_settings: dict[str, Any] | None = None,
+        draft_settings: SettingsDraft | Mapping[str, Any] | None = None,
     ) -> None:
         config = self._user_config
         draft = draft_settings or {}

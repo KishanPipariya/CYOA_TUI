@@ -25,7 +25,7 @@ from cyoa.core.user_config import (
     TerminalAccessibilityFallback,
     UserConfigSaveError,
 )
-from cyoa.ui.app import BufferedNotification, CYOAApp
+from cyoa.ui.app import BufferedNotification, CYOAApp, CYOAAppConfig
 from cyoa.ui.components import (
     AccessibleSummaryScreen,
     BranchScreen,
@@ -1993,6 +1993,34 @@ def test_cyoa_app_first_run_selection_updates_runtime_and_config(monkeypatch: py
     assert saved["setup_choice"] == "mock"
     assert saved["runtime_preset"] == "mock-smoke"
     app._sync_runtime_status.assert_called_once_with()
+
+
+def test_cyoa_app_accepts_typed_config_input() -> None:
+    app = CYOAApp(
+        CYOAAppConfig(
+            model_path="/tmp/demo.gguf",
+            starting_prompt="Begin at the locked gate.",
+            spinner_frames=["one", "two"],
+            accent_color="#abcdef",
+            ui_theme={"surface": "#111111"},
+            initial_world_state={"inventory": ["torch"]},
+            initial_prompt_config={"goals": ["escape"]},
+            runtime_diagnostics={"provider": "mock"},
+            startup_accessibility_overrides={"high_contrast": True},
+            allow_headless_startup_recovery=True,
+        )
+    )
+
+    assert app.model_path == "/tmp/demo.gguf"
+    assert app.starting_prompt == "Begin at the locked gate."
+    assert app.spinner_frames == ["one", "two"]
+    assert app._accent_color == "#abcdef"
+    assert app._ui_theme == {"surface": "#111111"}
+    assert app._initial_world_state == {"inventory": ["torch"]}
+    assert app._initial_prompt_config == {"goals": ["escape"]}
+    assert app._runtime_diagnostics == {"provider": "mock"}
+    assert app._startup_accessibility_overrides == {"high_contrast": True}
+    assert app._allow_headless_startup_recovery is True
 
 
 def test_cyoa_app_accepts_startup_accessibility_recommendation(

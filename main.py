@@ -281,7 +281,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from cyoa.core.theme_loader import ThemeValidationError, list_themes, load_theme
     from cyoa.core.user_config import update_user_config
     from cyoa.db.story_logger import StoryLogger
-    from cyoa.ui.app import CYOAApp
+    from cyoa.ui.app import CYOAApp, CYOAAppConfig
 
     # Initialize OpenTelemetry
     setup_observability()
@@ -348,22 +348,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     logger_service = StoryLogger(filepath=STORY_LOG_FILE)
 
     app = CYOAApp(
-        model_path=config.model or "",
-        starting_prompt=starting_prompt,
-        spinner_frames=spinner_frames,
-        accent_color=accent_color,
-        ui_theme=ui_theme,
-        initial_world_state=initial_world_state,
-        initial_prompt_config=initial_prompt_config,
-        runtime_diagnostics={
-            "runtime_preset": config.runtime_preset or "custom",
-            "provider": config.provider,
-            "model": (config.model or "(provider default)")
-            if config.provider != "mock"
-            else "mock",
-            "startup_note": config.startup_note or "",
-        },
-        startup_accessibility_overrides=config.startup_accessibility_overrides,
+        CYOAAppConfig(
+            model_path=config.model or "",
+            starting_prompt=starting_prompt,
+            spinner_frames=spinner_frames,
+            accent_color=accent_color,
+            ui_theme=ui_theme,
+            initial_world_state=initial_world_state,
+            initial_prompt_config=initial_prompt_config,
+            runtime_diagnostics={
+                "runtime_preset": config.runtime_preset or "custom",
+                "provider": config.provider,
+                "model": (config.model or "(provider default)")
+                if config.provider != "mock"
+                else "mock",
+                "startup_note": config.startup_note or "",
+            },
+            startup_accessibility_overrides=config.startup_accessibility_overrides,
+        )
     )
 
     try:

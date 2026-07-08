@@ -481,7 +481,8 @@ def test_main_passes_startup_accessibility_overrides_to_app(
         exit_code = main.main(["--screen-reader", "--high-contrast", "--reduced-motion"])
 
     assert exit_code == 0
-    assert app_cls.call_args.kwargs["startup_accessibility_overrides"] == {
+    app_config = app_cls.call_args.args[0]
+    assert app_config.startup_accessibility_overrides == {
         "screen_reader_mode": True,
         "high_contrast": True,
         "reduced_motion": True,

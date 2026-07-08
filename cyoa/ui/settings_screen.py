@@ -19,13 +19,21 @@ from cyoa.ui.keybindings import (
     iter_binding_sections,
     validate_keybindings,
 )
+from cyoa.ui.settings_types import (
+    SettingsActionPayload,
+    SettingsPayload,
+    SettingsResult,
+)
 
 __all__ = [
     "SettingsScreen",
+    "SettingsActionPayload",
+    "SettingsPayload",
+    "SettingsResult",
 ]
 
 
-class SettingsScreen(ModalScreen[dict[str, Any]]):
+class SettingsScreen(ModalScreen[SettingsResult | None]):
     """Modal settings screen for persisted consumer-facing preferences."""
 
     DEFAULT_CSS = """
@@ -684,13 +692,13 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
         keybinding_overrides: dict[str, str],
         *,
         require_model_path: bool,
-    ) -> dict[str, Any] | None:
+    ) -> SettingsPayload | None:
         self._set_settings_feedback("")
         model_path = self._resolve_model_path(require_model_path=require_model_path)
         if self._provider == "llama_cpp" and require_model_path and model_path is None:
             self.query_one("#settings-model-path", Input).focus()
             return None
-        return {
+        payload: SettingsPayload = {
             "provider": self._provider,
             "model_path": model_path,
             "theme": self._current_theme,
@@ -713,6 +721,7 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             "typewriter_speed": self._typewriter_speed,
             "diagnostics_enabled": self._diagnostics_enabled,
         }
+        return payload
 
     def on_button_pressed(self, event: Button.Pressed) -> None:  # noqa: C901
         button_id = event.button.id
@@ -729,7 +738,11 @@ class SettingsScreen(ModalScreen[dict[str, Any]]):
             )
             if payload is None:
                 return
-            self.dismiss({"action": "test_backend", "draft_settings": payload})
+            action_payload: SettingsActionPayload = {
+                "action": "test_backend",
+                "draft_settings": payload,
+            }
+            self.dismiss(action_payload)
             return
         if button_id == "btn-settings-capture-snapshot":
             self.dismiss({"action": "capture_accessibility_snapshot"})
