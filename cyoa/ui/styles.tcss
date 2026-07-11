@@ -281,13 +281,13 @@ Toast.-error {
 }
 
 #action-panel {
-    height: 75%;
+    height: 68%;
     min-height: 16;
-    max-height: 28;
-    border-top: solid $secondary 35%;
+    max-height: 26;
+    border-top: solid $secondary 22%;
     margin: 1 0 0 0;
     padding: 1 1 0 1;
-    background: $panel 80%;
+    background: $panel 58%;
     layout: vertical;
     overflow-y: auto;
 }
@@ -344,11 +344,11 @@ Toast.-error {
 }
 
 .side-panel-journal {
-    border-top: wide $accent 45%;
+    border-top: solid $accent 38%;
 }
 
 .side-panel-map {
-    border-top: wide $primary 45%;
+    border-top: solid $accent 34%;
 }
 
 .side-panel-kicker {
@@ -392,8 +392,8 @@ Toast.-error {
 #journal-list > ListItem {
     padding: 0 1;
     margin: 0 0 1 0;
-    background: $panel 55%;
-    border-left: thick $secondary 28%;
+    background: $panel 42%;
+    border-left: solid $secondary 22%;
 }
 
 #journal-list > ListItem.--highlight,
@@ -460,12 +460,12 @@ Toast.-error {
 
 .story-turn {
     min-height: 3;
-    background: $panel 88%;
+    background: $panel 74%;
     color: $text;
     padding: 1 2;
     margin: 0 0 1 0;
-    border-left: solid $accent 45%;
-    border-right: solid $secondary 12%;
+    border-left: solid $secondary 30%;
+    border-right: solid $secondary 8%;
 }
 
 .story-turn.pending-turn {
@@ -473,38 +473,39 @@ Toast.-error {
 }
 
 .player-choice {
-    background: $accent 12%;
+    background: $surface 68%;
     color: $text;
     padding: 1 2;
     margin: 0 0 1 4;
-    border-right: wide $accent 55%;
-    border-left: solid $accent 20%;
+    border-right: solid $accent 46%;
+    border-left: solid $secondary 18%;
     text-align: right;
 }
 
 .story-turn.current-turn {
-    background: $panel;
+    background: $panel 94%;
     border-left: solid $accent;
-    border-right: solid $accent 22%;
+    border-right: solid $secondary 18%;
 }
 
 .story-turn.archived-turn {
-    background: $panel 72%;
+    background: $surface 58%;
     color: $text-muted;
-    border-left: solid $secondary 38%;
-    border-right: solid $secondary 10%;
+    border-left: solid $secondary 22%;
+    border-right: solid $secondary 6%;
 }
 
 .player-choice.latest-choice {
-    background: $accent 18%;
-    border-right: wide $accent;
+    background: $accent 12%;
+    border-right: wide $accent 76%;
+    border-left: solid $accent 28%;
 }
 
 .player-choice.archived-choice {
-    background: $surface 55%;
+    background: $surface 38%;
     color: $text-muted;
-    border-right: solid $secondary 28%;
-    border-left: solid $secondary 18%;
+    border-right: solid $secondary 20%;
+    border-left: solid $secondary 12%;
 }
 
 #scene-art {
@@ -530,16 +531,16 @@ Toast.-error {
 
 StatusDisplay {
     height: auto;
-    background: $panel 46%;
-    border: round $secondary 18%;
+    background: $panel 36%;
+    border: solid $secondary 18%;
     padding: 1;
     margin: 0;
 }
 
 StatusDisplay:focus,
 StatusDisplay.region-jump-highlight {
-    background: $panel 62%;
-    border: round $accent;
+    background: $panel 54%;
+    border: solid $accent;
 }
 
 #stats-row {
@@ -590,8 +591,8 @@ StatusDisplay.region-jump-highlight {
     width: 1fr;
     height: 1;
     color: $text;
-    background: $surface 42%;
-    border: round $secondary 18%;
+    background: $surface 28%;
+    border-left: solid $success 34%;
     padding: 0 1;
     margin-right: 1;
     text-wrap: nowrap;
@@ -602,9 +603,9 @@ StatusDisplay.region-jump-highlight {
     width: 1fr;
     height: 1;
     text-align: right;
-    color: $text;
-    background: $surface 42%;
-    border: round $secondary 18%;
+    color: $text-muted;
+    background: $surface 24%;
+    border-left: solid $secondary 24%;
     padding: 0 1;
     text-wrap: nowrap;
     overflow: hidden;
@@ -612,13 +613,13 @@ StatusDisplay.region-jump-highlight {
 
 #inventory-label, #objectives-label, #directives-label, #latest-status-label {
     width: 100%;
-    height: auto;
+    height: 1;
     color: $text;
-    background: $surface 28%;
-    border-left: wide $accent 28%;
+    background: $surface 18%;
+    border-left: solid $secondary 24%;
     padding: 0 1;
     margin-top: 1;
-    text-wrap: wrap;
+    text-wrap: nowrap;
     overflow: hidden;
 }
 
@@ -626,9 +627,18 @@ StatusDisplay.region-jump-highlight {
     color: $text-muted;
 }
 
+#objectives-label {
+    border-left: solid $accent 36%;
+}
+
+#directives-label {
+    color: $text-muted;
+}
+
 #latest-status-label {
-    background: $surface 18%;
-    border-left: wide $primary 34%;
+    color: $text-muted;
+    background: $surface 14%;
+    border-left: solid $secondary 20%;
 }
 
 .compact-layout StatusDisplay {
@@ -690,10 +700,10 @@ Button {
     margin-bottom: 1;
     min-height: 3;
     padding: 0;
-    background: $panel 92%;
+    background: $panel 72%;
     color: $text;
-    border: round $secondary 42%;
-    border-left: solid $secondary 52%;
+    border: solid $secondary 34%;
+    border-left: solid $secondary 42%;
     tint: transparent;
 }
 
@@ -709,11 +719,11 @@ Button > .textual-button--label {
 }
 
 #choices-container Button:focus {
-    background: $accent 20%;
+    background: $accent 18%;
     border: round $accent;
     border-left: wide $accent;
     color: $text;
-    tint: $accent 9%;
+    tint: $accent 7%;
 }
 
 #choices-container Button:focus > .textual-button--label {
@@ -721,29 +731,29 @@ Button > .textual-button--label {
 }
 
 #choices-container Button:disabled {
-    background: $surface 88%;
+    background: $surface 62%;
     color: $text-muted;
-    border: round $secondary 24%;
-    border-left: solid $warning 38%;
+    border: solid $secondary 20%;
+    border-left: solid $warning 42%;
     tint: transparent;
 }
 
 #choices-container Button.choice-card-available {
-    background: $panel;
-    border-left: solid $accent 55%;
+    background: $panel 86%;
+    border-left: solid $accent 48%;
 }
 
 #choices-container Button.choice-card-available:hover {
-    background: $accent 8%;
-    border: round $accent 72%;
-    border-left: solid $accent 78%;
+    background: $accent 7%;
+    border: solid $accent 62%;
+    border-left: solid $accent 70%;
 }
 
 #choices-container Button.choice-card-locked {
-    background: $warning 7%;
+    background: $surface 54%;
     color: $text-muted;
-    border: round $warning 24%;
-    border-left: solid $warning 60%;
+    border: solid $warning 22%;
+    border-left: solid $warning 54%;
 }
 
 #choices-container Button.choice-card-error {

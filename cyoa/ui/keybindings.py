@@ -109,6 +109,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Theme",
         "Toggle dark/light theme",
         "Panels And Help",
+        show=False,
     ),
     AppBindingSpec(
         "toggle_journal",
@@ -150,6 +151,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Repeat Status",
         "Repeat latest status",
         "Panels And Help",
+        show=False,
     ),
     AppBindingSpec(
         "show_inventory_inspector",
@@ -158,6 +160,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Inventory",
         "Open inventory inspector",
         "Panels And Help",
+        show=False,
     ),
     AppBindingSpec(
         "show_scene_recap",
@@ -166,6 +169,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Recap",
         "Open scene recap",
         "Panels And Help",
+        show=False,
     ),
     AppBindingSpec(
         "show_world_state",
@@ -174,6 +178,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Character",
         "Open character sheet",
         "Panels And Help",
+        show=False,
     ),
     AppBindingSpec(
         "show_lore_codex",
@@ -182,6 +187,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Codex",
         "Open lore codex",
         "Panels And Help",
+        show=False,
     ),
     AppBindingSpec(
         "show_endings_discovered",
@@ -190,6 +196,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Endings",
         "Open endings discovered",
         "Panels And Help",
+        show=False,
     ),
     AppBindingSpec(
         "show_hidden_achievements",
@@ -198,6 +205,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Achievements",
         "Open hidden achievements",
         "Panels And Help",
+        show=False,
     ),
     AppBindingSpec(
         "show_run_archive",
@@ -206,6 +214,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Archive",
         "Open run archive",
         "Panels And Help",
+        show=False,
     ),
     AppBindingSpec(
         "show_replay",
@@ -214,6 +223,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Replay",
         "Open replay mode",
         "Panels And Help",
+        show=False,
     ),
     AppBindingSpec(
         "show_journal_summary",
@@ -222,6 +232,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Journal Summary",
         "Open journal summary",
         "Panels And Help",
+        show=False,
     ),
     AppBindingSpec(
         "show_story_map_summary",
@@ -230,6 +241,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Map Summary",
         "Open story map summary",
         "Panels And Help",
+        show=False,
     ),
     AppBindingSpec(
         "show_settings",
@@ -238,6 +250,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Settings",
         "Open settings",
         "Panels And Help",
+        show=False,
     ),
     AppBindingSpec(
         "branch_past",
@@ -246,6 +259,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Branch",
         "Branch from past scene",
         "Adventure Actions",
+        show=False,
     ),
     AppBindingSpec(
         "undo",
@@ -262,6 +276,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Redo",
         "Redo last choice",
         "Adventure Actions",
+        show=False,
     ),
     AppBindingSpec(
         "create_bookmark",
@@ -270,6 +285,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Bookmark",
         "Create bookmark",
         "Adventure Actions",
+        show=False,
     ),
     AppBindingSpec(
         "restore_bookmark",
@@ -278,6 +294,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Restore Mark",
         "Restore bookmark",
         "Adventure Actions",
+        show=False,
     ),
     AppBindingSpec(
         "save_game",
@@ -302,6 +319,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Export",
         "Export story",
         "Adventure Actions",
+        show=False,
     ),
     AppBindingSpec(
         "request_quit",
@@ -318,6 +336,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Restart",
         "Restart adventure",
         "Adventure Actions",
+        show=False,
     ),
     AppBindingSpec(
         "toggle_typewriter",
@@ -326,6 +345,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Typewriter",
         "Toggle typewriter",
         "Adventure Actions",
+        show=False,
     ),
     AppBindingSpec(
         "cycle_typewriter_speed",
@@ -334,6 +354,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Speed",
         "Cycle typewriter speed",
         "Adventure Actions",
+        show=False,
     ),
     AppBindingSpec(
         "cycle_generation_preset",
@@ -342,6 +363,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Preset",
         "Cycle generation preset",
         "Adventure Actions",
+        show=False,
     ),
     AppBindingSpec(
         "edit_directives",
@@ -350,6 +372,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Directives",
         "Edit directives",
         "Adventure Actions",
+        show=False,
     ),
     AppBindingSpec(
         "skip_typewriter",

@@ -2114,6 +2114,123 @@ async def test_multiline_choices_do_not_overlap_in_compact_layout(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("size", "config_overrides", "expected_classes"),
+    [
+        ((160, 48), {}, ()),
+        ((80, 30), {}, ("compact-layout",)),
+        ((120, 34), {"high_contrast": True}, ("compact-layout", "high-contrast-mode")),
+        ((80, 30), {"screen_reader_mode": True}, ("compact-layout", "screen-reader-mode")),
+    ],
+)
+async def test_release_polish_layout_handles_long_status_and_locked_choices(
+    size: tuple[int, int],
+    config_overrides: dict[str, Any],
+    expected_classes: tuple[str, ...],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def long_state_generator(*args, **kwargs):
+        mock_gen = MagicMock()
+        node = StoryNode(
+            narrative=(
+                "The archive chamber opens into a narrow gallery where every shelf is tagged "
+                "with brittle brass labels and a distant mechanism counts down."
+            ),
+            choices=[
+                Choice(
+                    text=(
+                        "Read the complete index, compare every shelf marker, and choose the "
+                        "route that keeps the expedition quiet"
+                    )
+                ),
+                Choice(
+                    text=(
+                        "Unlock the sealed reliquary with the ceremonial sun key before the "
+                        "patrol returns"
+                    ),
+                    requirements=ChoiceRequirement(items=["Ceremonial sun key"]),
+                ),
+                Choice(text="Retreat to the stairwell and preserve your notes"),
+            ],
+            title="Release Polish Check",
+        )
+        mock_gen.generate_next_node_async = AsyncMock(return_value=node)
+        mock_gen.update_story_summaries_async = AsyncMock()
+        mock_gen.save_state_async = AsyncMock(return_value=b"state")
+        mock_gen.load_state_async = AsyncMock()
+        mock_gen.token_budget = 2048
+        mock_gen.provider = MagicMock()
+        mock_gen.provider.count_tokens = MagicMock(return_value=10)
+        return mock_gen
+
+    monkeypatch.setattr("cyoa.ui.app.ModelBroker", long_state_generator)
+    with patch(
+        "cyoa.ui.app.load_user_config",
+        return_value=UserConfig(
+            setup_completed=True,
+            dismissed_startup_recommendations=["narrow_terminal_screen_reader"],
+            **config_overrides,
+        ),
+    ):
+        app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=size) as pilot:
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.engine is not None and app.engine.state.current_node is not None,
+        )
+        app.action_skip_typewriter()
+
+        status = app.query_one("#status-display", Static)
+        status.inventory = [
+            "Cartographer's lens with a cracked brass rim",
+            "Folded expedition writ naming three rival claimants",
+            "Bundle of charcoal rubbings from the eastern lintel",
+        ]
+        status.objectives = [
+            "Compare the archive index against the expedition writ before choosing a route"
+        ]
+        status.directives = [
+            "Keep the next answer concise, tense, and focused on visible consequences"
+        ]
+        status.latest_status = (
+            "Information: The narrator is preparing a long status message that should stay quiet."
+        )
+        await pilot.pause(0.2)
+
+        for class_name in expected_classes:
+            assert app.has_class(class_name)
+
+        story_container = app.query_one("#story-container", VerticalScroll)
+        action_panel = app.query_one("#action-panel", Container)
+        choices_container = app.query_one("#choices-container", Container)
+        buttons = list(choices_container.query(Button))
+
+        assert len(buttons) == 3
+        assert buttons[1].disabled is True
+        assert buttons[1].has_class("choice-card-locked")
+
+        for widget in (story_container, action_panel, choices_container, status):
+            _assert_region_within_screen(widget, app.size)
+
+        for button in buttons:
+            _assert_horizontal_region_within_parent(button, choices_container)
+
+        for story_widget in story_container.query(".story-turn"):
+            _assert_horizontal_region_within_parent(story_widget, story_container)
+
+        for selector in (
+            "#inventory-label",
+            "#objectives-label",
+            "#directives-label",
+            "#latest-status-label",
+        ):
+            label = app.query_one(selector, Label)
+            _assert_region_within_screen(label, app.size)
+            assert label.region.height <= 1
+
+
+@pytest.mark.asyncio
 async def test_narrow_terminal_rescue_mode_uses_single_column_panel_drawers(
     mock_app_dependencies,
 ) -> None:

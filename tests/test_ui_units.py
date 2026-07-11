@@ -48,6 +48,8 @@ from cyoa.ui.components import (
     ThemeSpinner,
 )
 from cyoa.ui.keybindings import (
+    APP_BINDING_SPEC_BY_ID,
+    build_app_bindings,
     build_command_palette_entries,
     effective_keybindings,
     search_command_palette,
@@ -1183,6 +1185,26 @@ def test_app_effective_keybindings_merge_defaults_and_overrides() -> None:
     assert merged["show_settings"] == "f2"
     assert merged["repeat_latest_status"] == "f3"
     assert merged["toggle_journal"] == "j"
+
+
+def test_footer_bindings_are_limited_to_core_play_actions() -> None:
+    visible_binding_ids = {
+        binding.id for binding in build_app_bindings() if getattr(binding, "show", False)
+    }
+
+    assert visible_binding_ids == {
+        "toggle_journal",
+        "toggle_story_map",
+        "show_help",
+        "show_command_palette",
+        "undo",
+        "save_game",
+        "load_game",
+        "request_quit",
+        "skip_typewriter",
+    }
+    assert APP_BINDING_SPEC_BY_ID["show_inventory_inspector"].palette is True
+    assert APP_BINDING_SPEC_BY_ID["show_inventory_inspector"].show is False
 
 
 def test_command_palette_entries_reflect_saved_bindings() -> None:
