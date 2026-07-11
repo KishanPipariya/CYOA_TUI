@@ -94,6 +94,10 @@ uv run ruff check .
 uv run mypy cyoa
 ```
 
+Pytest runs the full suite in parallel by default. Use `pytest -n 0` or
+`uv run pytest -n 0` when debugging, using `pdb`, or investigating behavior
+that should run in a single process.
+
 ## Technical References
 
 - [CodeWiki](../CODEWIKI.md)

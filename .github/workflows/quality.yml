@@ -52,7 +52,7 @@ jobs:
         run: uv sync --locked --group dev
 
       - name: Run tests
-        run: uv run pytest --cov=cyoa --cov-report=term-missing --cov-report=xml --cov-report=json -q
+        run: uv run pytest -n auto --cov=cyoa --cov-report=term-missing --cov-report=xml --cov-report=json -q
 
       - name: Generate coverage badge
         run: |
@@ -108,7 +108,7 @@ jobs:
 
       - name: Run optional dependency coverage
         run: >
-          uv run pytest -q
+          uv run pytest -n auto -q
           tests/test_db_integration.py
           tests/test_speculative_interruption.py
           --cov=cyoa.db.graph_db
@@ -146,7 +146,7 @@ jobs:
 
       - name: Run runtime extras coverage
         run: >
-          uv run pytest -q
+          uv run pytest -n auto -q
           tests/test_runtime_extras.py
           tests/test_observability.py
           tests/test_story.py

@@ -78,15 +78,18 @@ dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.0.0",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.15.7",
 ]
 
 [tool.pytest.ini_options]
+addopts = ["-n", "auto"]
 asyncio_mode = "auto"
 markers = [
     "no_worker_mock: skip the autouse mock_textual_workers fixture for tests using app.run_test()",
     "smoke: fast operational smoke coverage for startup validation, provider boot, and save/load flow",
 ]
+required_plugins = ["pytest-xdist"]
 
 [tool.coverage.run]
 branch = true
