@@ -3,7 +3,7 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from cyoa.core.constants import (
     CONFIG_FILE,
@@ -111,6 +111,24 @@ def _coerce_string_list(value: object) -> list[str]:
     return normalized
 
 
+def _trimmed_optional_str(value: object) -> str | None:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned:
+            return cleaned
+    return None
+
+
+def _coerce_keybindings(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key.strip(): binding.strip()
+        for key, binding in value.items()
+        if isinstance(key, str) and key.strip() and isinstance(binding, str) and binding.strip()
+    }
+
+
 def accessibility_preset_overrides(preset: str) -> dict[str, bool]:
     normalized = _coerce_accessibility_preset(preset)
     if normalized == "high_contrast":
@@ -157,6 +175,39 @@ def infer_accessibility_preset(
 
 @dataclass(slots=True)
 class UserConfig:
+    _KNOWN_PAYLOAD_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "provider",
+            "model_path",
+            "theme",
+            "dark",
+            "high_contrast",
+            "reduced_motion",
+            "screen_reader_mode",
+            "cognitive_load_reduction_mode",
+            "text_scale",
+            "line_width",
+            "line_spacing",
+            "notification_verbosity",
+            "scene_recap_verbosity",
+            "runtime_metadata_verbosity",
+            "locked_choice_verbosity",
+            "input_timing_profile",
+            "confirm_high_impact_actions",
+            "keybindings",
+            "typewriter",
+            "typewriter_speed",
+            "diagnostics_enabled",
+            "accessibility_preset",
+            "preset",
+            "runtime_preset",
+            "setup_completed",
+            "setup_choice",
+            "dismissed_startup_recommendations",
+            "version",
+        }
+    )
+
     provider: str | None = None
     model_path: str | None = None
     theme: str = "dark_dungeon"
@@ -191,42 +242,6 @@ class UserConfig:
         if not isinstance(payload, dict):
             return cls()
 
-        known_keys = {
-            "provider",
-            "model_path",
-            "theme",
-            "dark",
-            "high_contrast",
-            "reduced_motion",
-            "screen_reader_mode",
-            "cognitive_load_reduction_mode",
-            "text_scale",
-            "line_width",
-            "line_spacing",
-            "notification_verbosity",
-            "scene_recap_verbosity",
-            "runtime_metadata_verbosity",
-            "locked_choice_verbosity",
-            "input_timing_profile",
-            "confirm_high_impact_actions",
-            "keybindings",
-            "typewriter",
-            "typewriter_speed",
-            "diagnostics_enabled",
-            "accessibility_preset",
-            "preset",
-            "runtime_preset",
-            "setup_completed",
-            "setup_choice",
-            "dismissed_startup_recommendations",
-            "version",
-        }
-        extras = {
-            key: value
-            for key, value in payload.items()
-            if isinstance(key, str) and key not in known_keys
-        }
-
         provider = payload.get("provider")
         model_path = payload.get("model_path")
         theme = payload.get("theme")
@@ -255,22 +270,10 @@ class UserConfig:
         setup_choice = payload.get("setup_choice")
         dismissed_startup_recommendations = payload.get("dismissed_startup_recommendations")
 
-        parsed_keybindings = (
-            {
-                key.strip(): value.strip()
-                for key, value in keybindings.items()
-                if isinstance(key, str) and key.strip() and isinstance(value, str) and value.strip()
-            }
-            if isinstance(keybindings, dict)
-            else {}
-        )
-
         return cls(
-            provider=provider.strip() if isinstance(provider, str) and provider.strip() else None,
-            model_path=model_path.strip()
-            if isinstance(model_path, str) and model_path.strip()
-            else None,
-            theme=theme.strip() if isinstance(theme, str) and theme.strip() else "dark_dungeon",
+            provider=_trimmed_optional_str(provider),
+            model_path=_trimmed_optional_str(model_path),
+            theme=_trimmed_optional_str(theme) or "dark_dungeon",
             dark=dark if isinstance(dark, bool) else True,
             high_contrast=high_contrast if isinstance(high_contrast, bool) else False,
             reduced_motion=reduced_motion if isinstance(reduced_motion, bool) else False,
@@ -303,34 +306,30 @@ class UserConfig:
                 if isinstance(confirm_high_impact_actions, bool)
                 else False
             ),
-            keybindings=parsed_keybindings,
+            keybindings=_coerce_keybindings(keybindings),
             typewriter=typewriter if isinstance(typewriter, bool) else True,
-            typewriter_speed=(
-                typewriter_speed.strip()
-                if isinstance(typewriter_speed, str) and typewriter_speed.strip()
-                else "normal"
-            ),
+            typewriter_speed=_trimmed_optional_str(typewriter_speed) or "normal",
             diagnostics_enabled=(
                 diagnostics_enabled if isinstance(diagnostics_enabled, bool) else False
             ),
             accessibility_preset=_coerce_accessibility_preset(accessibility_preset),
-            preset=preset.strip() if isinstance(preset, str) and preset.strip() else None,
-            runtime_preset=(
-                runtime_preset.strip()
-                if isinstance(runtime_preset, str) and runtime_preset.strip()
-                else None
-            ),
+            preset=_trimmed_optional_str(preset),
+            runtime_preset=_trimmed_optional_str(runtime_preset),
             setup_completed=setup_completed if isinstance(setup_completed, bool) else False,
-            setup_choice=(
-                setup_choice.strip()
-                if isinstance(setup_choice, str) and setup_choice.strip()
-                else None
-            ),
+            setup_choice=_trimmed_optional_str(setup_choice),
             dismissed_startup_recommendations=_coerce_string_list(
                 dismissed_startup_recommendations
             ),
-            extras=extras,
+            extras=cls._payload_extras(payload),
         )
+
+    @classmethod
+    def _payload_extras(cls, payload: Mapping[object, object]) -> dict[str, object]:
+        return {
+            key: value
+            for key, value in payload.items()
+            if isinstance(key, str) and key not in cls._KNOWN_PAYLOAD_KEYS
+        }
 
     def to_dict(self) -> dict[str, Any]:
         payload = dict(self.extras)

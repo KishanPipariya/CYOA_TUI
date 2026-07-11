@@ -87,6 +87,13 @@ class GenerationPreset:
     summary_max_tokens: int
 
 
+@dataclass(frozen=True, slots=True)
+class SummaryLevelSpec:
+    title: str
+    context_description: str
+    goal: str
+
+
 PRESETS: dict[str, GenerationPreset] = {
     "balanced": GenerationPreset(
         "balanced", temperature=0.6, max_tokens=512, summary_max_tokens=200
@@ -98,6 +105,25 @@ PRESETS: dict[str, GenerationPreset] = {
         "cinematic", temperature=0.85, max_tokens=640, summary_max_tokens=240
     ),
 }
+
+SUMMARY_LEVELS: dict[str, SummaryLevelSpec] = {
+    "scene": SummaryLevelSpec(
+        title="Scene Summary",
+        context_description="last 10 turns",
+        goal="2-3 sentences of plot events",
+    ),
+    "chapter": SummaryLevelSpec(
+        title="Chapter Summary",
+        context_description="last 5 scenes",
+        goal="a dense overview of the local mission or region",
+    ),
+    "arc": SummaryLevelSpec(
+        title="Arc Summary",
+        context_description="global plot goals",
+        goal="a high-level synopsis of the overarching journey",
+    ),
+}
+DEFAULT_SUMMARY_LEVEL = SummaryLevelSpec(title="Summary", context_description="", goal="")
 
 
 class StoryContext:
@@ -563,57 +589,12 @@ class ModelBroker:
         level: str = "scene",
     ) -> str:
         """Helper to call the LLM for a specific hierarchy level."""
-
-        level_map = {
-            "scene": ("Scene Summary", "last 10 turns", "2-3 sentences of plot events"),
-            "chapter": (
-                "Chapter Summary",
-                "last 5 scenes",
-                "a dense overview of the local mission or region",
-            ),
-            "arc": (
-                "Arc Summary",
-                "global plot goals",
-                "a high-level synopsis of the overarching journey",
-            ),
-        }
-        title, context_desc, goal = level_map.get(level, ("Summary", "", ""))
-
-        # Assemble the input text
-        input_bits = []
-        if existing:
-            input_bits.append(f"Current {title}: {existing}")
-        if previous_summary:
-            input_bits.append(f"Newly Finished Lower-Level Context: {previous_summary}")
-
-        if turns:
-            compact_turns = []
-            for msg in turns:
-                role = "Story" if msg["role"] == "assistant" else "Player"
-                compact_turns.append(f"[{role}]: {msg['content']}")
-            input_bits.append("Recent Turn History:\n" + "\n".join(compact_turns))
-
-        input_text = "\n\n".join(input_bits)
-
-        summarizer_messages = [
-            {
-                "role": "system",
-                "content": (
-                    f"You are a narrative archivist. Your task is to maintain the '{title}'. "
-                    f"This level of summary covers {context_desc}. "
-                    f"Write {goal}. "
-                    "Focus on facts, character decisions, and significant world changes. "
-                    "Past tense, third person. No meta-commentary."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Update the following {title} with the new information provided:\n\n"
-                    f"{input_text}"
-                ),
-            },
-        ]
+        summarizer_messages = self._dense_summary_messages(
+            turns=turns,
+            existing=existing,
+            previous_summary=previous_summary,
+            level=level,
+        )
 
         try:
             return await self.provider.generate_text(
@@ -627,24 +608,95 @@ class ModelBroker:
             logger.warning("Hierarchical summary update failed for %s: %s", level, exc)
             return existing or ""
 
+    def _dense_summary_messages(
+        self,
+        *,
+        turns: list[dict[str, str]],
+        existing: str | None,
+        previous_summary: str | None,
+        level: str,
+    ) -> list[dict[str, str]]:
+        spec = SUMMARY_LEVELS.get(level, DEFAULT_SUMMARY_LEVEL)
+        input_text = self._dense_summary_input(
+            turns=turns,
+            existing=existing,
+            previous_summary=previous_summary,
+            title=spec.title,
+        )
+        return [
+            {
+                "role": "system",
+                "content": (
+                    f"You are a narrative archivist. Your task is to maintain the '{spec.title}'. "
+                    f"This level of summary covers {spec.context_description}. "
+                    f"Write {spec.goal}. "
+                    "Focus on facts, character decisions, and significant world changes. "
+                    "Past tense, third person. No meta-commentary."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Update the following {spec.title} with the new information provided:\n\n"
+                    f"{input_text}"
+                ),
+            },
+        ]
+
+    def _dense_summary_input(
+        self,
+        *,
+        turns: list[dict[str, str]],
+        existing: str | None,
+        previous_summary: str | None,
+        title: str,
+    ) -> str:
+        input_bits = []
+        if existing:
+            input_bits.append(f"Current {title}: {existing}")
+        if previous_summary:
+            input_bits.append(f"Newly Finished Lower-Level Context: {previous_summary}")
+        if turns:
+            input_bits.append("Recent Turn History:\n" + self._compact_turns_for_summary(turns))
+        return "\n\n".join(input_bits)
+
     async def generate_legacy_summary_async(self, turns_to_compress: list[dict[str, str]]) -> str:
         """The original summarization logic."""
         async with self._summary_lock:
             if not turns_to_compress:
                 return ""
 
-        # Build a compact textual representation of the turns to compress.
+        summarizer_messages = self._legacy_summary_messages(turns_to_compress)
+
+        try:
+            summary = await self.provider.generate_text(
+                messages=summarizer_messages,
+                temperature=0.3,
+                max_tokens=self._summary_max_tokens,
+            )
+            logger.info("Rolling summary generated (%d chars).", len(summary))
+            return summary.strip()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Rolling summarization failed: %s — using plaintext fallback.", exc)
+            return self._legacy_summary_fallback(turns_to_compress)
+
+    @staticmethod
+    def _compact_turns_for_summary(turns: list[dict[str, str]]) -> str:
         compressed_text_parts: list[str] = []
-        for msg in turns_to_compress:
+        for msg in turns:
             role = msg.get("role", "")
             content = msg.get("content", "")
             if role == "assistant":
                 compressed_text_parts.append(f"[Story]: {content}")
             elif role == "user":
                 compressed_text_parts.append(f"[Player]: {content}")
-        turns_blob = "\n".join(compressed_text_parts)
+        return "\n".join(compressed_text_parts)
 
-        summarizer_messages = [
+    def _legacy_summary_messages(
+        self, turns_to_compress: list[dict[str, str]]
+    ) -> list[dict[str, str]]:
+        turns_blob = self._compact_turns_for_summary(turns_to_compress)
+        return [
             {
                 "role": "system",
                 "content": (
@@ -664,18 +716,9 @@ class ModelBroker:
             },
         ]
 
-        try:
-            summary = await self.provider.generate_text(
-                messages=summarizer_messages,
-                temperature=0.3,
-                max_tokens=self._summary_max_tokens,
-            )
-            logger.info("Rolling summary generated (%d chars).", len(summary))
-            return summary.strip()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Rolling summarization failed: %s — using plaintext fallback.", exc)
-            # Graceful fallback: join turns into a very short plain-text blob
-            return " ".join(msg["content"][:80] for msg in turns_to_compress if msg.get("content"))
+    @staticmethod
+    def _legacy_summary_fallback(turns_to_compress: list[dict[str, str]]) -> str:
+        return " ".join(msg["content"][:80] for msg in turns_to_compress if msg.get("content"))
 
     async def generate_next_node_async(
         self,

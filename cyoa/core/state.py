@@ -1,5 +1,6 @@
 import logging
 from collections import deque
+from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from cyoa.core.events import Events, bus
@@ -19,6 +20,15 @@ from cyoa.core.models import (
 logger = logging.getLogger(__name__)
 
 MAX_HISTORY_DEPTH = 20
+
+
+@dataclass(frozen=True, slots=True)
+class _LoadedSaveScalars:
+    story_title: str | None
+    turn_count: int
+    current_scene_id: str | None
+    last_choice_text: str | None
+    last_choice_submission: str | None
 
 
 class GameState:
@@ -236,23 +246,14 @@ class GameState:
 
     def load_save_data(self, data: dict[str, Any]) -> None:
         """Hydrate state from dictionary data."""
-        self.story_title = (
-            data.get("story_title") if isinstance(data.get("story_title"), str) else None
-        )
-        self.turn_count = self._coerce_positive_int(data.get("turn_count"), default=1)
+        scalars = self._read_save_scalars(data)
+        self.story_title = scalars.story_title
+        self.turn_count = scalars.turn_count
         self.inventory = self._coerce_inventory(data.get("inventory"))
         self.player_stats = self._coerce_player_stats(data.get("player_stats"))
-        self.current_scene_id = (
-            data.get("current_scene_id") if isinstance(data.get("current_scene_id"), str) else None
-        )
-        self.last_choice_text = (
-            data.get("last_choice_text") if isinstance(data.get("last_choice_text"), str) else None
-        )
-        self.last_choice_submission = (
-            data.get("last_choice_submission")
-            if isinstance(data.get("last_choice_submission"), str)
-            else self.last_choice_text
-        )
+        self.current_scene_id = scalars.current_scene_id
+        self.last_choice_text = scalars.last_choice_text
+        self.last_choice_submission = scalars.last_choice_submission
         self.last_resolved_choice_check = self._coerce_resolved_choice_check(
             data.get("last_resolved_choice_check")
         )
@@ -276,17 +277,31 @@ class GameState:
             self._coerce_snapshot_list(data.get("redo_history")), maxlen=MAX_HISTORY_DEPTH
         )
         self._bookmarks = self._coerce_bookmarks(data.get("bookmarks"))
+        self.current_node = self._coerce_current_node(data.get("current_node"))
 
-        node_data = data.get("current_node")
+        self._emit_loaded_state_events()
+
+    def _read_save_scalars(self, data: dict[str, Any]) -> _LoadedSaveScalars:
+        last_choice_text = self._coerce_optional_str(data.get("last_choice_text"))
+        last_choice_submission = self._coerce_optional_str(data.get("last_choice_submission"))
+        return _LoadedSaveScalars(
+            story_title=self._coerce_optional_str(data.get("story_title")),
+            turn_count=self._coerce_positive_int(data.get("turn_count"), default=1),
+            current_scene_id=self._coerce_optional_str(data.get("current_scene_id")),
+            last_choice_text=last_choice_text,
+            last_choice_submission=last_choice_submission or last_choice_text,
+        )
+
+    def _coerce_current_node(self, node_data: Any) -> StoryNode | None:
         if not isinstance(node_data, dict):
-            self.current_node = None
-        else:
-            try:
-                self.current_node = StoryNode(**node_data)
-            except Exception:
-                logger.warning("Ignoring malformed current_node in save payload.")
-                self.current_node = None
+            return None
+        try:
+            return StoryNode(**node_data)
+        except Exception:
+            logger.warning("Ignoring malformed current_node in save payload.")
+            return None
 
+    def _emit_loaded_state_events(self) -> None:
         bus.emit_runtime(Events.STATS_UPDATED, stats=dict(self.player_stats))
         bus.emit_runtime(Events.INVENTORY_UPDATED, inventory=list(self.inventory))
         bus.emit_runtime(Events.WORLD_STATE_UPDATED, state=self.get_world_state())
@@ -294,6 +309,10 @@ class GameState:
             bus.emit_runtime(Events.NODE_COMPLETED, node=self.current_node)
 
         bus.emit_runtime(Events.STORY_TITLE_GENERATED, title=self.story_title)
+
+    @staticmethod
+    def _coerce_optional_str(value: Any) -> str | None:
+        return value if isinstance(value, str) else None
 
     def _coerce_positive_int(self, value: Any, *, default: int) -> int:
         """Return a positive integer fallback when save data is malformed."""

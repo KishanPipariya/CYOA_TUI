@@ -456,35 +456,33 @@ class StoryEngine:
         self._transition_phase(EnginePhase.RESTORING, "load_save_data")
         self._prepare_for_load()
 
-        # Hydrate state manager
         self.state.load_save_data(data)
-
-        # Hydrate engine-level LLM context
-        starting_prompt = data.get("starting_prompt")
-        if not isinstance(starting_prompt, str) or not starting_prompt:
-            starting_prompt = self.starting_prompt
-
-        self.story_context = StoryContext(
-            starting_prompt=starting_prompt,
-            token_budget=self.broker.token_budget,
-            token_counter=self.broker.provider.count_tokens,
-        )
-        context_history = data.get("context_history")
-        self.story_context.history = context_history if isinstance(context_history, list) else []
-        prompt_config = data.get("prompt_config")
-        if isinstance(prompt_config, dict):
-            goals = prompt_config.get("goals")
-            directives = prompt_config.get("directives")
-            if isinstance(goals, list):
-                self.story_context.goals = [goal for goal in goals if isinstance(goal, str)]
-            if isinstance(directives, list):
-                self.story_context.directives = [
-                    directive for directive in directives if isinstance(directive, str)
-                ]
+        self.story_context = self._story_context_from_save(data)
         self._sync_story_context_state()
         self._transition_phase(
             EnginePhase.READY, "load_completed", scene_id=self.state.current_scene_id
         )
+
+    def _new_story_context(self, starting_prompt: str | None = None) -> StoryContext:
+        return StoryContext(
+            starting_prompt=starting_prompt or self.starting_prompt,
+            token_budget=self.broker.token_budget,
+            token_counter=self.broker.provider.count_tokens,
+        )
+
+    def _story_context_from_save(self, data: dict[str, Any]) -> StoryContext:
+        starting_prompt = data.get("starting_prompt")
+        if not isinstance(starting_prompt, str) or not starting_prompt:
+            starting_prompt = self.starting_prompt
+
+        context = self._new_story_context(starting_prompt)
+        context_history = data.get("context_history")
+        context.history = context_history if isinstance(context_history, list) else []
+        prompt_config = data.get("prompt_config")
+        if isinstance(prompt_config, dict):
+            context.goals = self._coerce_string_sequence(prompt_config.get("goals"))
+            context.directives = self._coerce_string_sequence(prompt_config.get("directives"))
+        return context
 
     async def branch_to_scene(self, idx: int, history: dict[str, Any]) -> None:
         """Restore the engine state to a specific scene from the history."""
@@ -492,17 +490,49 @@ class StoryEngine:
         await self._prepare_for_history_restore()
         source_scene_id = self.state.current_scene_id
 
-        # 1. Rebuild user-facing context history
-        self.story_context = StoryContext(
-            starting_prompt=self.starting_prompt,
-            token_budget=self.broker.token_budget,
-            token_counter=self.broker.provider.count_tokens,
-        )
-        for i in range(idx):
-            self.story_context.add_turn(history["scenes"][i]["narrative"], history["choices"][i])
-
-        # 2. Update state manager
         target_scene = history["scenes"][idx]
+        self.story_context = self._story_context_from_branch(idx, history)
+        self._restore_branch_state(idx, history, target_scene, source_scene_id)
+
+        await self.rag.rebuild_async(history["scenes"][: idx + 1])
+
+        if self.state.current_scene_id is not None:
+            state = self.speculation_cache.get_state(self.state.current_scene_id)
+            if state:
+                await self.broker.load_state_async(state)
+
+        node = self._story_node_from_history_scene(target_scene)
+        self.state.current_node = node
+        self._sync_story_context_state()
+
+        # Emit events so UI can refresh stats/inventory/narrative
+        self._emit_runtime_event(Events.STATS_UPDATED, stats=self.state.player_stats)
+        self._emit_runtime_event(Events.INVENTORY_UPDATED, inventory=self.state.inventory)
+        self._emit_runtime_event(Events.WORLD_STATE_UPDATED, state=self.state.get_world_state())
+        self._emit_runtime_event(Events.NODE_COMPLETED, node=node)
+        self._transition_phase(
+            EnginePhase.READY, "branch_restore_completed", scene_id=self.state.current_scene_id
+        )
+
+    @staticmethod
+    def _coerce_string_sequence(raw_values: object) -> list[str]:
+        if not isinstance(raw_values, list):
+            return []
+        return [value for value in raw_values if isinstance(value, str)]
+
+    def _story_context_from_branch(self, idx: int, history: dict[str, Any]) -> StoryContext:
+        context = self._new_story_context()
+        for i in range(idx):
+            context.add_turn(history["scenes"][i]["narrative"], history["choices"][i])
+        return context
+
+    def _restore_branch_state(
+        self,
+        idx: int,
+        history: dict[str, Any],
+        target_scene: dict[str, Any],
+        source_scene_id: str | None,
+    ) -> None:
         self.state.current_scene_id = target_scene["id"]
         self.state.last_choice_text = history["choices"][idx - 1] if idx > 0 else None
         self.state.last_choice_submission = self.state.last_choice_text
@@ -512,16 +542,8 @@ class StoryEngine:
         self.state.player_stats = dict(
             target_scene.get("player_stats", {"health": 100, "gold": 0, "reputation": 0})
         )
-        lore_entries: list[LoreEntry] = []
-        for raw in target_scene.get("lore_entries", []):
-            if not isinstance(raw, dict):
-                continue
-            try:
-                lore_entries.append(LoreEntry(**raw))
-            except Exception:
-                continue
         self.state.seed_world_state(
-            lore_entries=lore_entries,
+            lore_entries=self._coerce_history_lore_entries(target_scene.get("lore_entries", [])),
             world_time=target_scene.get("world_time"),
         )
         self.state.timeline_metadata.append(
@@ -533,32 +555,28 @@ class StoryEngine:
             }
         )
 
-        # 3. Rebuild memory
-        await self.rag.rebuild_async(history["scenes"][: idx + 1])
+    @staticmethod
+    def _coerce_history_lore_entries(raw_values: object) -> list[LoreEntry]:
+        lore_entries: list[LoreEntry] = []
+        if not isinstance(raw_values, list):
+            return lore_entries
+        for raw in raw_values:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                lore_entries.append(LoreEntry(**raw))
+            except Exception:
+                continue
+        return lore_entries
 
-        # 4. Restore provider state (KV cache) if available
-        state = self.speculation_cache.get_state(self.state.current_scene_id)
-        if state:
-            await self.broker.load_state_async(state)
-
-        # 5. Create the node for UI display
+    @staticmethod
+    def _story_node_from_history_scene(target_scene: dict[str, Any]) -> StoryNode:
         available = target_scene.get("available_choices") or []
-        choices = [Choice(text=c) for c in available]
-        node = StoryNode(
+        choices = [Choice(text=choice) for choice in available]
+        return StoryNode(
             narrative=target_scene["narrative"],
             choices=choices,
             is_ending=len(choices) == 0,
-        )
-        self.state.current_node = node
-        self._sync_story_context_state()
-
-        # Emit events so UI can refresh stats/inventory/narrative
-        self._emit_runtime_event(Events.STATS_UPDATED, stats=self.state.player_stats)
-        self._emit_runtime_event(Events.INVENTORY_UPDATED, inventory=self.state.inventory)
-        self._emit_runtime_event(Events.WORLD_STATE_UPDATED, state=self.state.get_world_state())
-        self._emit_runtime_event(Events.NODE_COMPLETED, node=node)
-        self._transition_phase(
-            EnginePhase.READY, "branch_restore_completed", scene_id=self.state.current_scene_id
         )
 
     @staticmethod
