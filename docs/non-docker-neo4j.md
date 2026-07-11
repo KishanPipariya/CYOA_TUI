@@ -82,7 +82,7 @@ uv run cyoa-tui
 Or:
 
 ```bash
-uv run python main.py
+uv run cyoa-tui
 ```
 
 If the Neo4j credentials are valid and the server is reachable, the app will use graph persistence.

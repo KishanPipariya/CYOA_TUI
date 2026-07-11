@@ -42,7 +42,7 @@ def build_pyinstaller_command(
         _format_add_data(project_root / "cyoa" / "ui" / "styles.tcss", "cyoa/ui"),
         "--collect-data",
         "textual",
-        str(project_root / "main.py"),
+        str(project_root / "cyoa" / "cli.py"),
     ]
 
 

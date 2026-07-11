@@ -100,23 +100,8 @@ async def test_model_broker_judge_mode_extraction_failure_returns_empty_delta():
     assert node.stat_updates == {}
 
 
-@pytest.mark.asyncio
-async def test_generate_legacy_summary_falls_back_to_plaintext():
-    provider = _make_provider()
-    provider.generate_text = AsyncMock(side_effect=RuntimeError("summary fail"))
-    broker = ModelBroker(provider=provider)
-    turns = [
-        {"role": "assistant", "content": "A very long narrative " * 10},
-        {"role": "user", "content": "I choose the left door"},
-    ]
-
-    summary = await broker.generate_legacy_summary_async(turns)
-
-    assert "A very long narrative" in summary
-    assert "I choose the left door" in summary
-
-
-def test_model_broker_cycles_generation_presets():
+def test_model_broker_cycles_generation_presets(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("LLM_PRESET", raising=False)
     provider = _make_provider()
     broker = ModelBroker(provider=provider)
 

@@ -311,11 +311,6 @@ class StoryContext:
         # Still run prune to ensure we stay within budget if summaries increased
         self._prune_history()
 
-    def set_rolling_summary(self, summary: str) -> None:
-        """Backward compatibility for the old rolling summary. Sets the scene summary."""
-        self.scene_summary = summary
-        self._prune_history()
-
     # ------------------------------------------------------------------
     # Summarization trigger
     # ------------------------------------------------------------------
@@ -513,12 +508,6 @@ class ModelBroker:
             raise FileNotFoundError(f"Configured llama_cpp model file does not exist: {m_path!r}.")
         return LlamaCppProvider(model_path=m_path, n_ctx=n_ctx_val)
 
-    async def generate_summary_async(self, turns_to_compress: list[dict[str, str]]) -> str:
-        """Deprecated legacy wrapper. Use update_story_summaries_async(context) instead."""
-        # This will only be called if some third-party code uses it.
-        # We can't easily update a context we don't have, so we use the legacy logic.
-        return await self.generate_legacy_summary_async(turns_to_compress)
-
     async def update_story_summaries_async(self, context: StoryContext) -> None:
         """The core of Hierarchical Context Compression.
 
@@ -660,26 +649,6 @@ class ModelBroker:
             input_bits.append("Recent Turn History:\n" + self._compact_turns_for_summary(turns))
         return "\n\n".join(input_bits)
 
-    async def generate_legacy_summary_async(self, turns_to_compress: list[dict[str, str]]) -> str:
-        """The original summarization logic."""
-        async with self._summary_lock:
-            if not turns_to_compress:
-                return ""
-
-        summarizer_messages = self._legacy_summary_messages(turns_to_compress)
-
-        try:
-            summary = await self.provider.generate_text(
-                messages=summarizer_messages,
-                temperature=0.3,
-                max_tokens=self._summary_max_tokens,
-            )
-            logger.info("Rolling summary generated (%d chars).", len(summary))
-            return summary.strip()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Rolling summarization failed: %s — using plaintext fallback.", exc)
-            return self._legacy_summary_fallback(turns_to_compress)
-
     @staticmethod
     def _compact_turns_for_summary(turns: list[dict[str, str]]) -> str:
         compressed_text_parts: list[str] = []
@@ -691,34 +660,6 @@ class ModelBroker:
             elif role == "user":
                 compressed_text_parts.append(f"[Player]: {content}")
         return "\n".join(compressed_text_parts)
-
-    def _legacy_summary_messages(
-        self, turns_to_compress: list[dict[str, str]]
-    ) -> list[dict[str, str]]:
-        turns_blob = self._compact_turns_for_summary(turns_to_compress)
-        return [
-            {
-                "role": "system",
-                "content": (
-                    "You are a precise narrative archivist. "
-                    "Given a sequence of story events and player choices, "
-                    "write a single concise paragraph (2-4 sentences) summarising "
-                    "the key plot events, character state, and decisions made. "
-                    "Focus on facts and actions — no embellishment. "
-                    "Write in past tense, third person."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Summarise the following story events into a single paragraph:\n\n{turns_blob}"
-                ),
-            },
-        ]
-
-    @staticmethod
-    def _legacy_summary_fallback(turns_to_compress: list[dict[str, str]]) -> str:
-        return " ".join(msg["content"][:80] for msg in turns_to_compress if msg.get("content"))
 
     async def generate_next_node_async(
         self,

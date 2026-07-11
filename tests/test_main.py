@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import main
+from cyoa import cli
+from cyoa.core.startup import StartupConfigError, validate_startup_config
 from cyoa.core.theme_loader import ThemeValidationError
 from cyoa.core.user_config import (
     UserConfig,
@@ -35,8 +36,8 @@ def test_validate_startup_config_requires_model_for_env_llama_cpp(
 ) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "llama_cpp")
 
-    with pytest.raises(main.StartupConfigError, match="No local model configured"):
-        main.validate_startup_config(_args())
+    with pytest.raises(StartupConfigError, match="No local model configured"):
+        validate_startup_config(_args())
 
 
 def test_validate_startup_config_requires_existing_model_file(
@@ -44,8 +45,8 @@ def test_validate_startup_config_requires_existing_model_file(
 ) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "llama_cpp")
 
-    with pytest.raises(main.StartupConfigError, match="model file does not exist"):
-        main.validate_startup_config(_args(model="missing.gguf"))
+    with pytest.raises(StartupConfigError, match="model file does not exist"):
+        validate_startup_config(_args(model="missing.gguf"))
 
 
 def test_validate_startup_config_rejects_ollama_provider(
@@ -53,8 +54,8 @@ def test_validate_startup_config_rejects_ollama_provider(
 ) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
 
-    with pytest.raises(main.StartupConfigError, match="Unsupported LLM_PROVIDER"):
-        main.validate_startup_config(_args())
+    with pytest.raises(StartupConfigError, match="Unsupported LLM_PROVIDER"):
+        validate_startup_config(_args())
 
 
 def test_validate_startup_config_rejects_invalid_numeric_env(
@@ -63,8 +64,8 @@ def test_validate_startup_config_rejects_invalid_numeric_env(
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     monkeypatch.setenv("LLM_N_CTX", "zero")
 
-    with pytest.raises(main.StartupConfigError, match="LLM_N_CTX must be an integer"):
-        main.validate_startup_config(_args())
+    with pytest.raises(StartupConfigError, match="LLM_N_CTX must be an integer"):
+        validate_startup_config(_args())
 
 
 def test_validate_startup_config_rejects_non_positive_integer_env(
@@ -73,8 +74,8 @@ def test_validate_startup_config_rejects_non_positive_integer_env(
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     monkeypatch.setenv("LLM_MAX_TOKENS", "0")
 
-    with pytest.raises(main.StartupConfigError, match="LLM_MAX_TOKENS must be greater than 0"):
-        main.validate_startup_config(_args())
+    with pytest.raises(StartupConfigError, match="LLM_MAX_TOKENS must be greater than 0"):
+        validate_startup_config(_args())
 
 
 def test_validate_startup_config_rejects_negative_float_env(
@@ -83,8 +84,8 @@ def test_validate_startup_config_rejects_negative_float_env(
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     monkeypatch.setenv("LLM_TEMPERATURE", "-0.1")
 
-    with pytest.raises(main.StartupConfigError, match="LLM_TEMPERATURE must be non-negative"):
-        main.validate_startup_config(_args())
+    with pytest.raises(StartupConfigError, match="LLM_TEMPERATURE must be non-negative"):
+        validate_startup_config(_args())
 
 
 def test_validate_startup_config_rejects_unknown_provider(
@@ -92,8 +93,8 @@ def test_validate_startup_config_rejects_unknown_provider(
 ) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "unsupported")
 
-    with pytest.raises(main.StartupConfigError, match="Unsupported LLM_PROVIDER"):
-        main.validate_startup_config(_args())
+    with pytest.raises(StartupConfigError, match="Unsupported LLM_PROVIDER"):
+        validate_startup_config(_args())
 
 
 def test_validate_startup_config_rejects_unknown_preset(
@@ -101,8 +102,8 @@ def test_validate_startup_config_rejects_unknown_preset(
 ) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "mock")
 
-    with pytest.raises(main.StartupConfigError, match="Unsupported preset"):
-        main.validate_startup_config(_args(preset="chaos"))
+    with pytest.raises(StartupConfigError, match="Unsupported preset"):
+        validate_startup_config(_args(preset="chaos"))
 
 
 def test_validate_startup_config_applies_runtime_preset_defaults(
@@ -110,7 +111,7 @@ def test_validate_startup_config_applies_runtime_preset_defaults(
 ) -> None:
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     with patch("cyoa.core.user_config.load_user_config", return_value=UserConfig()):
-        config = main.validate_startup_config(_args(runtime_preset="mock-smoke"))
+        config = validate_startup_config(_args(runtime_preset="mock-smoke"))
 
     assert config.runtime_preset == "mock-smoke"
     assert config.provider == "mock"
@@ -123,7 +124,7 @@ def test_validate_startup_config_defaults_to_mock_when_no_provider_is_available(
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.delenv("LLM_MODEL_PATH", raising=False)
     with patch("cyoa.core.user_config.load_user_config", return_value=UserConfig()):
-        config = main.validate_startup_config(_args())
+        config = validate_startup_config(_args())
 
     assert config.provider == "mock"
     assert config.model is None
@@ -140,7 +141,7 @@ def test_validate_startup_config_falls_back_from_saved_llama_cpp_to_mock(
         "cyoa.core.user_config.load_user_config",
         return_value=UserConfig(provider="llama_cpp", model_path="/missing.gguf"),
     ):
-        config = main.validate_startup_config(_args())
+        config = validate_startup_config(_args())
 
     assert config.provider == "mock"
     assert (
@@ -159,7 +160,7 @@ def test_validate_startup_config_uses_saved_user_config_defaults(
         "cyoa.core.user_config.load_user_config",
         return_value=UserConfig(provider="mock", theme="space_explorer", preset="balanced"),
     ):
-        config = main.validate_startup_config(_args(theme=None, preset=None, runtime_preset=None))
+        config = validate_startup_config(_args(theme=None, preset=None, runtime_preset=None))
 
     assert config.provider == "mock"
     assert config.theme == "space_explorer"
@@ -179,7 +180,7 @@ def test_validate_startup_config_prefers_cli_args_over_saved_config(tmp_path) ->
             preset="balanced",
         ),
     ):
-        config = main.validate_startup_config(
+        config = validate_startup_config(
             _args(model=str(model_path), theme="dark_dungeon", preset="precise")
         )
 
@@ -194,7 +195,7 @@ def test_validate_startup_config_collects_startup_accessibility_flags(
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.delenv("LLM_MODEL_PATH", raising=False)
     with patch("cyoa.core.user_config.load_user_config", return_value=UserConfig()):
-        config = main.validate_startup_config(
+        config = validate_startup_config(
             _args(screen_reader=True, high_contrast=True, reduced_motion=True)
         )
 
@@ -282,7 +283,7 @@ def test_validate_startup_config_cli_model_overrides_mock_provider_env(
     model_path.write_text("stub", encoding="utf-8")
     monkeypatch.setenv("LLM_PROVIDER", "mock")
 
-    config = main.validate_startup_config(_args(model=str(model_path)))
+    config = validate_startup_config(_args(model=str(model_path)))
 
     assert config.provider == "llama_cpp"
     assert config.model == str(model_path)
@@ -296,7 +297,7 @@ def test_main_closes_logger_on_keyboard_interrupt(monkeypatch: pytest.MonkeyPatc
     app.run.side_effect = KeyboardInterrupt
 
     with (
-        patch("main.os._exit", side_effect=AssertionError("os._exit should not be used")),
+        patch("cyoa.cli.os._exit", side_effect=AssertionError("os._exit should not be used")),
         patch("cyoa.core.constants.ensure_user_directories"),
         patch("cyoa.core.observability.setup_observability"),
         patch("cyoa.core.theme_loader.list_themes", return_value=["dark_dungeon"]),
@@ -307,7 +308,7 @@ def test_main_closes_logger_on_keyboard_interrupt(monkeypatch: pytest.MonkeyPatc
         patch("cyoa.db.story_logger.StoryLogger", return_value=logger_service),
         patch("cyoa.ui.app.CYOAApp", return_value=app) as app_cls,
     ):
-        exit_code = main.main([])
+        exit_code = cli.main([])
 
     assert exit_code == 130
     logger_service.close.assert_called_once_with()
@@ -324,7 +325,7 @@ def test_main_returns_error_for_invalid_startup_config(monkeypatch: pytest.Monke
         patch("cyoa.db.story_logger.StoryLogger") as logger_cls,
         patch("cyoa.ui.app.CYOAApp") as app_cls,
     ):
-        exit_code = main.main([])
+        exit_code = cli.main([])
 
     assert exit_code == 2
     logger_cls.assert_not_called()
@@ -347,7 +348,7 @@ def test_main_returns_error_for_invalid_theme_payload(monkeypatch: pytest.Monkey
         patch("cyoa.db.story_logger.StoryLogger") as logger_cls,
         patch("cyoa.ui.app.CYOAApp") as app_cls,
     ):
-        exit_code = main.main([])
+        exit_code = cli.main([])
 
     assert exit_code == 2
     logger_cls.assert_not_called()
@@ -369,7 +370,7 @@ def test_main_bootstraps_user_directories(monkeypatch: pytest.MonkeyPatch) -> No
         patch("cyoa.ui.app.CYOAApp") as app_cls,
     ):
         app_cls.return_value.run.return_value = None
-        exit_code = main.main([])
+        exit_code = cli.main([])
 
     assert exit_code == 0
     ensure_dirs.assert_called_once_with()
@@ -397,7 +398,7 @@ def test_main_writes_crash_log_for_unexpected_failure(monkeypatch: pytest.Monkey
         patch("cyoa.db.story_logger.StoryLogger", return_value=logger_service),
         patch("cyoa.ui.app.CYOAApp", return_value=app),
     ):
-        exit_code = main.main([])
+        exit_code = cli.main([])
 
     assert exit_code == 1
     assert (
@@ -430,7 +431,7 @@ def test_main_returns_actionable_error_for_terminal_attach_failure(
         patch("cyoa.db.story_logger.StoryLogger", return_value=logger_service),
         patch("cyoa.ui.app.CYOAApp", return_value=app),
     ):
-        exit_code = main.main([])
+        exit_code = cli.main([])
 
     assert exit_code == 2
     assert "could not attach to this terminal session" in stderr.getvalue().lower()
@@ -454,7 +455,7 @@ def test_main_persists_resolved_user_config(monkeypatch: pytest.MonkeyPatch) -> 
         patch("cyoa.ui.app.CYOAApp") as app_cls,
     ):
         app_cls.return_value.run.return_value = None
-        exit_code = main.main([])
+        exit_code = cli.main([])
 
     assert exit_code == 0
     update_config.assert_called_once()
@@ -478,7 +479,7 @@ def test_main_passes_startup_accessibility_overrides_to_app(
         patch("cyoa.ui.app.CYOAApp") as app_cls,
     ):
         app_cls.return_value.run.return_value = None
-        exit_code = main.main(["--screen-reader", "--high-contrast", "--reduced-motion"])
+        exit_code = cli.main(["--screen-reader", "--high-contrast", "--reduced-motion"])
 
     assert exit_code == 0
     app_config = app_cls.call_args.args[0]
@@ -507,7 +508,7 @@ def test_main_does_not_persist_startup_accessibility_overrides(
         patch("cyoa.ui.app.CYOAApp") as app_cls,
     ):
         app_cls.return_value.run.return_value = None
-        exit_code = main.main(["--screen-reader", "--high-contrast", "--reduced-motion"])
+        exit_code = cli.main(["--screen-reader", "--high-contrast", "--reduced-motion"])
 
     assert exit_code == 0
     assert "screen_reader_mode" not in update_config.call_args.kwargs

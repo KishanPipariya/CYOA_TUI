@@ -33,6 +33,28 @@ logger = logging.getLogger(__name__)
 class PersistenceMixin:
     """Mixin for save/load game persistence."""
 
+    _REQUIRED_SAVE_KEYS = {
+        "starting_prompt",
+        "context_history",
+        "prompt_config",
+        "turn_count",
+        "inventory",
+        "player_stats",
+        "current_node",
+        "ui_state",
+        "saved_at",
+    }
+    _REQUIRED_UI_STATE_KEYS = {
+        "current_story_text",
+        "story_segments",
+        "journal_entries",
+        "current_turn_text",
+        "active_turn",
+        "mood",
+        "journal_panel_collapsed",
+        "story_map_panel_collapsed",
+    }
+
     @staticmethod
     def _autosave_file_path() -> str:
         return os.path.join(constants.SAVES_DIR, "autosave_latest.json")
@@ -247,10 +269,109 @@ class PersistenceMixin:
 
     @staticmethod
     def _coerce_ui_state(payload: object) -> dict[str, object]:
-        """Normalize optional UI save data so partial files still restore safely."""
+        """Return UI state for non-hydrating export paths."""
         if not isinstance(payload, dict):
             return {}
         return payload
+
+    @classmethod
+    def _validate_save_payload(cls, payload: object) -> dict[str, object]:
+        data = cls._require_payload_object(payload)
+        cls._require_keys(data, cls._REQUIRED_SAVE_KEYS, "save payload")
+        cls._validate_engine_save_fields(data)
+        cls._validate_ui_state(data["ui_state"])
+        cls._validate_restore_points(data.get("restore_points"))
+        return data
+
+    @classmethod
+    def _validate_ui_state(cls, payload: object) -> None:
+        data = cls._require_dict(payload, "save payload has invalid ui_state")
+        cls._require_keys(data, cls._REQUIRED_UI_STATE_KEYS, "ui_state")
+        cls._validate_ui_scalar_fields(data)
+        cls._validate_story_segments(data["story_segments"])
+        cls._validate_journal_entries(data["journal_entries"])
+
+    @staticmethod
+    def _require_payload_object(payload: object) -> dict[str, object]:
+        return PersistenceMixin._require_dict(payload, "save payload must be a JSON object")
+
+    @staticmethod
+    def _require_dict(payload: object, message: str) -> dict[str, object]:
+        if not isinstance(payload, dict):
+            raise ValueError(message)
+        return cast(dict[str, object], payload)
+
+    @staticmethod
+    def _require_keys(payload: dict[str, object], required_keys: set[str], label: str) -> None:
+        missing = sorted(required_keys.difference(payload))
+        if missing:
+            raise ValueError(f"{label} is missing required keys: {', '.join(missing)}")
+
+    @staticmethod
+    def _validate_engine_save_fields(payload: dict[str, object]) -> None:
+        if not isinstance(payload["starting_prompt"], str) or not payload["starting_prompt"]:
+            raise ValueError("save payload has invalid starting_prompt")
+        if not isinstance(payload["context_history"], list):
+            raise ValueError("save payload has invalid context_history")
+        if not isinstance(payload["prompt_config"], dict):
+            raise ValueError("save payload has invalid prompt_config")
+        if isinstance(payload["turn_count"], bool) or not isinstance(payload["turn_count"], int):
+            raise ValueError("save payload has invalid turn_count")
+        if not isinstance(payload["inventory"], list):
+            raise ValueError("save payload has invalid inventory")
+        if not isinstance(payload["player_stats"], dict):
+            raise ValueError("save payload has invalid player_stats")
+        if payload["current_node"] is not None and not isinstance(payload["current_node"], dict):
+            raise ValueError("save payload has invalid current_node")
+        if not isinstance(payload["saved_at"], str) or not payload["saved_at"]:
+            raise ValueError("save payload has invalid saved_at")
+
+    @staticmethod
+    def _validate_ui_scalar_fields(payload: dict[str, object]) -> None:
+        if not isinstance(payload["current_story_text"], str):
+            raise ValueError("ui_state has invalid current_story_text")
+        if not isinstance(payload["current_turn_text"], str):
+            raise ValueError("ui_state has invalid current_turn_text")
+        if isinstance(payload["active_turn"], bool) or not isinstance(payload["active_turn"], int):
+            raise ValueError("ui_state has invalid active_turn")
+        if not isinstance(payload["mood"], str):
+            raise ValueError("ui_state has invalid mood")
+        if not isinstance(payload["journal_panel_collapsed"], bool):
+            raise ValueError("ui_state has invalid journal_panel_collapsed")
+        if not isinstance(payload["story_map_panel_collapsed"], bool):
+            raise ValueError("ui_state has invalid story_map_panel_collapsed")
+
+    @classmethod
+    def _validate_story_segments(cls, payload: object) -> None:
+        if cls._coerce_story_segments(payload) != payload:
+            raise ValueError("ui_state has invalid story_segments")
+
+    @staticmethod
+    def _validate_journal_entries(journal_entries: object) -> None:
+        if not isinstance(journal_entries, list):
+            raise ValueError("ui_state has invalid journal_entries")
+        for entry in journal_entries:
+            if not isinstance(entry, dict):
+                raise ValueError("ui_state has invalid journal entry")
+            if not isinstance(entry.get("label"), str):
+                raise ValueError("ui_state has invalid journal entry label")
+            if isinstance(entry.get("scene_index"), bool) or not isinstance(
+                entry.get("scene_index"), int
+            ):
+                raise ValueError("ui_state has invalid journal entry scene_index")
+            if not isinstance(entry.get("entry_kind"), str):
+                raise ValueError("ui_state has invalid journal entry kind")
+
+    @classmethod
+    def _validate_restore_points(cls, restore_points: object) -> None:
+        if restore_points is None:
+            return
+        if not isinstance(restore_points, dict):
+            raise ValueError("save payload has invalid restore_points")
+        for name, restore_point in restore_points.items():
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("save payload has invalid restore point name")
+            cls._validate_save_payload(restore_point)
 
     @staticmethod
     def _coerce_journal_entries(payload: object) -> list[dict[str, object]]:
@@ -405,7 +526,8 @@ class PersistenceMixin:
         try:
             with open(save_path, encoding="utf-8") as f:
                 data = json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
+            data = self._validate_save_payload(data)
+        except (OSError, json.JSONDecodeError, ValueError) as e:
             app.notify(f"Load failed: {e}", severity="error", timeout=3)
             return
         self._restore_from_payload(data, source_label="Loaded save")
@@ -423,8 +545,14 @@ class PersistenceMixin:
         if not host.engine:
             return
 
+        try:
+            data = self._validate_save_payload(data)
+        except ValueError as exc:
+            app.notify(f"Load failed: {exc}", severity="error", timeout=3)
+            return
+
         self._clear_restore_runtime_state(host, app)
-        ui_state = self._coerce_ui_state(data.get("ui_state"))
+        ui_state = cast(dict[str, object], data["ui_state"])
         host.engine.load_save_data(data)
         host.invalidate_scene_caches(keep_scene_id=host.engine.state.current_scene_id)
         host.turn_count = host.engine.state.turn_count

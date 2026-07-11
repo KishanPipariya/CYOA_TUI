@@ -588,7 +588,7 @@ class MockProvider(LLMProvider):
                 "stat_updates": {"reputation": 1},
             }
         else:
-            # Fallback (StoryNode or unknown) — include legacy strings for test compatibility
+            # Fallback (StoryNode or unknown)
             data = {
                 "narrative": "You are standing in a digital void. Mock narrative.",
                 "title": "Mock Title",

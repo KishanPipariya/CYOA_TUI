@@ -149,9 +149,6 @@ warn_unused_ignores = false
 module = ["tests.test_tui", "tests.test_ui_units"]
 ignore_errors = true
 
-[tool.setuptools]
-py-modules = ["main"]
-
 [tool.setuptools.packages.find]
 include = ["cyoa*"]
 

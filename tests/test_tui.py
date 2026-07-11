@@ -96,6 +96,57 @@ def _app_with_accessibility_config(**config_overrides: Any) -> CYOAApp:
         return CYOAApp(model_path="dummy_path.gguf")
 
 
+def _current_save_payload(**overrides: Any) -> dict[str, Any]:
+    current_node = overrides.pop(
+        "current_node",
+        {
+            "narrative": "Recovered scene",
+            "choices": [{"text": "Continue"}, {"text": "Wait"}],
+        },
+    )
+    ui_state = {
+        "current_story_text": "Recovered scene",
+        "story_segments": [{"kind": "story_turn", "text": "Recovered scene"}],
+        "journal_entries": [],
+        "current_turn_text": "Recovered scene",
+        "active_turn": 2,
+        "mood": "default",
+        "journal_panel_collapsed": False,
+        "story_map_panel_collapsed": True,
+    }
+    ui_state.update(overrides.pop("ui_state", {}))
+    payload = {
+        "starting_prompt": "Start",
+        "context_history": [{"role": "user", "content": "Start"}],
+        "prompt_config": {"goals": [], "directives": []},
+        "story_title": "Recovered Adventure",
+        "turn_count": 2,
+        "inventory": ["Torch"],
+        "player_stats": {"health": 77, "gold": 3, "reputation": 1},
+        "current_node": current_node,
+        "current_scene_id": "scene-2",
+        "last_choice_text": "Continue",
+        "last_choice_submission": "Continue",
+        "timeline_metadata": [],
+        "objectives": [],
+        "faction_reputation": {},
+        "npc_affinity": {},
+        "story_flags": [],
+        "lore_entries": [],
+        "companions": [],
+        "world_time": {"day": 1, "hour": 8},
+        "campaign": None,
+        "campaign_progress": None,
+        "undo_history": [],
+        "redo_history": [],
+        "bookmarks": {},
+        "ui_state": ui_state,
+        "saved_at": "2026-07-11T00:00:00Z",
+    }
+    payload.update(overrides)
+    return payload
+
+
 async def _wait_for(
     predicate: Any,
     *,
@@ -1042,7 +1093,7 @@ async def test_character_sheet_modal_opens_and_reflects_current_world_state(
             lambda: len(list(app.query_one("#choices-container", Container).query(Button))) >= 2,
         )
         choices = list(app.query_one("#choices-container", Container).query(Button))
-        assert app.focused is choices[0]
+        await _wait_for_pilot(pilot, lambda: app.focused is choices[0])
 
         app.engine.state.objectives = [
             {"id": "escape", "text": "Escape the dungeon", "status": "active"}
@@ -3203,31 +3254,25 @@ def test_list_manual_save_files_excludes_autosave(tmp_path, monkeypatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_restore_from_save_handles_malformed_ui_state(mock_app_dependencies, tmp_path):
+async def test_restore_from_save_rejects_malformed_ui_state(mock_app_dependencies, tmp_path):
     save_path = tmp_path / "broken-ui-save.json"
     save_path.write_text(
         json.dumps(
-            {
-                "starting_prompt": "Start",
-                "context_history": [],
-                "turn_count": 2,
-                "inventory": ["Torch"],
-                "player_stats": {"health": 77, "gold": 3, "reputation": 1},
-                "current_node": {
-                    "narrative": "Recovered scene",
-                    "choices": [{"text": "Continue"}, {"text": "Wait"}],
-                },
-                "ui_state": {
+            _current_save_payload(
+                ui_state={
                     "current_story_text": 99,
                     "current_turn_text": None,
+                    "story_segments": [{"kind": "story_turn", "text": "Recovered scene"}],
                     "journal_entries": [
                         "bad",
                         {"label": 55, "scene_index": "oops", "entry_kind": 8},
                     ],
+                    "active_turn": 2,
+                    "mood": "default",
                     "journal_panel_collapsed": False,
                     "story_map_panel_collapsed": "invalid",
                 },
-            }
+            )
         ),
         encoding="utf-8",
     )
@@ -3239,15 +3284,8 @@ async def test_restore_from_save_handles_malformed_ui_state(mock_app_dependencie
         app._restore_from_save(str(save_path))
         await pilot.pause(0.1)
 
-        assert app._current_story
-        assert app._current_story == app._current_turn_text
-        journal_panel = app.query_one("#journal-panel", Container)
-        map_panel = app.query_one("#story-map-panel", Container)
-        assert not journal_panel.has_class("panel-collapsed")
-        assert map_panel.has_class("panel-collapsed")
-        journal_items = list(app.query_one("#journal-list", ListView).children)
-        assert len(journal_items) == 1
-        assert "Unknown Turn" in journal_items[0].query_one(Label).render().plain
+        assert app.turn_count == 1
+        assert any("Load failed" in line for line in app.get_notification_history_lines())
 
 
 @pytest.mark.asyncio
@@ -3257,24 +3295,23 @@ async def test_restore_from_save_tolerates_missing_story_map_panel(
     save_path = tmp_path / "missing-story-map-save.json"
     save_path.write_text(
         json.dumps(
-            {
-                "starting_prompt": "Start",
-                "context_history": [],
-                "story_title": "Recovered Adventure",
-                "turn_count": 2,
-                "inventory": ["Torch"],
-                "player_stats": {"health": 77, "gold": 3, "reputation": 1},
-                "current_node": {
+            _current_save_payload(
+                story_title="Recovered Adventure",
+                current_node={
                     "narrative": "Recovered scene",
                     "choices": [{"text": "Continue"}, {"text": "Wait"}],
                 },
-                "ui_state": {
+                ui_state={
                     "current_story_text": "Recovered scene",
+                    "story_segments": [{"kind": "story_turn", "text": "Recovered scene"}],
                     "current_turn_text": "Recovered scene",
                     "journal_entries": [],
+                    "active_turn": 2,
+                    "mood": "default",
+                    "journal_panel_collapsed": False,
                     "story_map_panel_collapsed": False,
                 },
-            }
+            )
         ),
         encoding="utf-8",
     )
@@ -3306,18 +3343,16 @@ async def test_restore_from_save_rebuilds_story_timeline(mock_app_dependencies, 
     save_path = tmp_path / "timeline-save.json"
     save_path.write_text(
         json.dumps(
-            {
-                "starting_prompt": "Start",
-                "context_history": [],
-                "story_title": "Timeline Adventure",
-                "turn_count": 3,
-                "inventory": ["Compass"],
-                "player_stats": {"health": 91, "gold": 4, "reputation": 2},
-                "current_node": {
+            _current_save_payload(
+                story_title="Timeline Adventure",
+                turn_count=3,
+                inventory=["Compass"],
+                player_stats={"health": 91, "gold": 4, "reputation": 2},
+                current_node={
                     "narrative": "You return to the crossroads.",
                     "choices": [{"text": "Take the east road"}, {"text": "Camp"}],
                 },
-                "timeline_metadata": [
+                timeline_metadata=[
                     {
                         "kind": "branch_restore",
                         "source_scene_id": "scene-3",
@@ -3325,7 +3360,7 @@ async def test_restore_from_save_rebuilds_story_timeline(mock_app_dependencies, 
                         "restored_turn": 2,
                     }
                 ],
-                "ui_state": {
+                ui_state={
                     "current_story_text": "Opening scene.\n\n> **You chose:** Go North\n\n---\n\nNorth path.",
                     "current_turn_text": "You return to the crossroads.",
                     "story_segments": [
@@ -3346,10 +3381,12 @@ async def test_restore_from_save_rebuilds_story_timeline(mock_app_dependencies, 
                             "entry_kind": "branch",
                         },
                     ],
+                    "active_turn": 3,
+                    "mood": "default",
                     "journal_panel_collapsed": False,
                     "story_map_panel_collapsed": False,
                 },
-            }
+            )
         ),
         encoding="utf-8",
     )
@@ -3391,7 +3428,7 @@ async def test_restore_from_save_rebuilds_story_timeline(mock_app_dependencies, 
 
 
 @pytest.mark.asyncio
-async def test_restore_from_save_accepts_partial_payload(mock_app_dependencies, tmp_path):
+async def test_restore_from_save_rejects_partial_payload(mock_app_dependencies, tmp_path):
     save_path = tmp_path / "partial-save.json"
     save_path.write_text(
         json.dumps(
@@ -3413,27 +3450,23 @@ async def test_restore_from_save_accepts_partial_payload(mock_app_dependencies, 
         app._restore_from_save(str(save_path))
         await pilot.pause(0.1)
 
-        assert app.engine.state.story_title == "Partial Adventure"
         assert app.engine.state.turn_count == 1
         assert app.turn_count == 1
-        assert app.engine.state.inventory == []
-        assert app._current_story
-        buttons = list(app.query_one("#choices-container", Container).query(Button))
-        assert len(buttons) == 2
+        assert any("Load failed" in line for line in app.get_notification_history_lines())
 
 
 @pytest.mark.asyncio
-async def test_restore_from_save_ignores_malformed_story_segments(mock_app_dependencies, tmp_path):
+async def test_restore_from_save_rejects_malformed_story_segments(mock_app_dependencies, tmp_path):
     save_path = tmp_path / "bad-story-segments.json"
     save_path.write_text(
         json.dumps(
-            {
-                "story_title": "Broken Timeline",
-                "current_node": {
+            _current_save_payload(
+                story_title="Broken Timeline",
+                current_node={
                     "narrative": "Recovered ending",
                     "choices": [{"text": "Continue"}],
                 },
-                "ui_state": {
+                ui_state={
                     "current_story_text": "Recovered history",
                     "current_turn_text": "Recovered ending",
                     "story_segments": [
@@ -3441,8 +3474,13 @@ async def test_restore_from_save_ignores_malformed_story_segments(mock_app_depen
                         {"kind": "bad", "text": "ignored"},
                         "oops",
                     ],
+                    "journal_entries": [],
+                    "active_turn": 2,
+                    "mood": "default",
+                    "journal_panel_collapsed": False,
+                    "story_map_panel_collapsed": True,
                 },
-            }
+            )
         ),
         encoding="utf-8",
     )
@@ -3454,14 +3492,12 @@ async def test_restore_from_save_ignores_malformed_story_segments(mock_app_depen
         app._restore_from_save(str(save_path))
         await pilot.pause(0.1)
 
-        story_turns = list(app.query_one("#story-container").query(".story-turn"))
-        assert len(story_turns) == 1
-        assert app._current_turn_text == "Recovered ending"
-        assert app._story_segments == [{"kind": "story_turn", "text": "Recovered ending"}]
+        assert app.turn_count == 1
+        assert any("Load failed" in line for line in app.get_notification_history_lines())
 
 
 @pytest.mark.asyncio
-async def test_restore_from_save_does_not_rebuild_branch_context_without_story_segments(
+async def test_restore_from_save_rejects_legacy_branch_payload_without_story_segments(
     mock_app_dependencies, tmp_path
 ):
     save_path = tmp_path / "legacy-branch-save.json"
@@ -3500,16 +3536,12 @@ async def test_restore_from_save_does_not_rebuild_branch_context_without_story_s
         app._restore_from_save(str(save_path))
         await pilot.pause(0.1)
 
-        assert app.turn_count == 4
-        assert app._story_segments == [
-            {"kind": "story_turn", "text": "You return to the crossroads."},
-        ]
-        journal_items = list(app.query_one("#journal-list", ListView).children)
-        assert len(journal_items) == 0
+        assert app.turn_count == 1
+        assert any("Load failed" in line for line in app.get_notification_history_lines())
 
 
 @pytest.mark.asyncio
-async def test_restore_from_save_ignores_branch_state_without_structured_timeline(
+async def test_restore_from_save_rejects_branch_state_without_structured_timeline(
     mock_app_dependencies, tmp_path
 ):
     save_path = tmp_path / "bad-branch-state-save.json"
@@ -3547,10 +3579,8 @@ async def test_restore_from_save_ignores_branch_state_without_structured_timelin
         app._restore_from_save(str(save_path))
         await pilot.pause(0.1)
 
-        assert app.turn_count == 3
-        assert app._story_segments == [
-            {"kind": "story_turn", "text": "Recovered branch scene"},
-        ]
+        assert app.turn_count == 1
+        assert any("Load failed" in line for line in app.get_notification_history_lines())
 
 
 @pytest.mark.asyncio
