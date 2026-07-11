@@ -34,6 +34,9 @@ uv run cyoa-tui --runtime-preset local-fast
 uv run cyoa-tui --runtime-preset local-quality
 ```
 
+`mock-smoke` is the safe startup path for a fresh machine: it starts without a local
+model and is useful for demos, smoke checks, and verifying the UI.
+
 You can also force key accessibility modes before the full UI renders:
 
 ```bash
@@ -47,6 +50,13 @@ On first launch, choose one of these options:
 
 - `Quick Demo` for instant play with the built-in mock backend
 - `Download Local Model` to save a recommended GGUF into the app data folder
+
+If you already have a `.gguf` model, launch with `--model /path/to/model.gguf` or
+set it from Settings. Local model mode requires the `local-llm` extra from source.
+
+Manual saves, autosaves, exports, settings, models, logs, and crash diagnostics are
+stored in standard app-data folders for your platform. If a previous session has an
+autosave, startup offers to resume it or start fresh.
 
 If you already have a packaged release build, unpack it and run `./cyoa-tui` from a terminal. The v0.1.0 packaged builds target macOS and Linux; Windows users should run from source for this release.
 

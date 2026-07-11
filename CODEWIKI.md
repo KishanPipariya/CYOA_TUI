@@ -1,13 +1,13 @@
 # CYOA TUI CodeWiki
 
-This document describes the repository as it exists on 2026-05-01. It is a fast technical map for contributors, reviewers, and anyone trying to understand the current architecture without reading the entire codebase first.
+This document describes the repository as it exists on 2026-07-11. It is a fast technical map for contributors, reviewers, and anyone trying to understand the current architecture without reading the entire codebase first.
 
 ## 1. Project Snapshot
 
 - App type: terminal-first interactive fiction built with `Textual`
 - Python: `>=3.13`
 - Packaged command: `cyoa-tui`, defined in [`pyproject.toml`](pyproject.toml)
-- Script entrypoint: [`cyoa/cli.py`](cyoa/cli.py), which delegates to [`main.py`](main.py)
+- Authoritative startup entrypoint: [`cyoa/cli.py`](cyoa/cli.py)
 - Main package: [`cyoa/`](cyoa/)
 - Built-in providers:
   - `mock` for demos, tests, and safe startup
@@ -45,15 +45,19 @@ The current codebase supports:
   - defines the `cyoa-tui` console script
   - declares optional extras and dev tooling
 - [`cyoa/cli.py`](cyoa/cli.py)
-  - thin wrapper around `main.main`
-- [`main.py`](main.py)
   - loads `.env` before other imports that read environment variables
   - parses CLI flags
-  - validates startup configuration
+  - delegates startup validation to [`cyoa/core/startup.py`](cyoa/core/startup.py)
   - persists resolved user config
   - loads theme content or a direct prompt override
   - creates [`StoryLogger`](cyoa/db/story_logger.py)
   - starts [`CYOAApp`](cyoa/ui/app.py)
+- [`cyoa/core/startup.py`](cyoa/core/startup.py)
+  - validates provider, runtime preset, generation preset, model path, and numeric environment settings
+  - resolves safe default provider behavior from CLI, environment, saved config, and runtime presets
+- [`scripts/build_binary.py`](scripts/build_binary.py)
+  - builds the PyInstaller bundle from [`cyoa/cli.py`](cyoa/cli.py)
+  - includes theme, resource, prompt-template, Textual, and stylesheet assets
 
 ### Core runtime
 
@@ -115,7 +119,7 @@ The current codebase supports:
 
 ### Assets, scripts, and docs
 
-- [`themes/`](themes): shipped narrative themes and palette definitions
+- [`cyoa/themes/`](cyoa/themes): shipped narrative themes and palette definitions
 - [`monitoring/`](monitoring): OTEL collector, Prometheus, and Grafana config
 - [`docker-compose.yml`](docker-compose.yml): local stack for monitoring and Neo4j
 - [`scripts/`](scripts)
@@ -131,23 +135,25 @@ The current codebase supports:
 The packaged startup path is:
 
 ```text
-cyoa-tui -> cyoa.cli:main -> main.main
+cyoa-tui -> cyoa.cli:main
 ```
 
-`main.py` is intentionally strict and current startup behavior is easy to verify from code:
+Startup validation is split between [`cyoa/cli.py`](cyoa/cli.py) and [`cyoa/core/startup.py`](cyoa/core/startup.py), with `cyoa.cli.main` as the only runtime entrypoint. Current startup behavior is easy to verify from code:
 
 1. `.env` is loaded immediately.
 2. Observability setup is initialized before app launch.
 3. User-facing directories are created.
 4. CLI arguments are parsed.
-5. Startup config is resolved from CLI, environment, runtime presets, and saved config.
+5. Startup config is resolved by `validate_startup_config` from CLI, environment, runtime presets, and saved config.
 6. Invalid providers, presets, themes, or numeric env values fail fast with exit code `2`.
 7. Resolved provider, model path, theme, preset, and runtime preset are saved back to user config.
 8. Theme data is loaded unless `--prompt` overrides it directly.
 9. `StoryLogger` subscribes to engine events.
 10. `CYOAApp` is created and run.
 
-Current CLI flags in [`main.py`](main.py):
+PyInstaller packaging follows the same path. [`scripts/build_binary.py`](scripts/build_binary.py) passes [`cyoa/cli.py`](cyoa/cli.py) as the PyInstaller entry script, and release smoke checks execute the packaged `cyoa-tui --help`.
+
+Current CLI flags in [`cyoa/cli.py`](cyoa/cli.py):
 
 - `--model`
 - `--theme`
@@ -236,6 +242,8 @@ The broker also manages:
 - background summarization
 - provider state save/restore for speculation
 
+Older rolling-summary compatibility helpers are no longer part of the broker API. Current summarization state is hierarchical on `StoryContext` (`scene_summary`, `chapter_summary`, and `arc_summary`) and is updated through `set_hierarchical_summary`.
+
 ### Optional memory
 
 [`RAGManager`](cyoa/core/rag.py) separates:
@@ -262,7 +270,7 @@ It injects these memories into `StoryContext` and rebuilds memory stores after b
 ```mermaid
 flowchart TD
     A[cyoa-tui] --> B[cyoa.cli.main]
-    B --> C[main.py]
+    B --> C[cyoa.core.startup]
     C --> D[resolve startup config and theme]
     D --> E[create StoryLogger and CYOAApp]
     E --> F[CYOAApp on_mount]
@@ -402,7 +410,7 @@ Current high-signal events:
 
 ### CLI
 
-See [`main.py`](main.py) for the authoritative parser.
+See [`cyoa/cli.py`](cyoa/cli.py) for the authoritative parser.
 
 ### Environment variables
 
@@ -471,6 +479,8 @@ Important files and directories include:
 
 File writes use owner-only permissions where supported via [`open_private_text_file`](cyoa/core/support.py).
 
+Save and autosave restore flows hydrate through [`cyoa/ui/mixins/persistence.py`](cyoa/ui/mixins/persistence.py). Before restoring, `_validate_save_payload` requires the engine payload fields (`starting_prompt`, `context_history`, `prompt_config`, `turn_count`, `inventory`, `player_stats`, `current_node`, `saved_at`) and the UI payload fields (`current_story_text`, `story_segments`, `journal_entries`, `current_turn_text`, `active_turn`, `mood`, panel collapse flags). Malformed restore points are rejected before hydration.
+
 ## 12. Optional Integrations and Degraded Mode
 
 The current architecture is intentionally resilient when optional services are missing.
@@ -501,7 +511,7 @@ The current architecture is intentionally resilient when optional services are m
 
 Themes are more than prompt skins.
 
-Each theme in [`themes/`](themes):
+Each theme in [`cyoa/themes/`](cyoa/themes):
 
 - provides a narrative prompt
 - provides spinner frames and accent color
@@ -515,7 +525,7 @@ Each theme in [`themes/`](themes):
 
 This repo has broad test coverage across startup, engine, UI, persistence, packaging, themes, and optional integrations. High-signal modules include:
 
-- [`tests/test_main.py`](tests/test_main.py): startup validation and entrypoint behavior
+- [`tests/test_main.py`](tests/test_main.py): startup validation and `cyoa.cli.main` behavior
 - [`tests/test_tui.py`](tests/test_tui.py): integrated Textual behavior
 - [`tests/test_ui_units.py`](tests/test_ui_units.py): presenter, export, and UI helper logic
 - [`tests/test_engine_state.py`](tests/test_engine_state.py): engine state and restore flows
@@ -576,7 +586,7 @@ uv run python scripts/build_binary.py
 
 The current codebase is best understood as four cooperating layers:
 
-- startup and settings resolution in `main.py` and `cyoa/core`
+- startup and settings resolution in `cyoa/cli.py` and `cyoa/core`
 - narrative orchestration in `StoryEngine` and `ModelBroker`
 - optional persistence and retrieval services in `cyoa/db`
 - a fairly feature-rich Textual product shell in `cyoa/ui`
