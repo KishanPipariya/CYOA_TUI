@@ -12,6 +12,7 @@ from textual.widgets import Button, Label, ListView, Markdown
 
 from cyoa.core import constants
 from cyoa.core.support import open_private_text_file
+from cyoa.ui import persistence_payloads as payloads
 from cyoa.ui.commands import ExportStoryCommand, SaveGameCommand, UICommandContext
 from cyoa.ui.components import JournalListItem
 from cyoa.ui.mixins.contracts import (
@@ -21,7 +22,6 @@ from cyoa.ui.mixins.contracts import (
     as_textual_app,
 )
 from cyoa.ui.presenters import (
-    build_accessible_export,
     classify_ending_type,
     format_ending_type_label,
     identify_newly_unlocked_hidden_achievements,
@@ -69,8 +69,7 @@ class PersistenceMixin:
 
     @staticmethod
     def _clone_payload(payload: dict[str, object]) -> dict[str, object]:
-        """Deep-copy a JSON-compatible payload without sharing nested state."""
-        return cast(dict[str, object], json.loads(json.dumps(payload)))
+        return payloads.clone_payload(payload)
 
     @classmethod
     def _list_manual_save_files(cls) -> list[str]:
@@ -269,182 +268,67 @@ class PersistenceMixin:
 
     @staticmethod
     def _coerce_ui_state(payload: object) -> dict[str, object]:
-        """Return UI state for non-hydrating export paths."""
-        if not isinstance(payload, dict):
-            return {}
-        return payload
+        return payloads.coerce_ui_state(payload)
 
     @classmethod
     def _validate_save_payload(cls, payload: object) -> dict[str, object]:
-        data = cls._require_payload_object(payload)
-        cls._require_keys(data, cls._REQUIRED_SAVE_KEYS, "save payload")
-        cls._validate_engine_save_fields(data)
-        cls._validate_ui_state(data["ui_state"])
-        cls._validate_restore_points(data.get("restore_points"))
-        return data
+        return payloads.validate_save_payload(payload)
 
     @classmethod
     def _validate_ui_state(cls, payload: object) -> None:
-        data = cls._require_dict(payload, "save payload has invalid ui_state")
-        cls._require_keys(data, cls._REQUIRED_UI_STATE_KEYS, "ui_state")
-        cls._validate_ui_scalar_fields(data)
-        cls._validate_story_segments(data["story_segments"])
-        cls._validate_journal_entries(data["journal_entries"])
+        payloads.validate_ui_state(payload)
 
     @staticmethod
     def _require_payload_object(payload: object) -> dict[str, object]:
-        return PersistenceMixin._require_dict(payload, "save payload must be a JSON object")
+        return payloads.require_dict(payload, "save payload must be a JSON object")
 
     @staticmethod
     def _require_dict(payload: object, message: str) -> dict[str, object]:
-        if not isinstance(payload, dict):
-            raise ValueError(message)
-        return cast(dict[str, object], payload)
+        return payloads.require_dict(payload, message)
 
     @staticmethod
     def _require_keys(payload: dict[str, object], required_keys: set[str], label: str) -> None:
-        missing = sorted(required_keys.difference(payload))
-        if missing:
-            raise ValueError(f"{label} is missing required keys: {', '.join(missing)}")
+        payloads.require_keys(payload, required_keys, label)
 
     @staticmethod
     def _validate_engine_save_fields(payload: dict[str, object]) -> None:
-        if not isinstance(payload["starting_prompt"], str) or not payload["starting_prompt"]:
-            raise ValueError("save payload has invalid starting_prompt")
-        if not isinstance(payload["context_history"], list):
-            raise ValueError("save payload has invalid context_history")
-        if not isinstance(payload["prompt_config"], dict):
-            raise ValueError("save payload has invalid prompt_config")
-        if isinstance(payload["turn_count"], bool) or not isinstance(payload["turn_count"], int):
-            raise ValueError("save payload has invalid turn_count")
-        if not isinstance(payload["inventory"], list):
-            raise ValueError("save payload has invalid inventory")
-        if not isinstance(payload["player_stats"], dict):
-            raise ValueError("save payload has invalid player_stats")
-        if payload["current_node"] is not None and not isinstance(payload["current_node"], dict):
-            raise ValueError("save payload has invalid current_node")
-        if not isinstance(payload["saved_at"], str) or not payload["saved_at"]:
-            raise ValueError("save payload has invalid saved_at")
+        payloads.validate_engine_save_fields(payload)
 
     @staticmethod
     def _validate_ui_scalar_fields(payload: dict[str, object]) -> None:
-        if not isinstance(payload["current_story_text"], str):
-            raise ValueError("ui_state has invalid current_story_text")
-        if not isinstance(payload["current_turn_text"], str):
-            raise ValueError("ui_state has invalid current_turn_text")
-        if isinstance(payload["active_turn"], bool) or not isinstance(payload["active_turn"], int):
-            raise ValueError("ui_state has invalid active_turn")
-        if not isinstance(payload["mood"], str):
-            raise ValueError("ui_state has invalid mood")
-        if not isinstance(payload["journal_panel_collapsed"], bool):
-            raise ValueError("ui_state has invalid journal_panel_collapsed")
-        if not isinstance(payload["story_map_panel_collapsed"], bool):
-            raise ValueError("ui_state has invalid story_map_panel_collapsed")
+        payloads.validate_ui_scalar_fields(payload)
 
     @classmethod
     def _validate_story_segments(cls, payload: object) -> None:
-        if cls._coerce_story_segments(payload) != payload:
-            raise ValueError("ui_state has invalid story_segments")
+        payloads.validate_story_segments(payload)
 
     @staticmethod
     def _validate_journal_entries(journal_entries: object) -> None:
-        if not isinstance(journal_entries, list):
-            raise ValueError("ui_state has invalid journal_entries")
-        for entry in journal_entries:
-            if not isinstance(entry, dict):
-                raise ValueError("ui_state has invalid journal entry")
-            if not isinstance(entry.get("label"), str):
-                raise ValueError("ui_state has invalid journal entry label")
-            if isinstance(entry.get("scene_index"), bool) or not isinstance(
-                entry.get("scene_index"), int
-            ):
-                raise ValueError("ui_state has invalid journal entry scene_index")
-            if not isinstance(entry.get("entry_kind"), str):
-                raise ValueError("ui_state has invalid journal entry kind")
+        payloads.validate_journal_entries(journal_entries)
 
     @classmethod
     def _validate_restore_points(cls, restore_points: object) -> None:
-        if restore_points is None:
-            return
-        if not isinstance(restore_points, dict):
-            raise ValueError("save payload has invalid restore_points")
-        for name, restore_point in restore_points.items():
-            if not isinstance(name, str) or not name.strip():
-                raise ValueError("save payload has invalid restore point name")
-            cls._validate_save_payload(restore_point)
+        payloads.validate_restore_points(restore_points)
 
     @staticmethod
     def _coerce_journal_entries(payload: object) -> list[dict[str, object]]:
-        """Return only well-formed journal entry objects from a save payload."""
-        if not isinstance(payload, list):
-            return []
-        return [entry for entry in payload if isinstance(entry, dict)]
+        return payloads.coerce_journal_entries(payload)
 
     @staticmethod
     def _coerce_run_archive_entries(payload: object) -> list[dict[str, object]]:
-        """Normalize archived completed-run entries loaded from disk."""
-        if not isinstance(payload, list):
-            return []
-
-        entries: list[dict[str, object]] = []
-        for raw in payload:
-            if not isinstance(raw, dict):
-                continue
-            completed_at = raw.get("completed_at")
-            ending_type = raw.get("ending_type")
-            if not isinstance(completed_at, str) or not isinstance(ending_type, str):
-                continue
-            entries.append(cast(dict[str, object], raw))
-        return entries
+        return payloads.coerce_run_archive_entries(payload)
 
     @staticmethod
     def _coerce_restore_points(payload: object) -> dict[str, dict[str, object]]:
-        """Normalize persisted restore points from save files."""
-        if not isinstance(payload, dict):
-            return {}
-
-        normalized: dict[str, dict[str, object]] = {}
-        for raw_name, raw_point in payload.items():
-            if not isinstance(raw_name, str) or not raw_name.strip():
-                continue
-            if not isinstance(raw_point, dict):
-                continue
-            normalized[raw_name.strip()] = cast(dict[str, object], raw_point)
-        return normalized
+        return payloads.coerce_restore_points(payload)
 
     @staticmethod
     def _coerce_story_segments(payload: object) -> list[dict[str, str]]:
-        """Normalize structured story timeline entries from save payloads."""
-        if not isinstance(payload, list):
-            return []
-
-        normalized: list[dict[str, str]] = []
-        for entry in payload:
-            if not isinstance(entry, dict):
-                continue
-            kind = entry.get("kind")
-            text = entry.get("text")
-            if kind not in {"story_turn", "player_choice", "branch_marker"} or not isinstance(
-                text, str
-            ):
-                continue
-            normalized.append({"kind": kind, "text": text})
-        return normalized
+        return payloads.coerce_story_segments(payload)
 
     @staticmethod
     def _render_story_segments(segments: list[dict[str, str]]) -> str:
-        """Rebuild the flattened story text from structured timeline segments."""
-        story_text = ""
-        for segment in segments:
-            if segment["kind"] == "player_choice":
-                if story_text:
-                    story_text += "\n\n"
-                story_text += f"> {segment['text']}\n\n---\n\n"
-            elif segment["kind"] == "branch_marker":
-                story_text += f"\n\n***\n\n{segment['text']}"
-            else:
-                story_text += segment["text"]
-        return story_text
+        return payloads.render_story_segments(segments)
 
     def _snapshot_story_segments(self, host: object) -> list[dict[str, str]]:
         """Serialize structured timeline state, falling back to a flat story turn if needed."""
@@ -466,20 +350,7 @@ class PersistenceMixin:
 
     @staticmethod
     def _coerce_scene_index(value: object) -> int:
-        """Clamp scene indexes from save files to a safe non-negative int."""
-        if isinstance(value, bool):
-            return 0
-        if isinstance(value, int):
-            return max(0, value)
-        if isinstance(value, float):
-            return max(0, int(value))
-        if isinstance(value, (str, bytes, bytearray)):
-            try:
-                parsed = int(value)
-            except ValueError:
-                return 0
-            return max(0, parsed)
-        return 0
+        return payloads.coerce_scene_index(value)
 
     def action_save_game(self) -> None:
         """Serialize the current game state to a JSON save file."""
@@ -945,52 +816,15 @@ class PersistenceMixin:
 
     @staticmethod
     def _obsidian_safe_name(value: str) -> str:
-        """Return a conservative Markdown filename stem for vault exports."""
-        safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in value).strip()
-        return safe or "Untitled"
+        return payloads.obsidian_safe_name(value)
 
     def _write_obsidian_vault(self, payload: dict[str, object], safe_title: str) -> str:
         """Write an Obsidian-style Markdown vault with one note per scene."""
         vault_dir = os.path.join(self._exports_dir(), f"{safe_title}_vault")
         os.makedirs(vault_dir, exist_ok=True)
 
-        ui_state = self._coerce_ui_state(payload.get("ui_state"))
-        story_segments = self._coerce_story_segments(ui_state.get("story_segments"))
         story_title = str(payload.get("story_title") or "Untitled Adventure")
-        records: list[dict[str, object]] = []
-        current_turn = 0
-
-        for segment in story_segments:
-            kind = segment["kind"]
-            text = segment["text"].strip()
-            if not text:
-                continue
-            if kind == "story_turn":
-                current_turn += 1
-                records.append(
-                    {
-                        "kind": "turn",
-                        "turn": current_turn,
-                        "title": f"Turn {current_turn:02d}",
-                        "text": text,
-                        "choices": [],
-                    }
-                )
-                continue
-            if kind == "player_choice" and records:
-                choices = records[-1].setdefault("choices", [])
-                if isinstance(choices, list):
-                    choices.append(text)
-                continue
-            records.append(
-                {
-                    "kind": "branch",
-                    "turn": current_turn,
-                    "title": f"Branch Marker {len(records) + 1:02d}",
-                    "text": text,
-                    "choices": [],
-                }
-            )
+        records = payloads.build_obsidian_records(payload)
 
         note_names = [self._obsidian_safe_name(str(record["title"])) for record in records]
         index_lines = [
@@ -1038,106 +872,16 @@ class PersistenceMixin:
 
     @staticmethod
     def _obsidian_state_lines(payload: dict[str, object]) -> list[str]:
-        """Build compact final-state bullets for the vault index note."""
-        lines: list[str] = []
-        turn_count = payload.get("turn_count")
-        if isinstance(turn_count, int):
-            lines.append(f"- Turns: {turn_count}")
-        inventory = payload.get("inventory")
-        if isinstance(inventory, list):
-            carried = ", ".join(str(item) for item in inventory if isinstance(item, str))
-            lines.append(f"- Inventory: {carried or 'Empty'}")
-        player_stats = payload.get("player_stats")
-        if isinstance(player_stats, dict) and player_stats:
-            stats = ", ".join(f"{key}: {value}" for key, value in sorted(player_stats.items()))
-            lines.append(f"- Stats: {stats}")
-        flags = payload.get("story_flags")
-        if isinstance(flags, list) and flags:
-            lines.append("- Flags: " + ", ".join(str(flag) for flag in flags))
-        return lines
+        return payloads.obsidian_state_lines(payload)
 
     def _render_markdown_export(self, payload: dict[str, object]) -> str:
-        """Render a readable Markdown export from a save payload."""
-        ui_state = self._coerce_ui_state(payload.get("ui_state"))
-        story_segments = self._coerce_story_segments(ui_state.get("story_segments"))
-        lines = [f"# {payload.get('story_title') or 'Untitled Adventure'}", ""]
-        directives = payload.get("prompt_config", {})
-        if isinstance(directives, dict):
-            active = directives.get("directives")
-            if isinstance(active, list) and active:
-                lines.append("## Active Directives")
-                lines.extend(f"- {directive}" for directive in active if isinstance(directive, str))
-                lines.append("")
-        lines.append("## Story")
-        if story_segments:
-            for segment in story_segments:
-                if segment["kind"] == "player_choice":
-                    lines.append(f"> {segment['text']}")
-                elif segment["kind"] == "branch_marker":
-                    lines.append(f"---\n{segment['text']}")
-                else:
-                    lines.append(segment["text"])
-                lines.append("")
-        else:
-            current_story = ui_state.get("current_story_text")
-            if isinstance(current_story, str) and current_story:
-                lines.append(current_story)
-                lines.append("")
-        return "\n".join(lines).strip() + "\n"
+        return payloads.render_markdown_export(payload)
 
     def _render_accessible_export(self, payload: dict[str, object]) -> str:
-        """Render a plain-text transcript export for assistive-technology workflows."""
-        ui_state = self._coerce_ui_state(payload.get("ui_state"))
-        prompt_config = payload.get("prompt_config", {})
-        directives: list[str] = []
-        if isinstance(prompt_config, dict):
-            raw_directives = prompt_config.get("directives")
-            if isinstance(raw_directives, list):
-                directives = [
-                    directive for directive in raw_directives if isinstance(directive, str)
-                ]
-        story_title = payload.get("story_title")
-        turn_count = payload.get("turn_count")
-        saved_at = payload.get("saved_at")
-        current_story_text = ui_state.get("current_story_text")
-        inventory = payload.get("inventory")
-        player_stats = payload.get("player_stats")
-        objectives = payload.get("objectives")
-        world_time = payload.get("world_time")
-        last_choice_text = payload.get("last_choice_text")
-        return build_accessible_export(
-            story_title=story_title if isinstance(story_title, str) else None,
-            turn_count=turn_count if isinstance(turn_count, int) else None,
-            saved_at=saved_at if isinstance(saved_at, str) else None,
-            story_segments=self._coerce_story_segments(ui_state.get("story_segments")),
-            current_story_text=(
-                current_story_text if isinstance(current_story_text, str) else None
-            ),
-            directives=directives,
-            inventory=inventory if isinstance(inventory, list) else [],
-            player_stats=player_stats if isinstance(player_stats, dict) else {},
-            objectives=objectives if isinstance(objectives, list) else [],
-            world_time=world_time if isinstance(world_time, dict) else None,
-            last_choice_text=last_choice_text if isinstance(last_choice_text, str) else None,
-            last_resolved_choice_check=payload.get("last_resolved_choice_check"),
+        return payloads.render_accessible_export(
+            payload,
             verbosity=getattr(self, "scene_recap_verbosity", "standard"),
         )
 
     def _build_timeline_export(self, payload: dict[str, object]) -> dict[str, object]:
-        """Build the machine-readable JSON export."""
-        ui_state = self._coerce_ui_state(payload.get("ui_state"))
-        return {
-            "story_title": payload.get("story_title"),
-            "turn_count": payload.get("turn_count"),
-            "inventory": payload.get("inventory"),
-            "player_stats": payload.get("player_stats"),
-            "world_time": payload.get("world_time"),
-            "campaign": payload.get("campaign"),
-            "campaign_progress": payload.get("campaign_progress"),
-            "campaign_clocks": payload.get("campaign_clocks"),
-            "timeline_metadata": payload.get("timeline_metadata"),
-            "story_segments": self._coerce_story_segments(ui_state.get("story_segments")),
-            "journal_entries": self._coerce_journal_entries(ui_state.get("journal_entries")),
-            "prompt_config": payload.get("prompt_config"),
-            "saved_at": payload.get("saved_at"),
-        }
+        return payloads.build_timeline_export(payload)

@@ -5,18 +5,16 @@ import os
 import threading
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
 
 from textual import work
-from textual.app import App, ComposeResult, ScreenStackError
+from textual.app import App, ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.css.query import NoMatches
 from textual.events import Click, Resize
 from textual.notifications import SeverityLevel
 from textual.reactive import reactive
-from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.widget import Widget
 from textual.widgets import (
@@ -66,6 +64,14 @@ from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import is_rag_diagnostics_enabled
 from cyoa.llm.broker import ModelBroker
 from cyoa.llm.providers import LlamaCppProvider
+from cyoa.ui.app_focus import FocusModalMixin
+from cyoa.ui.app_notifications import NotificationStatusMixin
+from cyoa.ui.app_types import (
+    BufferedNotification,
+    CYOAAppConfig,
+    FocusTarget,
+    NotificationHistoryEntry,
+)
 from cyoa.ui.components import (
     CommandPaletteScreen,
     ConfirmScreen,
@@ -96,7 +102,6 @@ from cyoa.ui.presenters import (
     build_lore_codex_summary,
     build_scene_recap,
     build_world_state_summary,
-    format_status_message,
     loading_story_text,
 )
 from cyoa.ui.settings_controller import (
@@ -129,40 +134,9 @@ __all__ = [
 ]
 
 
-@dataclass(slots=True)
-class CYOAAppConfig:
-    model_path: str
-    starting_prompt: str = constants.DEFAULT_STARTING_PROMPT
-    spinner_frames: list[str] | None = None
-    accent_color: str | None = None
-    ui_theme: dict[str, str] | None = None
-    initial_world_state: dict[str, object] | None = None
-    initial_prompt_config: dict[str, object] | None = None
-    runtime_diagnostics: dict[str, str] | None = None
-    startup_accessibility_overrides: dict[str, bool] | None = None
-    allow_headless_startup_recovery: bool = False
-
-
-@dataclass(slots=True)
-class BufferedNotification:
-    message: str
-    severity: Literal["information", "warning", "error"]
-    timeout: float
-
-
-@dataclass(slots=True)
-class NotificationHistoryEntry:
-    message: str
-    severity: Literal["information", "warning", "error"]
-
-
-@dataclass(slots=True)
-class FocusTarget:
-    kind: Literal["widget_id", "choice_index"]
-    value: str | int
-
-
 class CYOAApp(
+    NotificationStatusMixin,
+    FocusModalMixin,
     ThemeMixin,
     TypewriterMixin,
     PersistenceMixin,
@@ -522,122 +496,6 @@ class CYOAApp(
             focus_target=focus_target,
         )
 
-    def _notification_prefix(self, severity: SeverityLevel) -> str:
-        prefix = self._notification_title(severity)
-        if self.cognitive_load_reduction_mode:
-            prefix = {
-                "information": "Update",
-                "warning": "Attention",
-                "error": "Problem",
-            }.get(severity, "Update")
-        return prefix
-
-    @staticmethod
-    def _notification_title(severity: SeverityLevel) -> str:
-        titles = {
-            "information": "Information",
-            "warning": "Warning",
-            "error": "Error",
-        }
-        return titles.get(severity, "Notice")
-
-    def _prepare_status_message(self, message: str, severity: SeverityLevel) -> str:
-        prefix = self._notification_prefix(severity)
-        cleaned = format_status_message(
-            message,
-            screen_reader_mode=self.screen_reader_mode,
-            simplified_mode=self.cognitive_load_reduction_mode,
-        ).strip()
-        if not cleaned:
-            return cleaned
-        if self.notification_verbosity == "minimal":
-            return cleaned
-        if self.notification_verbosity == "detailed":
-            detailed_prefix = f"{prefix} update"
-            if cleaned.lower().startswith(f"{detailed_prefix.lower()}:"):
-                return cleaned
-            return f"{detailed_prefix}: {cleaned}"
-        if not cleaned.lower().startswith(f"{prefix.lower()}:"):
-            cleaned = f"{prefix}: {cleaned}"
-        return cleaned
-
-    def _refresh_latest_status_message(self) -> None:
-        self._latest_status_message = self._prepare_status_message(
-            self._latest_status_source_message,
-            self._latest_status_severity,
-        )
-        try:
-            self.query_one(StatusDisplay).latest_status = self._latest_status_message
-        except Exception:
-            return
-
-    def _record_notification_history(self, message: str, severity: SeverityLevel) -> None:
-        cleaned = self._prepare_status_message(message, severity)
-        if not cleaned:
-            return
-        self._notification_history.append(
-            NotificationHistoryEntry(message=message, severity=severity)
-        )
-        if len(self._notification_history) > self._notification_history_limit:
-            self._notification_history = self._notification_history[
-                -self._notification_history_limit :
-            ]
-
-    def get_notification_history_lines(self) -> list[str]:
-        return [
-            self._prepare_status_message(entry.message, entry.severity)
-            for entry in self._notification_history
-        ]
-
-    def _dispatch_notification(
-        self,
-        message: str,
-        *,
-        title: str,
-        severity: SeverityLevel,
-        timeout: float | None,
-        markup: bool,
-        update_latest: bool,
-    ) -> None:
-        if not message:
-            return
-        if update_latest:
-            self._latest_status_source_message = message
-            self._latest_status_severity = severity
-            self._latest_status_message = message
-            try:
-                self.query_one(StatusDisplay).latest_status = message
-            except Exception:
-                pass
-        super().notify(
-            message,
-            title=title,
-            severity=severity,
-            timeout=timeout,
-            markup=markup,
-        )
-
-    def notify(
-        self,
-        message: str,
-        *,
-        title: str = "",
-        severity: SeverityLevel = "information",
-        timeout: float | None = None,
-        markup: bool = True,
-    ) -> None:
-        prefix = self._notification_title(severity)
-        cleaned = self._prepare_status_message(message, severity)
-        self._record_notification_history(message, severity)
-        self._dispatch_notification(
-            cleaned,
-            title=title or prefix,
-            severity=severity,
-            timeout=timeout,
-            markup=markup and not self.screen_reader_mode,
-            update_latest=True,
-        )
-
     def is_runtime_active(self) -> bool:
         """Return whether UI workers and event handlers may still touch widgets."""
         return self.is_running and not self._is_shutting_down
@@ -673,19 +531,6 @@ class CYOAApp(
         if focused is not None and not self._widget_can_receive_focus(focused):
             self._restore_focus_target(None, fallback="choices")
 
-    def action_repeat_latest_status(self) -> None:
-        if not self._latest_status_message:
-            self.notify("No status messages yet.", severity="warning", timeout=2)
-            return
-        self._dispatch_notification(
-            self._latest_status_message,
-            title="Latest Status",
-            severity="information",
-            timeout=6,
-            markup=False,
-            update_latest=False,
-        )
-
     def action_show_action_palette(self) -> None:
         """Open a searchable command palette for discoverable action launching."""
         entries = build_command_palette_entries(self._keybinding_overrides)
@@ -696,140 +541,6 @@ class CYOAApp(
             self.run_worker(self.run_action(action), exclusive=False, group="palette")
 
         self._push_modal_screen(CommandPaletteScreen(entries), on_selected)
-
-    def _focused_widget(self) -> Widget | None:
-        try:
-            focused = self.focused
-        except ScreenStackError:
-            return None
-        return focused if isinstance(focused, Widget) else None
-
-    def _capture_focus_target(self) -> FocusTarget | None:
-        focused = self._focused_widget()
-        if focused is None or not focused.is_attached:
-            return None
-
-        if isinstance(focused, Button):
-            buttons = self._available_action_buttons()
-            if focused in buttons:
-                return FocusTarget("choice_index", buttons.index(focused))
-
-        widget: Widget | None = focused
-        while widget is not None:
-            if widget.id:
-                return FocusTarget("widget_id", widget.id)
-            parent = widget.parent
-            widget = parent if isinstance(parent, Widget) else None
-        return None
-
-    def _widget_can_receive_focus(self, widget: Widget) -> bool:
-        if not widget.is_attached or not widget.visible or not widget.display:
-            return False
-        if bool(getattr(widget, "disabled", False)):
-            return False
-
-        current: Widget | None = widget
-        while current is not None:
-            if current.has_class("hidden") or current.has_class("panel-collapsed"):
-                return False
-            parent = current.parent
-            current = parent if isinstance(parent, Widget) else None
-        return True
-
-    def _resolve_focus_target_widget(self, target: FocusTarget | None) -> Widget | None:
-        if target is None:
-            return None
-        if target.kind == "choice_index":
-            buttons = self._available_action_buttons()
-            if not buttons:
-                return None
-            index = min(int(target.value), len(buttons) - 1)
-            return buttons[index]
-        try:
-            widget = self.query_one(f"#{target.value}", Widget)
-        except NoMatches:
-            return None
-        return widget if self._widget_can_receive_focus(widget) else None
-
-    def _fallback_focus_widget(self, fallback: str = "choices") -> Widget | None:
-        fallback_methods: dict[str, Callable[[], Widget | None]] = {
-            "choices": lambda: (
-                self._available_action_buttons()[0] if self._available_action_buttons() else None
-            ),
-            "story": lambda: self.query_one("#story-container", Widget),
-            "status": lambda: self.query_one("#status-display", Widget),
-            "journal": lambda: self.query_one("#journal-list", Widget),
-            "story_map": lambda: self.query_one("#story-map-tree", Widget),
-        }
-        ordered = [fallback, "choices", "story", "status", "journal", "story_map"]
-        for key in ordered:
-            resolver = fallback_methods.get(key)
-            if resolver is None:
-                continue
-            try:
-                widget = resolver()
-            except NoMatches:
-                continue
-            if widget is not None and self._widget_can_receive_focus(widget):
-                return widget
-        return None
-
-    def _restore_focus_target(
-        self,
-        target: FocusTarget | None,
-        *,
-        fallback: str = "choices",
-    ) -> None:
-        def apply_focus() -> None:
-            try:
-                widget = self._resolve_focus_target_widget(target)
-                if widget is None:
-                    widget = self._fallback_focus_widget(fallback)
-            except ScreenStackError:
-                return
-            if widget is not None and self._widget_can_receive_focus(widget):
-                widget.focus()
-
-        self.call_after_refresh(apply_focus)
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        self.set_timer(0.01, apply_focus)
-
-    def _has_open_modal_screen(self) -> bool:
-        try:
-            screen_stack = self.screen_stack
-        except ScreenStackError:
-            return False
-        return any(isinstance(screen, ModalScreen) for screen in screen_stack[1:])
-
-    def _push_modal_screen(
-        self,
-        screen: ModalScreen[Any],
-        callback: Callable[[Any], None] | None = None,
-        *,
-        fallback_focus: str = "choices",
-    ) -> None:
-        opened_over_modal = self._has_open_modal_screen()
-        modal_focus_target = self._capture_focus_target()
-        if self._modal_focus_return_target is None:
-            self._modal_focus_return_target = modal_focus_target
-
-        def on_dismiss(result: Any) -> None:
-            try:
-                if callback is not None:
-                    callback(result)
-            finally:
-                if self._has_open_modal_screen():
-                    if opened_over_modal:
-                        self._restore_focus_target(modal_focus_target, fallback=fallback_focus)
-                else:
-                    target = self._modal_focus_return_target
-                    self._modal_focus_return_target = None
-                    self._restore_focus_target(target, fallback=fallback_focus)
-
-        self.push_screen(screen, on_dismiss)
 
     def get_scene_recap_text(self) -> str:
         if not self.engine or not self.engine.state.current_node:
@@ -1045,72 +756,10 @@ class CYOAApp(
         if buttons:
             buttons[0].focus()
 
-    def queue_notification(
-        self,
-        message: str,
-        *,
-        severity: Literal["information", "warning", "error"] = "information",
-        timeout: float = 3,
-        batch: bool = True,
-    ) -> None:
-        """Coalesce bursty notifications into a single popup."""
-        if not message or not self.is_runtime_active():
-            return
-        if not batch:
-            self.notify(message, severity=severity, timeout=timeout)
-            return
-
-        self._record_notification_history(message, severity)
-        entry = BufferedNotification(message=message, severity=severity, timeout=timeout)
-        if self._notification_buffer and self._notification_buffer[-1] == entry:
-            return
-        self._notification_buffer.append(entry)
-        if self._notification_timer is None:
-            self._notification_timer = self.set_timer(0.18, self._flush_buffered_notifications)
-
     def _evict_scene_cache(self, cache: dict[str, dict[str, Any]]) -> None:
         while len(cache) > self._scene_cache_limit:
             oldest_key = next(iter(cache))
             del cache[oldest_key]
-
-    def _flush_buffered_notifications(self) -> None:
-        self._notification_timer = None
-        if not self._notification_buffer or not self.is_runtime_active():
-            self._notification_buffer.clear()
-            return
-
-        buffered = self._notification_buffer
-        self._notification_buffer = []
-        if len(buffered) == 1:
-            item = buffered[0]
-            self._dispatch_notification(
-                self._prepare_status_message(item.message, item.severity),
-                title=self._notification_title(item.severity),
-                severity=item.severity,
-                timeout=item.timeout,
-                markup=not self.screen_reader_mode,
-                update_latest=True,
-            )
-            return
-
-        severity_order = {"error": 3, "warning": 2, "information": 1}
-        strongest = max(buffered, key=lambda item: severity_order.get(item.severity, 0))
-        messages: list[str] = []
-        for item in buffered:
-            if item.message not in messages:
-                messages.append(item.message)
-        if len(messages) > 3:
-            summary = " | ".join(messages[:3]) + f" | +{len(messages) - 3} more"
-        else:
-            summary = " | ".join(messages)
-        self._dispatch_notification(
-            self._prepare_status_message(summary, strongest.severity),
-            title=self._notification_title(strongest.severity),
-            severity=strongest.severity,
-            timeout=max(item.timeout for item in buffered),
-            markup=not self.screen_reader_mode,
-            update_latest=True,
-        )
 
     def _schedule_optional_runtime_warmup(self) -> None:
         self._post_render_warmup_timer = None
