@@ -17,6 +17,7 @@ from cyoa.core.models import Choice, ChoiceRequirement, LoreEntry, StoryNode, Wo
 from cyoa.core.theme_loader import load_theme
 from cyoa.core.user_config import UserConfig
 from cyoa.ui.app import CYOAApp
+from cyoa.ui.app_types import FocusTarget
 from cyoa.ui.components import (
     AccessibleSummaryScreen,
     BranchScreen,
@@ -178,6 +179,33 @@ async def _wait_for_pilot(
     raise AssertionError("Timed out waiting for test condition")
 
 
+def _choice_buttons(app: CYOAApp) -> list[Button]:
+    return list(app.query_one("#choices-container", Container).query(Button))
+
+
+async def _wait_for_initial_scene(pilot: Any, app: CYOAApp, *, timeout: float = 5.0) -> None:
+    await _wait_for_pilot(
+        pilot,
+        lambda: (
+            app.engine is not None
+            and app.engine.state.current_node is not None
+            and "You awaken in a test dungeon." in app._current_story
+            and len(_choice_buttons(app)) == 2
+        ),
+        timeout=timeout,
+    )
+
+
+async def _wait_for_turn(
+    pilot: Any, app: CYOAApp, turn_count: int, *, timeout: float = 5.0
+) -> None:
+    await _wait_for_pilot(
+        pilot,
+        lambda: app.engine is not None and app.turn_count == turn_count,
+        timeout=timeout,
+    )
+
+
 def _assert_region_within_screen(widget: Any, screen_size: Any) -> None:
     """Assert that a widget's full box, including borders, remains on screen."""
     region = widget.region
@@ -244,16 +272,14 @@ async def test_app_startup_and_loading_state(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        # Give the background workers a moment to process initial generation
-        await pilot.pause(1.5)
+        await _wait_for_initial_scene(pilot, app)
         app.action_skip_typewriter()
 
         # Verify the story text container updated with the mock narrative
         assert "You awaken in a test dungeon." in app._current_story
 
         # Verify choices were generated
-        choices_container = app.query_one("#choices-container", Container)
-        buttons = list(choices_container.query(Button))
+        buttons = _choice_buttons(app)
         assert len(buttons) == 2
         assert str(buttons[0].label) == "1. Go North"
         assert str(buttons[1].label) == "2. Go South"
@@ -335,7 +361,7 @@ async def test_stats_display_reflects_player_stats(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
         status_display = app.query_one("#status-display")
         health_value = app.query_one("#health-value", Label)
 
@@ -345,19 +371,28 @@ async def test_stats_display_reflects_player_stats(mock_app_dependencies):
 
         # Update stats to mid-health
         app.query_one("StatusDisplay").health = 50
-        await pilot.pause(0.1)  # Wait for reactive update
+        await _wait_for_pilot(
+            pilot,
+            lambda: "50%" in str(health_value.render()) and status_display.has_class("health-mid"),
+        )
         assert "50%" in str(health_value.render())
         assert status_display.has_class("health-mid")
 
         # Update stats to low-health
         app.query_one("StatusDisplay").health = 20
-        await pilot.pause(0.1)
+        await _wait_for_pilot(
+            pilot,
+            lambda: "20%" in str(health_value.render()) and status_display.has_class("health-low"),
+        )
         assert "20%" in str(health_value.render())
         assert status_display.has_class("health-low")
 
         # Update stats to dead
         app.query_one("StatusDisplay").health = 0
-        await pilot.pause(0.1)
+        await _wait_for_pilot(
+            pilot,
+            lambda: "0%" in health_value.render().plain and status_display.has_class("health-low"),
+        )
         # Use .plain to get the text without markup/formatting
         rendered_text = health_value.render().plain
         assert "0%" in rendered_text
@@ -525,8 +560,11 @@ async def test_accessibility_matrix_covers_story_notifications_and_settings(
         assert app.query_one("#scene-art", Static).has_class("hidden") is expect_scene_art_hidden
 
         app.notify("⚡ Weaving possible futures...", severity="information", timeout=1)
-        await pilot.pause(0.2)
-        assert app.get_notification_history_lines()[-1] == expected_status_line
+        await _wait_for_pilot(
+            pilot,
+            lambda: expected_status_line in app.get_notification_history_lines(),
+        )
+        assert expected_status_line in app.get_notification_history_lines()
 
         app.action_show_settings()
         await pilot.pause(0.2)
@@ -579,14 +617,22 @@ async def test_inventory_updates_on_item_gain_and_loss(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
 
         # Initial inventory should have Broken Sword (from node1)
         assert "Broken Sword" in app.engine.state.inventory
 
         # Gain an item via a choice that returns node2 (which has Health Potion)
         await pilot.press("1")
-        await pilot.pause(1.0)
+        await _wait_for_pilot(
+            pilot,
+            lambda: (
+                app.engine is not None
+                and app.turn_count == 2
+                and "Health Potion" in app.engine.state.inventory
+            ),
+            timeout=5.0,
+        )
         assert "Health Potion" in app.engine.state.inventory
         assert "Broken Sword" in app.engine.state.inventory
 
@@ -634,7 +680,7 @@ async def test_locked_choices_render_disabled_and_block_selection(mock_app_depen
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
         assert app.engine is not None
         app.engine.state.story_flags.clear()
         locked_node = StoryNode(
@@ -713,7 +759,7 @@ async def test_startup_does_not_wait_for_optional_runtime_checks() -> None:
         app = CYOAApp(model_path="dummy_path.gguf")
 
         async with app.run_test() as pilot:
-            await pilot.pause(0.6)
+            await _wait_for_initial_scene(pilot, app, timeout=2.0)
             app.action_skip_typewriter()
 
             assert "You awaken in a test dungeon." in app._current_story
@@ -729,14 +775,14 @@ async def test_choice_selection_via_keyboard(mock_app_dependencies):
 
     async with app.run_test() as pilot:
         # Wait for initial load
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
         app.action_skip_typewriter()
 
         # Press '1' to select the first choice ("Go North")
         await pilot.press("1")
 
         # Pause to let the worker thread process the next mock node
-        await pilot.pause(1.0)
+        await _wait_for_turn(pilot, app, 2)
         app.action_skip_typewriter()
 
         # Verify the story text appended the new narrative
@@ -775,7 +821,7 @@ async def test_final_narrative_sync_keeps_earlier_story_text_without_separator(
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
         app.action_skip_typewriter()
 
         earlier_story = "Earlier story text that should remain visible."
@@ -816,7 +862,7 @@ async def test_choices_do_not_mount_against_blank_typewriter_story(
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
         app.action_skip_typewriter()
 
         narrative = "A full scene arrives without streaming."
@@ -853,7 +899,7 @@ async def test_pending_story_turn_is_hidden_until_narrative_arrives(
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test(size=(72, 24)) as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
         app.action_skip_typewriter()
 
         assert app.engine is not None
@@ -863,8 +909,7 @@ async def test_pending_story_turn_is_hidden_until_narrative_arrives(
             await release_choice.wait()
 
         app.engine.make_choice = AsyncMock(side_effect=slow_choice)
-        choices_container = app.query_one("#choices-container", Container)
-        first_choice = list(choices_container.query(Button))[0]
+        first_choice = _choice_buttons(app)[0]
 
         choice_task = asyncio.create_task(
             app._trigger_choice(0, selected_button_id=first_choice.id)
@@ -891,19 +936,17 @@ async def test_choice_selection_via_click(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
 
         # Click the first choice button
-        choices_container = app.query_one("#choices-container", Container)
-        first_btn = list(choices_container.query(Button))[0]
+        first_btn = _choice_buttons(app)[0]
         first_btn.focus()
         await pilot.press("enter")
 
-        await pilot.pause(1.0)
+        await _wait_for_turn(pilot, app, 2)
         assert "You went North." in app._current_story
 
-        choices_container = app.query_one("#choices-container", Container)
-        buttons = list(choices_container.query(Button))
+        buttons = _choice_buttons(app)
         assert len(buttons) == 2
         assert str(buttons[0].label) == "1. Open Door"
         assert str(buttons[1].label) == "2. Go Back"
@@ -914,11 +957,11 @@ async def test_choice_focus_moves_with_arrow_keys(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
 
-        choices_container = app.query_one("#choices-container", Container)
-        buttons = list(choices_container.query(Button))
+        buttons = _choice_buttons(app)
         assert len(buttons) == 2
+        await _wait_for_pilot(pilot, lambda: app.focused is buttons[0])
         assert app.focused is buttons[0]
 
         await pilot.press("down")
@@ -930,7 +973,7 @@ async def test_choice_focus_moves_with_arrow_keys(mock_app_dependencies):
         assert app.focused is buttons[0]
 
         await pilot.press("down", "enter")
-        await pilot.pause(1.0)
+        await _wait_for_turn(pilot, app, 2)
         app.action_skip_typewriter()
 
         journal_list = app.query_one("#journal-list", ListView)
@@ -943,11 +986,11 @@ async def test_steady_input_timing_gates_rapid_choice_navigation(mock_app_depend
     app = _app_with_accessibility_config(input_timing_profile="steady")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
 
-        choices_container = app.query_one("#choices-container", Container)
-        buttons = list(choices_container.query(Button))
+        buttons = _choice_buttons(app)
         assert len(buttons) == 2
+        await _wait_for_pilot(pilot, lambda: app.focused is buttons[0])
         assert app.focused is buttons[0]
 
         app.action_focus_next_choice()
@@ -1138,9 +1181,9 @@ async def test_lore_codex_modal_opens_and_reflects_discovered_entries(mock_app_d
 
         await _wait_for_pilot(
             pilot,
-            lambda: len(list(app.query_one("#choices-container", Container).query(Button))) >= 2,
+            lambda: len(_choice_buttons(app)) >= 2 and app.focused is _choice_buttons(app)[0],
         )
-        choices = list(app.query_one("#choices-container", Container).query(Button))
+        choices = _choice_buttons(app)
         assert app.focused is choices[0]
 
         app.engine.state.lore_entries = [
@@ -1245,11 +1288,15 @@ async def test_game_over_state_and_restart(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)  # Node 1
+        await _wait_for_initial_scene(pilot, app)  # Node 1
         await pilot.press("1")
-        await pilot.pause(1.0)  # Node 2
+        await _wait_for_turn(pilot, app, 2)  # Node 2
         await pilot.press("1")
-        await pilot.pause(1.0)  # Node 3 (Ending)
+        await _wait_for_pilot(
+            pilot,
+            lambda: "You opened the door and escaped!" in app._current_story,
+            timeout=5.0,
+        )  # Node 3 (Ending)
 
         assert "You opened the door and escaped!" in app._current_story
 
@@ -1262,7 +1309,7 @@ async def test_game_over_state_and_restart(mock_app_dependencies):
 
         # Test clicking the restart button
         await pilot.click("#btn-new-adventure")
-        await pilot.pause(1.0)  # Back to Node 1
+        await _wait_for_initial_scene(pilot, app)  # Back to Node 1
 
         # Verify reset
         assert app.engine.state.turn_count == 1
@@ -1278,9 +1325,9 @@ async def test_app_restart_via_keyboard(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
         await pilot.press("1")
-        await pilot.pause(1.0)  # Node 2 (turn 2)
+        await _wait_for_turn(pilot, app, 2)  # Node 2 (turn 2)
 
         assert app.turn_count == 2
 
@@ -1290,7 +1337,7 @@ async def test_app_restart_via_keyboard(mock_app_dependencies):
 
         # Confirm the restart
         await pilot.press("y")
-        await pilot.pause(1.0)  # Node 1 again
+        await _wait_for_initial_scene(pilot, app)  # Node 1 again
 
         assert app.engine.state.turn_count == 1
         assert "You awaken in a test dungeon." in app._current_story
@@ -1668,10 +1715,9 @@ async def test_choice_buttons_have_number_labels(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
 
-        choices_container = app.query_one("#choices-container", Container)
-        buttons = list(choices_container.query(Button))
+        buttons = _choice_buttons(app)
 
         assert len(buttons) == 2
         assert str(buttons[0].label).startswith("1.")
@@ -1686,9 +1732,9 @@ async def test_choice_buttons_keep_top_and_left_borders(
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test(size=size) as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
 
-        buttons = list(app.query_one("#choices-container", Container).query(Button))
+        buttons = _choice_buttons(app)
         assert buttons
 
         for button in buttons:
@@ -1702,7 +1748,7 @@ async def test_undo_restores_previous_state(mock_app_dependencies):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)  # Node 1
+        await _wait_for_initial_scene(pilot, app)  # Node 1
         app.action_skip_typewriter()
 
         assert app.turn_count == 1
@@ -1710,7 +1756,7 @@ async def test_undo_restores_previous_state(mock_app_dependencies):
 
         # Make a choice
         await pilot.press("1")
-        await pilot.pause(1.0)  # Node 2
+        await _wait_for_turn(pilot, app, 2)  # Node 2
         app.action_skip_typewriter()
         assert app.turn_count == 2
         assert "You went North." in app._current_story
@@ -1731,10 +1777,10 @@ async def test_redo_restores_undone_turn(mock_app_dependencies, tmp_path, monkey
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
         app.action_skip_typewriter()
         await pilot.press("1")
-        await pilot.pause(1.0)
+        await _wait_for_turn(pilot, app, 2)
         app.action_skip_typewriter()
         redone_story = app._current_story
 
@@ -1743,7 +1789,7 @@ async def test_redo_restores_undone_turn(mock_app_dependencies, tmp_path, monkey
         assert app.turn_count == 1
 
         await pilot.press("y")
-        await pilot.pause(0.3)
+        await _wait_for_turn(pilot, app, 2)
         app.action_skip_typewriter()
         assert app.turn_count == 2
         assert app._current_story == redone_story
@@ -2163,21 +2209,33 @@ async def test_release_polish_layout_handles_long_status_and_locked_choices(
         mock_gen.provider.count_tokens = MagicMock(return_value=10)
         return mock_gen
 
-    monkeypatch.setattr("cyoa.ui.app.ModelBroker", long_state_generator)
     with patch(
-        "cyoa.ui.app.load_user_config",
-        return_value=UserConfig(
-            setup_completed=True,
-            dismissed_startup_recommendations=["narrow_terminal_screen_reader"],
-            **config_overrides,
-        ),
-    ):
-        app = CYOAApp(model_path="dummy_path.gguf")
+        "cyoa.ui.app.CYOAGraphDB",
+    ) as mock_db:
+        db_instance = mock_db.return_value
+        db_instance.verify_connectivity_async = AsyncMock(return_value=True)
+        db_instance.create_story_node_and_get_title.return_value = "Release Polish Check"
+        db_instance.get_story_tree.return_value = None
+        db_instance.save_scene_async = AsyncMock(return_value="release-polish-scene")
+        monkeypatch.setattr("cyoa.ui.app.ModelBroker", long_state_generator)
+        with patch(
+            "cyoa.ui.app.load_user_config",
+            return_value=UserConfig(
+                setup_completed=True,
+                dismissed_startup_recommendations=["narrow_terminal_screen_reader"],
+                **config_overrides,
+            ),
+        ):
+            app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test(size=size) as pilot:
         await _wait_for_pilot(
             pilot,
-            lambda: app.engine is not None and app.engine.state.current_node is not None,
+            lambda: (
+                app.engine is not None
+                and app.engine.state.current_node is not None
+                and len(_choice_buttons(app)) == 3
+            ),
         )
         app.action_skip_typewriter()
 
@@ -2204,7 +2262,7 @@ async def test_release_polish_layout_handles_long_status_and_locked_choices(
         story_container = app.query_one("#story-container", VerticalScroll)
         action_panel = app.query_one("#action-panel", Container)
         choices_container = app.query_one("#choices-container", Container)
-        buttons = list(choices_container.query(Button))
+        buttons = _choice_buttons(app)
 
         assert len(buttons) == 3
         assert buttons[1].disabled is True
@@ -2595,22 +2653,18 @@ async def test_choice_rerender_preserves_story_focus_and_recovers_removed_choice
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
 
         story = app.query_one("#story-container", VerticalScroll)
-        story.focus()
-        await pilot.pause(0.1)
+        app._restore_focus_target(None, fallback="story")
+        await _wait_for_pilot(pilot, lambda: app.focused is story)
 
         app.screen_reader_mode = True
-        await pilot.pause(0.2)
+        await _wait_for_pilot(pilot, lambda: app.focused is story)
         assert app.focused is story
 
         choices_container = app.query_one("#choices-container", Container)
-        choice_buttons = list(choices_container.query(Button))
-        choice_buttons[1].focus()
-        await pilot.pause(0.1)
-
-        focus_target = app._capture_focus_target()
+        focus_target = FocusTarget("choice_index", 1)
         choices_container.remove_children()
         app._mount_choice_buttons(
             StoryNode(
@@ -2623,9 +2677,10 @@ async def test_choice_rerender_preserves_story_focus_and_recovers_removed_choice
             False,
             focus_target=focus_target,
         )
-        await pilot.pause(0.2)
-
-        assert app.focused is app.query_one("#btn-new-adventure", Button)
+        await _wait_for_pilot(
+            pilot,
+            lambda: app.focused is app.query_one("#btn-new-adventure", Button),
+        )
 
 
 @pytest.mark.asyncio
@@ -2638,9 +2693,9 @@ async def test_save_and_load_game(mock_app_dependencies, tmp_path, monkeypatch):
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)  # Node 1
+        await _wait_for_initial_scene(pilot, app)  # Node 1
         await pilot.press("1")
-        await pilot.pause(1.0)  # Node 2
+        await _wait_for_turn(pilot, app, 2)  # Node 2
 
         assert app.turn_count == 2
 
@@ -2742,7 +2797,7 @@ async def test_ending_persists_completed_run_summary(mock_app_dependencies, tmp_
 
     app = CYOAApp(model_path="dummy_path.gguf")
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
         await pilot.press("1")
         await pilot.pause(1.0)
         assert app.turn_count == 2
@@ -2810,7 +2865,7 @@ async def test_autosave_payload_can_restore_last_session(
 
     app = CYOAApp(model_path="dummy_path.gguf")
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
         await pilot.press("1")
         await _wait_for_pilot(
             pilot,
@@ -2937,9 +2992,9 @@ async def test_export_story_writes_markdown_accessible_text_and_timeline_json(
 
     app = CYOAApp(model_path="dummy_path.gguf")
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
         await pilot.press("1")
-        await pilot.pause(1.0)
+        await _wait_for_turn(pilot, app, 2)
         await pilot.press("e")
         await _wait_for_pilot(pilot, lambda: len(list((tmp_path / "exports").glob("*.md"))) == 1)
 
@@ -3886,7 +3941,11 @@ async def test_status_notifications_are_batched(mock_app_dependencies) -> None:
     app = CYOAApp(model_path="dummy_path.gguf")
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
+        await _wait_for_initial_scene(pilot, app)
+        if app._notification_timer is not None:
+            app._notification_timer.stop()
+            app._notification_timer = None
+        app._notification_buffer.clear()
         dispatched: list[str] = []
 
         def capture_dispatch(

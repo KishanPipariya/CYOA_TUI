@@ -5,6 +5,7 @@ Headless test harness that verifies core CYOA behaviour without loading the
 actual LLM model or requiring a Neo4j instance.
 """
 
+import asyncio
 from collections import deque
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1138,7 +1139,10 @@ class TestBranchingLogic:
 
             app = CYOAApp(model_path="dummy")
             async with app.run_test() as pilot:
-                await pilot.pause(0.5)
+                deadline = asyncio.get_running_loop().time() + 5.0
+                while app.engine is None and asyncio.get_running_loop().time() < deadline:
+                    await pilot.pause(0.05)
+                assert app.engine is not None
 
                 # Simulate being at a later turn with different stats
                 app.engine.state.inventory = ["Sword"]
