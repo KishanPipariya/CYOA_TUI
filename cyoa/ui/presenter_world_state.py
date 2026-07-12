@@ -19,6 +19,7 @@ class WorldStateSummaryInput:
     last_choice_text: str | None = None
     last_resolved_choice_check: Any = None
     current_scene_id: str | None = None
+    campaign_progress: Any = None
 
 
 def build_world_state_summary(  # noqa: C901
@@ -36,6 +37,7 @@ def build_world_state_summary(  # noqa: C901
     last_choice_text: str | None = None,
     last_resolved_choice_check: Any = None,
     current_scene_id: str | None = None,
+    campaign_progress: Any = None,
 ) -> str:
     def _normalize_objective(objective: Any) -> tuple[str, str] | None:
         if isinstance(objective, dict):
@@ -71,6 +73,62 @@ def build_world_state_summary(  # noqa: C901
             "summary": summary.strip() if isinstance(summary, str) and summary.strip() else None,
             "effect": effect.strip() if isinstance(effect, str) and effect.strip() else None,
         }
+
+    def _value(source: Any, field: str, default: Any = None) -> Any:
+        if isinstance(source, dict):
+            return source.get(field, default)
+        return getattr(source, field, default)
+
+    def _normalize_campaign_clock(clock: Any) -> str | None:
+        label = _value(clock, "label")
+        value = _value(clock, "value", 0)
+        maximum = _value(clock, "maximum", 0)
+        if not isinstance(label, str) or not label.strip():
+            return None
+        if not isinstance(value, int) or not isinstance(maximum, int):
+            return None
+        return f"{label.strip()} {value}/{maximum}"
+
+    def _active_campaign_milestones(progress: Any, active_chapter_id: str | None) -> list[Any]:
+        if active_chapter_id is None:
+            return []
+        for chapter in _value(progress, "chapters", []) or []:
+            if _value(chapter, "chapter_id") == active_chapter_id:
+                return list(_value(chapter, "completed_milestone_ids", []) or [])
+        return []
+
+    def _campaign_status_lines(progress: Any) -> list[str]:
+        if progress is None:
+            return ["- No active campaign"]
+        lines: list[str] = []
+        active_act_id = _value(progress, "active_act_id")
+        active_chapter_id = _value(progress, "active_chapter_id")
+        if isinstance(active_act_id, str) and active_act_id.strip():
+            lines.append(f"- Act: {active_act_id.strip()}")
+        if isinstance(active_chapter_id, str) and active_chapter_id.strip():
+            lines.append(f"- Chapter: {active_chapter_id.strip()}")
+        started_turn = _value(progress, "started_turn")
+        completed_turn = _value(progress, "completed_turn")
+        if isinstance(started_turn, int):
+            lines.append(f"- Started turn: {started_turn}")
+        if isinstance(completed_turn, int):
+            lines.append(f"- Completed turn: {completed_turn}")
+
+        clocks = [
+            summary
+            for clock in _value(progress, "clocks", []) or []
+            if (summary := _normalize_campaign_clock(clock)) is not None
+        ]
+        if clocks:
+            lines.append("- Pressure: " + " | ".join(clocks))
+
+        completed_milestones = _active_campaign_milestones(
+            progress,
+            active_chapter_id if isinstance(active_chapter_id, str) else None,
+        )
+        if completed_milestones:
+            lines.append("- Milestones: " + ", ".join(str(item) for item in completed_milestones))
+        return lines or ["- Campaign active"]
 
     lines = ["## Overview"]
     lines.append(f"- Adventure: {story_title or 'Untitled Adventure'}")
@@ -191,5 +249,8 @@ def build_world_state_summary(  # noqa: C901
         lines.extend(f"- {flag}" for flag in normalized_flags)
     else:
         lines.append("- None")
+
+    lines.extend(["", "## Campaign"])
+    lines.extend(_campaign_status_lines(campaign_progress))
 
     return "\n".join(lines)

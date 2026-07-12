@@ -133,6 +133,76 @@ class CampaignMilestone(BaseModel):
         return True
 
 
+class CampaignClockDefinition(BaseModel):
+    id: str = Field(description="Stable campaign pressure clock identifier.")
+    label: str = Field(description="Terse UI label for this clock.")
+    description: str | None = Field(
+        default=None,
+        description="Optional authoring note describing what the clock tracks.",
+    )
+    initial: int = Field(default=0, ge=0, description="Starting clock value.")
+    minimum: int = Field(default=0, ge=0, description="Lowest allowed clock value.")
+    maximum: int = Field(default=6, ge=1, description="Highest allowed clock value.")
+
+    @model_validator(mode="after")
+    def normalize_fields(self) -> "CampaignClockDefinition":
+        self.id = self.id.strip()
+        self.label = self.label.strip()
+        if not self.id:
+            raise ValueError("Campaign clock id cannot be empty.")
+        if not self.label:
+            raise ValueError("Campaign clock label cannot be empty.")
+        if self.description is not None:
+            normalized_description = self.description.strip()
+            self.description = normalized_description or None
+        if self.minimum > self.maximum:
+            raise ValueError("Campaign clock minimum cannot exceed maximum.")
+        if not self.minimum <= self.initial <= self.maximum:
+            raise ValueError("Campaign clock initial value must be within bounds.")
+        return self
+
+
+class CampaignClock(BaseModel):
+    id: str = Field(description="Stable campaign pressure clock identifier.")
+    label: str = Field(description="Terse UI label for this clock.")
+    value: int = Field(default=0, ge=0, description="Current clock value.")
+    minimum: int = Field(default=0, ge=0, description="Lowest allowed clock value.")
+    maximum: int = Field(default=6, ge=1, description="Highest allowed clock value.")
+
+    @model_validator(mode="after")
+    def normalize_fields(self) -> "CampaignClock":
+        self.id = self.id.strip()
+        self.label = self.label.strip()
+        if not self.id:
+            raise ValueError("Campaign clock id cannot be empty.")
+        if not self.label:
+            raise ValueError("Campaign clock label cannot be empty.")
+        if self.minimum > self.maximum:
+            raise ValueError("Campaign clock minimum cannot exceed maximum.")
+        self.value = max(self.minimum, min(self.value, self.maximum))
+        return self
+
+    @classmethod
+    def from_definition(cls, definition: CampaignClockDefinition) -> "CampaignClock":
+        return cls(
+            id=definition.id,
+            label=definition.label,
+            value=definition.initial,
+            minimum=definition.minimum,
+            maximum=definition.maximum,
+        )
+
+    def apply_delta(self, delta: int) -> bool:
+        next_value = max(self.minimum, min(self.value + delta, self.maximum))
+        if next_value == self.value:
+            return False
+        self.value = next_value
+        return True
+
+    def terse_summary(self) -> str:
+        return f"{self.label} {self.value}/{self.maximum}"
+
+
 class CampaignChapter(BaseModel):
     id: str = Field(description="Stable chapter identifier.")
     title: str = Field(description="Player-facing chapter title.")
@@ -220,6 +290,10 @@ class CampaignPack(BaseModel):
         default=None,
         description="Optional explicit starting chapter identifier.",
     )
+    clocks: list[CampaignClockDefinition] = Field(
+        default_factory=list,
+        description="Optional pressure clocks used by the adventure director.",
+    )
 
     @model_validator(mode="after")
     def normalize_fields(self) -> "CampaignPack":
@@ -241,6 +315,11 @@ class CampaignPack(BaseModel):
 
         act_ids, chapter_to_act = self._campaign_indexes()
         self._validate_starting_position(act_ids, chapter_to_act)
+        clock_ids: set[str] = set()
+        for clock in self.clocks:
+            if clock.id in clock_ids:
+                raise ValueError(f"Duplicate campaign clock id '{clock.id}'.")
+            clock_ids.add(clock.id)
         return self
 
     def _campaign_indexes(self) -> tuple[set[str], dict[str, str]]:
@@ -369,6 +448,10 @@ class CampaignProgress(BaseModel):
         ge=1,
         description="Turn when the campaign finished, if it has.",
     )
+    clocks: list[CampaignClock] = Field(
+        default_factory=list,
+        description="Current campaign pressure-clock values.",
+    )
 
     @model_validator(mode="after")
     def normalize_fields(self) -> "CampaignProgress":
@@ -388,6 +471,11 @@ class CampaignProgress(BaseModel):
                     f"Duplicate campaign progress entry for chapter '{chapter.chapter_id}'."
                 )
             chapter_ids.add(chapter.chapter_id)
+        clock_ids: set[str] = set()
+        for clock in self.clocks:
+            if clock.id in clock_ids:
+                raise ValueError(f"Duplicate campaign progress clock '{clock.id}'.")
+            clock_ids.add(clock.id)
         return self
 
     @classmethod
@@ -398,6 +486,7 @@ class CampaignProgress(BaseModel):
             active_act_id=act_id,
             active_chapter_id=chapter_id,
             chapters=[CampaignChapterProgress(chapter_id=chapter_id, started_turn=started_turn)],
+            clocks=[CampaignClock.from_definition(clock) for clock in campaign.clocks],
             started_turn=started_turn,
         )
 
@@ -421,6 +510,34 @@ class CampaignProgress(BaseModel):
         created = CampaignChapterProgress(chapter_id=chapter_id, started_turn=started_turn)
         self.chapters.append(created)
         return created
+
+    def clock_for(self, clock_id: str) -> CampaignClock | None:
+        for clock in self.clocks:
+            if clock.id == clock_id:
+                return clock
+        return None
+
+    def sync_clock_definitions(self, campaign: CampaignPack) -> bool:
+        changed = False
+        known = {clock.id for clock in self.clocks}
+        definitions_by_id = {clock.id: clock for clock in campaign.clocks}
+        for definition in campaign.clocks:
+            if definition.id not in known:
+                self.clocks.append(CampaignClock.from_definition(definition))
+                changed = True
+        kept_clocks = [clock for clock in self.clocks if clock.id in definitions_by_id]
+        if len(kept_clocks) != len(self.clocks):
+            self.clocks = kept_clocks
+            changed = True
+        return changed
+
+    def apply_clock_updates(self, updates: dict[str, int]) -> bool:
+        changed = False
+        for clock_id, delta in updates.items():
+            clock = self.clock_for(clock_id)
+            if clock is not None and clock.apply_delta(delta):
+                changed = True
+        return changed
 
 
 class WorldTime(BaseModel):
@@ -799,6 +916,13 @@ class StoryNode(BaseModel):
         ge=0,
         description="How many in-world hours pass before the next choice point.",
     )
+    campaign_clock_updates: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Deltas for active campaign clocks such as tension, danger, suspicion, "
+            "corruption, or pursuit. Only use ids defined by the active campaign."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_choices_count(self) -> "StoryNode":
@@ -888,4 +1012,8 @@ class ExtractionNode(BaseModel):
         default=0,
         ge=0,
         description="How many in-world hours the narrative consumed.",
+    )
+    campaign_clock_updates: dict[str, int] = Field(
+        default_factory=dict,
+        description="Pressure-clock deltas derived from the narrative.",
     )

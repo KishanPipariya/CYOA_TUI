@@ -17,6 +17,24 @@ When the story reaches a definitive conclusion (victory, death, escape, etc), se
 Ensure your output is strictly valid JSON matching the requested schema.
 """
 
+[terminal_identity]
+standard = "Keyboard-first, text-led, compact. Prefer prompt glyphs, terse labels, and readable transcript surfaces over decorative panels."
+title_card = """
+  ____  ___   ____  _  __   _____ ____   ____    _    ____  _____
+ |  _ \\|_ _| / ___|| |/ /  | ____/ ___| / ___|  / \\  |  _ \\| ____|
+ | | | || |  \\___ \\| ' /   |  _| \\___ \\| |     / _ \\ | |_) |  _|
+ | |_| || |   ___) | . \\   | |___ ___) | |___ / ___ \\|  __/| |___
+ |____/|___| |____/|_|\\_\\  |_____|____/ \\____/_/   \\_\\_|   |_____|
+"""
+scene_divider = ":: iron / ash / torch-smoke ::"
+
+[terminal_identity.loading_glyph_sets]
+lockdown = ["[!!]", "[##]", "[!!]", "[//]"]
+
+[terminal_identity.mood_microcopy]
+dark = "The walls listen."
+combat = "Boots on stone."
+
 [opening_stats]
 health = 90
 gold = 0
@@ -39,6 +57,22 @@ name = "Dark Escape"
 description = "A three-chapter prison-break arc that tracks the climb from confinement to the storm beyond the walls."
 starting_act_id = "act_one"
 starting_chapter_id = "cell_block"
+
+[[campaign.clocks]]
+id = "danger"
+label = "DANGER"
+description = "How close the prison is to a violent lockdown."
+initial = 1
+minimum = 0
+maximum = 6
+
+[[campaign.clocks]]
+id = "suspicion"
+label = "SUSP"
+description = "How certain the wardens are about the player's route."
+initial = 0
+minimum = 0
+maximum = 6
 
 [[campaign.acts]]
 id = "act_one"

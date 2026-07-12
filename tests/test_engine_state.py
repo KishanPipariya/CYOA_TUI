@@ -7,6 +7,7 @@ import pytest
 from cyoa.core.engine import StoryEngine
 from cyoa.core.events import Events, bus
 from cyoa.core.models import (
+    CampaignClockDefinition,
     CampaignPack,
     Choice,
     ChoiceCheck,
@@ -62,6 +63,69 @@ def _make_broker_with_mock_provider() -> tuple[ModelBroker, MagicMock]:
     provider.load_state = AsyncMock(return_value=None)
     broker = ModelBroker(provider=provider)
     return broker, provider
+
+
+def _make_clock_campaign() -> CampaignPack:
+    return CampaignPack(
+        id="clock_campaign",
+        name="Clock Campaign",
+        description="A campaign with clocks.",
+        clocks=[
+            CampaignClockDefinition(
+                id="danger",
+                label="DANGER",
+                initial=1,
+                minimum=0,
+                maximum=6,
+            )
+        ],
+        acts=[{"id": "act", "title": "Act", "chapters": [{"id": "chapter", "title": "Chapter"}]}],
+    )
+
+
+def test_game_state_applies_saves_and_audits_campaign_clocks() -> None:
+    state = GameState()
+    state.seed_world_state(campaign=_make_clock_campaign())
+    state.last_choice_text = "Force the barred door"
+    state.apply_node_updates(
+        StoryNode(
+            narrative="The patrol hears the hinges scream.",
+            choices=[Choice(text="Run"), Choice(text="Hide")],
+            campaign_clock_updates={"danger": 2},
+        )
+    )
+
+    payload = state.get_save_data()
+    restored = GameState()
+    restored.load_save_data(payload)
+
+    assert restored.campaign_progress is not None
+    assert restored.campaign_progress.clocks[0].value == 3
+    assert "Campaign pressure: DANGER 3/6" in restored.continuity_audit_notes()
+
+
+def test_story_context_prompt_includes_clocks_and_continuity_notes() -> None:
+    state = GameState()
+    state.seed_world_state(campaign=_make_clock_campaign())
+    state.apply_node_updates(
+        StoryNode(
+            narrative="The patrol lanterns converge.",
+            choices=[Choice(text="Bolt"), Choice(text="Wait")],
+            campaign_clock_updates={"danger": 1},
+        )
+    )
+    context = StoryContext("Start", token_counter=lambda _text: 1)
+    assert state.campaign_progress is not None
+    context.sync_world_state(
+        campaign_clocks=state.campaign_progress.clocks,
+        continuity_notes=state.continuity_audit_notes(),
+    )
+
+    system_message = context.get_messages()[0]["content"]
+
+    assert "Campaign Clocks:" in system_message
+    assert "DANGER 2/6" in system_message
+    assert "Continuity Audit:" in system_message
 
 
 @pytest.mark.asyncio

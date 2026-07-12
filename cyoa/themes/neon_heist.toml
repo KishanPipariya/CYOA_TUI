@@ -17,6 +17,24 @@ When the story reaches a definitive conclusion (clean escape, capture, betrayal,
 Ensure your output is strictly valid JSON matching the requested schema.
 """
 
+[terminal_identity]
+standard = "Keyboard-first, glyph-led, compact. Keep tactical information terse and terminal-native."
+title_card = """
+ _   _ _____ ___  _   _   _   _ _____ ___ ____ _____
+| \\ | | ____/ _ \\| \\ | | | | | | ____|_ _/ ___|_   _|
+|  \\| |  _|| | | |  \\| | | |_| |  _|  | |\\___ \\ | |
+| |\\  | |__| |_| | |\\  | |  _  | |___ | | ___) || |
+|_| \\_|_____\\___/|_| \\_| |_| |_|_____|___|____/ |_|
+"""
+scene_divider = ":: grid / rain / heat-signature ::"
+
+[terminal_identity.loading_glyph_sets]
+intrusion = ["[00]", "[01]", "[11]", "[10]"]
+
+[terminal_identity.mood_microcopy]
+mysterious = "Signal buried."
+combat = "Alarms rising."
+
 [opening_stats]
 health = 95
 gold = 250
@@ -32,6 +50,67 @@ status = "active"
 
 [npc_affinity]
 "Wheelman Suri" = 1
+
+[campaign]
+id = "neon_heist"
+name = "Neon Heist"
+description = "A three-phase arc for breach, extraction, and escape under citywide surveillance."
+starting_act_id = "act_one"
+starting_chapter_id = "breach"
+
+[[campaign.clocks]]
+id = "alert"
+label = "ALERT"
+description = "How close the arcology grid is to a hard lockdown."
+initial = 1
+minimum = 0
+maximum = 6
+
+[[campaign.clocks]]
+id = "heat"
+label = "HEAT"
+description = "How much citywide attention the crew has drawn."
+initial = 0
+minimum = 0
+maximum = 6
+
+[[campaign.acts]]
+id = "act_one"
+title = "The Job"
+summary = "Break in, steal the prototype, and exit before the grid marks the crew."
+
+[[campaign.acts.chapters]]
+id = "breach"
+title = "Breach"
+summary = "Enter the arcology and establish a route past the public security layer."
+directives = ["Treat access, time, and camera coverage as persistent pressure."]
+
+[[campaign.acts.chapters.milestones]]
+id = "enter_arcology"
+title = "Enter the arcology"
+min_turn = 2
+
+[[campaign.acts.chapters]]
+id = "extraction"
+title = "Extraction"
+summary = "Find the prototype and decide what collateral the crew is willing to create."
+directives = ["Make every shortcut trade stealth against crew trust or future heat."]
+
+[[campaign.acts.chapters.milestones]]
+id = "secure_prototype"
+title = "Secure the prototype"
+min_turn = 5
+
+[[campaign.acts.chapters]]
+id = "getaway"
+title = "Getaway"
+summary = "Escape through a city that has started to recognize the theft."
+directives = ["Resolve the ending through heat, alert level, and remaining crew support."]
+
+[[campaign.acts.chapters.milestones]]
+id = "clear_the_grid"
+title = "Clear the grid"
+min_turn = 8
 
 [ui]
 main_surface = "#0b1014"

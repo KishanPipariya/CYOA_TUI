@@ -883,6 +883,7 @@ class CYOAApp(
                 npc_affinity={},
                 story_flags=[],
                 world_time=None,
+                campaign_progress=None,
             )
 
         state = self.engine.state
@@ -900,6 +901,7 @@ class CYOAApp(
             last_choice_text=state.last_choice_text,
             last_resolved_choice_check=state.last_resolved_choice_check,
             current_scene_id=state.current_scene_id,
+            campaign_progress=state.campaign_progress,
         )
 
     def get_lore_codex_text(self) -> str:

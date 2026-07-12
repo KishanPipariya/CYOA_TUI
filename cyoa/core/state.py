@@ -7,6 +7,7 @@ from cyoa.core.events import Events, bus
 from cyoa.core.mementos import GameStateSnapshot, StoryContextMemento
 from cyoa.core.models import (
     CampaignChapter,
+    CampaignClock,
     CampaignPack,
     CampaignProgress,
     Companion,
@@ -126,8 +127,9 @@ class GameState:
 
         world_state_changed = self._apply_world_updates(node)
         time_changed = self._apply_time_advance(node.time_advance_hours)
+        clock_changed = self._apply_campaign_clock_updates(node.campaign_clock_updates)
         campaign_changed = self._update_campaign_progress()
-        if world_state_changed or time_changed or campaign_changed:
+        if world_state_changed or time_changed or clock_changed or campaign_changed:
             bus.emit_runtime(Events.WORLD_STATE_UPDATED, state=self.get_world_state())
 
         # 3. Advance state
@@ -237,6 +239,11 @@ class GameState:
             "campaign_progress": (
                 self.campaign_progress.model_dump() if self.campaign_progress else None
             ),
+            "campaign_clocks": (
+                [clock.model_dump() for clock in self.campaign_progress.clocks]
+                if self.campaign_progress
+                else []
+            ),
             "undo_history": [snapshot.to_payload() for snapshot in self._undo_history],
             "redo_history": [snapshot.to_payload() for snapshot in self._redo_history],
             "bookmarks": {
@@ -270,6 +277,10 @@ class GameState:
             data.get("campaign_progress"),
             campaign=self.campaign,
         )
+        if self.campaign_progress is not None and not self.campaign_progress.clocks:
+            self.campaign_progress.clocks = self._coerce_campaign_clocks(
+                data.get("campaign_clocks")
+            )
         self._undo_history = deque(
             self._coerce_snapshot_list(data.get("undo_history")), maxlen=MAX_HISTORY_DEPTH
         )
@@ -407,6 +418,11 @@ class GameState:
             "campaign_progress": (
                 self.campaign_progress.model_dump() if self.campaign_progress else None
             ),
+            "campaign_clocks": (
+                [clock.model_dump() for clock in self.campaign_progress.clocks]
+                if self.campaign_progress
+                else []
+            ),
         }
 
     def seed_world_state(
@@ -487,6 +503,42 @@ class GameState:
         if chapter is None:
             return []
         return list(chapter.directives)
+
+    def continuity_audit_notes(self) -> list[str]:
+        """Return compact local-first continuity reminders for prompt injection."""
+        notes: list[str] = []
+        for objective in self.objectives:
+            notes.append(f"Objective {objective.id}: {objective.status} - {objective.text}")
+        if self.last_choice_text:
+            notes.append(f"Last player choice is canon: {self.last_choice_text}")
+        active_companions = [
+            companion.name for companion in self.companions if companion.status == "active"
+        ]
+        lost_companions = [
+            companion.name for companion in self.companions if companion.status == "lost"
+        ]
+        if active_companions:
+            notes.append(f"Active companions: {', '.join(active_companions)}")
+        if lost_companions:
+            notes.append(
+                f"Lost companions must not reappear as active: {', '.join(lost_companions)}"
+            )
+        if self.story_flags:
+            notes.append(f"Established flags: {', '.join(sorted(self.story_flags))}")
+        if self.lore_entries:
+            recent_lore = sorted(
+                self.lore_entries,
+                key=lambda entry: entry.discovered_turn or 0,
+                reverse=True,
+            )[:5]
+            for entry in recent_lore:
+                notes.append(f"Lore {entry.category}/{entry.name}: {entry.summary}")
+        if self.campaign_progress and self.campaign_progress.clocks:
+            notes.append(
+                "Campaign pressure: "
+                + ", ".join(clock.terse_summary() for clock in self.campaign_progress.clocks)
+            )
+        return notes[:16]
 
     def _apply_objective_updates(self, objectives_updated: list[Objective]) -> bool:
         changed = False
@@ -614,6 +666,11 @@ class GameState:
         changed = self._apply_companion_updates(node.companions_updated) or changed
         return changed
 
+    def _apply_campaign_clock_updates(self, updates: dict[str, int]) -> bool:
+        if self.campaign_progress is None or not updates:
+            return False
+        return self.campaign_progress.apply_clock_updates(updates)
+
     def _update_campaign_progress(self) -> bool:
         chapter = self._ensure_active_campaign_chapter()
         progress_state = self.campaign_progress
@@ -621,11 +678,11 @@ class GameState:
         if chapter is None or progress_state is None or campaign is None:
             return False
 
+        changed = progress_state.sync_clock_definitions(campaign)
         progress = progress_state.ensure_chapter_progress(
             chapter.id,
             started_turn=self.turn_count,
         )
-        changed = False
         for milestone in chapter.milestones:
             if milestone.id in progress.completed_milestone_ids:
                 continue
@@ -744,7 +801,21 @@ class GameState:
             progress = None
         if progress is None or progress.campaign_id != campaign.id:
             return CampaignProgress.from_campaign(campaign, started_turn=self.turn_count)
+        progress.sync_clock_definitions(campaign)
         return progress
+
+    def _coerce_campaign_clocks(self, value: Any) -> list[CampaignClock]:
+        if not isinstance(value, list):
+            return []
+        clocks: list[CampaignClock] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            try:
+                clocks.append(CampaignClock(**item))
+            except Exception:
+                continue
+        return clocks
 
     def _coerce_resolved_choice_check(self, value: Any) -> ResolvedChoiceCheck | None:
         if not isinstance(value, dict):
@@ -802,6 +873,12 @@ class GameState:
                 node = None
 
         campaign = self._coerce_campaign(value.get("campaign"))
+        campaign_progress = self._coerce_campaign_progress(
+            value.get("campaign_progress"),
+            campaign=campaign,
+        )
+        if campaign_progress is not None and not campaign_progress.clocks:
+            campaign_progress.clocks = self._coerce_campaign_clocks(value.get("campaign_clocks"))
 
         return GameStateSnapshot(
             turn_count=self._coerce_positive_int(value.get("turn_count"), default=1),
@@ -836,9 +913,11 @@ class GameState:
             companions=self._coerce_companions(value.get("companions")),
             world_time=self._coerce_world_time(value.get("world_time")),
             campaign=campaign,
-            campaign_progress=self._coerce_campaign_progress(
-                value.get("campaign_progress"),
-                campaign=campaign,
+            campaign_progress=campaign_progress,
+            campaign_clocks=(
+                [clock.model_copy() for clock in campaign_progress.clocks]
+                if campaign_progress is not None
+                else []
             ),
             story_context=StoryContextMemento.from_payload(value.get("story_context_history")),
         )

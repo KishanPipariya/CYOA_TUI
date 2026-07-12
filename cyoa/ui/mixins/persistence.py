@@ -753,6 +753,15 @@ class PersistenceMixin:
             "npc_affinity": dict(state.npc_affinity),
             "story_flags": sorted(state.story_flags),
             "world_time": state.world_time.model_dump(),
+            "campaign": state.campaign.model_dump() if state.campaign else None,
+            "campaign_progress": (
+                state.campaign_progress.model_dump() if state.campaign_progress else None
+            ),
+            "campaign_clocks": (
+                [clock.model_dump() for clock in state.campaign_progress.clocks]
+                if state.campaign_progress
+                else []
+            ),
             "timeline_metadata": [entry.copy() for entry in state.timeline_metadata],
             "branch_restores": branch_restores,
             "divergence_points": divergence_points,
@@ -1123,6 +1132,9 @@ class PersistenceMixin:
             "inventory": payload.get("inventory"),
             "player_stats": payload.get("player_stats"),
             "world_time": payload.get("world_time"),
+            "campaign": payload.get("campaign"),
+            "campaign_progress": payload.get("campaign_progress"),
+            "campaign_clocks": payload.get("campaign_clocks"),
             "timeline_metadata": payload.get("timeline_metadata"),
             "story_segments": self._coerce_story_segments(ui_state.get("story_segments")),
             "journal_entries": self._coerce_journal_entries(ui_state.get("journal_entries")),

@@ -19,6 +19,7 @@ from cyoa.core.constants import (
     DEFAULT_LLM_SUMMARY_THRESHOLD,
 )
 from cyoa.core.models import (
+    CampaignClock,
     Choice,
     Companion,
     ExtractionNode,
@@ -156,6 +157,8 @@ class StoryContext:
         self.lore_entries: list[LoreEntry] = []
         self.companions: list[Companion] = []
         self.world_time: WorldTime = WorldTime()
+        self.campaign_clocks: list[CampaignClock] = []
+        self.continuity_notes: list[str] = []
         # Hierarchy tracking
         self._scene_turn_count: int = 0
         self._chapter_scene_count: int = 0
@@ -265,6 +268,8 @@ class StoryContext:
         companions: list[Companion] | None = None,
         world_time: WorldTime | None = None,
         chapter_directives: list[str] | None = None,
+        campaign_clocks: list[CampaignClock] | None = None,
+        continuity_notes: list[str] | None = None,
     ) -> None:
         """Keep prompt state aligned with the engine's long-lived world state."""
         updates: tuple[tuple[Any, Callable[[Any], object], str], ...] = (
@@ -290,6 +295,12 @@ class StoryContext:
             ),
             (world_time, lambda current: current.model_copy(), "world_time"),
             (chapter_directives, list, "chapter_directives"),
+            (
+                campaign_clocks,
+                lambda current: [clock.model_copy() for clock in current],
+                "campaign_clocks",
+            ),
+            (continuity_notes, list, "continuity_notes"),
         )
         for value, copier, attribute in updates:
             if value is not None:
@@ -365,6 +376,8 @@ class StoryContext:
         new_ctx.lore_entries = [entry.model_copy() for entry in self.lore_entries]
         new_ctx.companions = [companion.model_copy() for companion in self.companions]
         new_ctx.world_time = self.world_time.model_copy()
+        new_ctx.campaign_clocks = [clock.model_copy() for clock in self.campaign_clocks]
+        new_ctx.continuity_notes = list(self.continuity_notes)
         new_ctx._scene_turn_count = self._scene_turn_count
         new_ctx._chapter_scene_count = self._chapter_scene_count
         # Reuse the same pipeline (shallow copy of list is fine if components are stateless or handled)

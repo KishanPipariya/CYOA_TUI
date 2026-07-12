@@ -210,6 +210,61 @@ def test_validate_theme_accepts_campaign_bundle():
     assert theme["campaign"]["acts"][0]["chapters"][0]["milestones"][0]["id"] == "escape_cell"
 
 
+def test_validate_theme_accepts_terminal_identity_and_campaign_clocks():
+    theme = validate_theme(
+        {
+            "name": "Clock Demo",
+            "description": "Structured terminal campaign theme",
+            "prompt": "Start",
+            "accent_color": "blue",
+            "spinner_frames": ["-", "|"],
+            "terminal_identity": {
+                "standard": "Keyboard-first and compact.",
+                "title_card": "CLOCK DEMO",
+                "scene_divider": ":: demo ::",
+                "loading_glyph_sets": {"scan": ["[.]", "[*]"]},
+                "mood_microcopy": {"dark": "Signal fades."},
+            },
+            "campaign": {
+                "id": "clock_demo",
+                "name": "Clock Demo",
+                "description": "A campaign with pressure clocks.",
+                "clocks": [
+                    {
+                        "id": "danger",
+                        "label": "DANGER",
+                        "initial": 1,
+                        "minimum": 0,
+                        "maximum": 6,
+                    }
+                ],
+                "acts": [
+                    {
+                        "id": "act_one",
+                        "title": "Act One",
+                        "chapters": [{"id": "chapter_one", "title": "Chapter One"}],
+                    }
+                ],
+            },
+            "ui": {
+                "main_surface": "#111111",
+                "action_dock_surface": "#121212",
+                "side_panel_surface": "#131313",
+                "status_surface": "#141414",
+                "story_card_surface": "#151515",
+                "story_card_muted_surface": "#0e0e0e",
+                "player_choice_surface": "#171717",
+                "choice_surface": "#24384d",
+                "choice_locked_surface": "#1a1a1a",
+            },
+        },
+        "clock_demo",
+    )
+
+    assert theme["terminal_identity"]["title_card"] == "CLOCK DEMO"
+    assert theme["campaign"]["clocks"][0]["label"] == "DANGER"
+
+
 def test_shipped_campaign_theme_is_selectable() -> None:
     assert "dark_dungeon_campaign" in list_themes()
 

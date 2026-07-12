@@ -676,6 +676,10 @@ class StoryEngine:
             companions=self.state.companions,
             world_time=self.state.world_time,
             chapter_directives=self.state.active_chapter_directives(),
+            campaign_clocks=(
+                self.state.campaign_progress.clocks if self.state.campaign_progress else []
+            ),
+            continuity_notes=self.state.continuity_audit_notes(),
         )
 
     def _find_choice_definition(self, choice_text: str) -> Choice | None:

@@ -153,6 +153,72 @@ def _validate_optional_mappings(
         validated[optional_mapping_field] = normalized
 
 
+def _validate_terminal_identity(
+    theme: dict[str, Any],
+    source: str,
+    validated: dict[str, Any],
+) -> None:
+    terminal_identity = theme.get("terminal_identity")
+    if terminal_identity is None:
+        return
+    if not isinstance(terminal_identity, dict):
+        raise ThemeValidationError(f"{source}: terminal_identity must be an object.")
+
+    normalized: dict[str, Any] = {}
+    for field in ("standard", "title_card", "scene_divider"):
+        value = terminal_identity.get(field)
+        if value is not None:
+            normalized[field] = _require_non_empty_string(value, field, source)
+
+    _validate_terminal_glyph_sets(terminal_identity, source, normalized)
+    _validate_terminal_microcopy(terminal_identity, source, normalized)
+
+    if normalized:
+        validated["terminal_identity"] = normalized
+
+
+def _validate_terminal_glyph_sets(
+    terminal_identity: dict[str, Any],
+    source: str,
+    normalized: dict[str, Any],
+) -> None:
+    glyph_sets = terminal_identity.get("loading_glyph_sets")
+    if glyph_sets is None:
+        return
+    if not isinstance(glyph_sets, dict):
+        raise ThemeValidationError(f"{source}: loading_glyph_sets must be an object.")
+    normalized_glyph_sets: dict[str, list[str]] = {}
+    for name, frames in glyph_sets.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ThemeValidationError(
+                f"{source}: loading_glyph_sets keys must be non-empty strings."
+            )
+        normalized_glyph_sets[name] = _require_non_empty_string_list(
+            frames, f"loading_glyph_sets.{name}", source
+        )
+    normalized["loading_glyph_sets"] = normalized_glyph_sets
+
+
+def _validate_terminal_microcopy(
+    terminal_identity: dict[str, Any],
+    source: str,
+    normalized: dict[str, Any],
+) -> None:
+    microcopy = terminal_identity.get("mood_microcopy")
+    if microcopy is None:
+        return
+    if not isinstance(microcopy, dict):
+        raise ThemeValidationError(f"{source}: mood_microcopy must be an object.")
+    normalized_microcopy: dict[str, str] = {}
+    for mood, copy in microcopy.items():
+        if not isinstance(mood, str) or not mood.strip():
+            raise ThemeValidationError(f"{source}: mood_microcopy keys must be non-empty strings.")
+        normalized_microcopy[mood] = _require_non_empty_string(
+            copy, f"mood_microcopy.{mood}", source
+        )
+    normalized["mood_microcopy"] = normalized_microcopy
+
+
 def _validate_opening_objectives(
     theme: dict[str, Any],
     source: str,
@@ -281,6 +347,7 @@ def validate_theme(theme: dict[str, Any], theme_name: str) -> dict[str, Any]:
         validated["persona"] = _require_non_empty_string(theme.get("persona"), "persona", source)
     _validate_optional_string_lists(theme, source, validated)
     _validate_optional_mappings(theme, source, validated)
+    _validate_terminal_identity(theme, source, validated)
     _validate_opening_objectives(theme, source, validated)
     _validate_opening_companions(theme, source, validated)
     _validate_campaign(theme, source, validated)

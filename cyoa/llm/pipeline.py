@@ -138,35 +138,57 @@ class PlayerSheetComponent(PromptComponent, PromptComponentMixin):
 
             lines.append(f"Current Stats: {json.dumps(stats)}")
         lines.extend(self._world_time_lines(getattr(context, "world_time", None)))
+        self._append_section(
+            lines,
+            "Campaign Clocks:",
+            self._campaign_clock_lines(getattr(context, "campaign_clocks", [])),
+        )
         objectives = getattr(context, "objectives", [])
         if objectives:
             objective_bits = [f"{objective.text} ({objective.status})" for objective in objectives]
             lines.append(f"Objectives: {'; '.join(objective_bits)}")
-        faction_reputation = getattr(context, "faction_reputation", {})
-        if faction_reputation:
-            import json
-
-            lines.append(f"Faction Reputation: {json.dumps(faction_reputation)}")
-        npc_affinity = getattr(context, "npc_affinity", {})
-        if npc_affinity:
-            import json
-
-            lines.append(f"NPC Affinity: {json.dumps(npc_affinity)}")
-        companion_lines = self._compact_companion_lines(getattr(context, "companions", []))
-        if companion_lines:
-            lines.append("Companions:")
-            lines.extend(companion_lines)
+        self._append_json_mapping(
+            lines,
+            "Faction Reputation",
+            getattr(context, "faction_reputation", {}),
+        )
+        self._append_json_mapping(lines, "NPC Affinity", getattr(context, "npc_affinity", {}))
+        self._append_section(
+            lines,
+            "Companions:",
+            self._compact_companion_lines(getattr(context, "companions", [])),
+        )
         story_flags = sorted(getattr(context, "story_flags", set()))
         if story_flags:
             lines.append(f"Unlocked Story Flags: {', '.join(story_flags)}")
-        lore_entries = getattr(context, "lore_entries", [])
-        compact_lore_lines = self._compact_lore_lines(lore_entries)
-        if compact_lore_lines:
-            lines.append("Discovered Lore:")
-            lines.extend(compact_lore_lines)
+        self._append_section(
+            lines,
+            "Discovered Lore:",
+            self._compact_lore_lines(getattr(context, "lore_entries", [])),
+        )
+        self._append_section(
+            lines,
+            "Continuity Audit:",
+            self._continuity_lines(getattr(context, "continuity_notes", [])),
+        )
         lines.append("</player_sheet>")
 
         return self._inject_into_system(messages, "\n".join(lines))
+
+    @staticmethod
+    def _append_section(lines: list[str], heading: str, entries: list[str]) -> None:
+        if not entries:
+            return
+        lines.append(heading)
+        lines.extend(entries)
+
+    @staticmethod
+    def _append_json_mapping(lines: list[str], label: str, mapping: object) -> None:
+        if not mapping:
+            return
+        import json
+
+        lines.append(f"{label}: {json.dumps(mapping)}")
 
     @staticmethod
     def _world_time_lines(world_time: object) -> list[str]:
@@ -176,6 +198,19 @@ class PlayerSheetComponent(PromptComponent, PromptComponentMixin):
         if not callable(summary):
             return []
         return [f"Current World Time: {summary()}"]
+
+    @staticmethod
+    def _campaign_clock_lines(campaign_clocks: list[object]) -> list[str]:
+        lines: list[str] = []
+        for clock in campaign_clocks:
+            summary = getattr(clock, "terse_summary", None)
+            if callable(summary):
+                lines.append(f"- {summary()}")
+        return lines
+
+    @staticmethod
+    def _continuity_lines(continuity_notes: list[object]) -> list[str]:
+        return [f"- {note}" for note in continuity_notes[:16] if isinstance(note, str)]
 
     @staticmethod
     def _compact_lore_lines(lore_entries: list[object], *, max_entries: int = 12) -> list[str]:

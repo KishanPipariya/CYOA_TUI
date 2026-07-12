@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from cyoa.core.models import (
+    CampaignClock,
     CampaignPack,
     CampaignProgress,
     Companion,
@@ -66,6 +67,7 @@ class GameStateSnapshot:
     world_time: WorldTime
     campaign: CampaignPack | None
     campaign_progress: CampaignProgress | None
+    campaign_clocks: list[CampaignClock]
     story_context: StoryContextMemento = field(default_factory=StoryContextMemento)
 
     @classmethod
@@ -106,6 +108,11 @@ class GameStateSnapshot:
                 if state.campaign_progress is not None
                 else None
             ),
+            campaign_clocks=(
+                [clock.model_copy() for clock in state.campaign_progress.clocks]
+                if state.campaign_progress is not None
+                else []
+            ),
             story_context=StoryContextMemento.from_payload(story_context_history),
         )
 
@@ -136,6 +143,7 @@ class GameStateSnapshot:
             campaign_progress=(
                 self.campaign_progress.model_copy() if self.campaign_progress is not None else None
             ),
+            campaign_clocks=[clock.model_copy() for clock in self.campaign_clocks],
             story_context=StoryContextMemento(history=self.story_context.to_payload()),
         )
 
@@ -168,6 +176,8 @@ class GameStateSnapshot:
         state.campaign_progress = (
             self.campaign_progress.model_copy() if self.campaign_progress is not None else None
         )
+        if state.campaign_progress is not None and self.campaign_clocks:
+            state.campaign_progress.clocks = [clock.model_copy() for clock in self.campaign_clocks]
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -196,5 +206,6 @@ class GameStateSnapshot:
             "campaign_progress": (
                 self.campaign_progress.model_dump() if self.campaign_progress else None
             ),
+            "campaign_clocks": [clock.model_dump() for clock in self.campaign_clocks],
             "story_context_history": self.story_context.to_payload(),
         }

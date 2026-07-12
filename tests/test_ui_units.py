@@ -735,6 +735,18 @@ def test_build_world_state_summary_groups_objectives_and_relationships() -> None
             stakes="The ward snaps shut.",
         ),
         current_scene_id="scene-4",
+        campaign_progress={
+            "active_act_id": "act_escape",
+            "active_chapter_id": "lower_vault",
+            "started_turn": 1,
+            "chapters": [
+                {
+                    "chapter_id": "lower_vault",
+                    "completed_milestone_ids": ["found_key"],
+                }
+            ],
+            "clocks": [{"id": "danger", "label": "DANGER", "value": 3, "maximum": 6}],
+        },
     )
 
     assert "## Overview" in summary
@@ -758,6 +770,12 @@ def test_build_world_state_summary_groups_objectives_and_relationships() -> None
     assert "- Guild: 2" in summary
     assert "## NPC Affinity" in summary
     assert "- Steward Hale: 1" in summary
+    assert "## Campaign" in summary
+    assert "- Act: act_escape" in summary
+    assert "- Chapter: lower_vault" in summary
+    assert "- Started turn: 1" in summary
+    assert "- Pressure: DANGER 3/6" in summary
+    assert "- Milestones: found_key" in summary
     assert "## Companions" in summary
     assert "### Active" in summary
     assert "- Steward Hale (Affinity 2): Can negotiate guild rites." in summary

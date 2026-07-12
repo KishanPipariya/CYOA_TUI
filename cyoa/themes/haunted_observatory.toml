@@ -17,6 +17,24 @@ When the story reaches a definitive conclusion (truth revealed, escape, death, p
 Ensure your output is strictly valid JSON matching the requested schema.
 """
 
+[terminal_identity]
+standard = "Keyboard-first, text-forward, compact. Favor clue ledgers, terse omens, and transcript-safe ASCII."
+title_card = """
+  ___  ____  ____  _____ ______     ___  _____ ___  ______   __
+ / _ \\| __ )/ ___|| ____|  _ \\ \\   / / \\|_   _/ _ \\|  _ \\ \\ / /
+| | | |  _ \\\\___ \\|  _| | |_) \\ \\ / / _ \\ | || | | | |_) \\ V /
+| |_| | |_) |___) | |___|  _ < \\ V / ___ \\| || |_| |  _ < | |
+ \\___/|____/|____/|_____|_| \\_\\ \\_/_/   \\_\\_| \\___/|_| \\_\\|_|
+"""
+scene_divider = ":: brass / rain / starless glass ::"
+
+[terminal_identity.loading_glyph_sets]
+storm = ["[. ]", "[..]", "[*.]", "[**]"]
+
+[terminal_identity.mood_microcopy]
+mysterious = "The dome creaks."
+dark = "A star goes out."
+
 [opening_stats]
 health = 100
 gold = 12
@@ -32,6 +50,67 @@ status = "active"
 
 [npc_affinity]
 "Missing Astronomer" = 1
+
+[campaign]
+id = "haunted_observatory"
+name = "Haunted Observatory"
+description = "A clue-driven night investigation through the sealed dome, below-stairs machinery, and the final celestial alignment."
+starting_act_id = "act_one"
+starting_chapter_id = "sealed_dome"
+
+[[campaign.clocks]]
+id = "corruption"
+label = "CORR"
+description = "How deeply the observatory's influence has marked the player."
+initial = 0
+minimum = 0
+maximum = 6
+
+[[campaign.clocks]]
+id = "storm"
+label = "STORM"
+description = "How close the weather is to trapping everyone inside."
+initial = 1
+minimum = 0
+maximum = 6
+
+[[campaign.acts]]
+id = "act_one"
+title = "The Watching Dome"
+summary = "Enter the observatory, map its locked spaces, and decide which truth to trust."
+
+[[campaign.acts.chapters]]
+id = "sealed_dome"
+title = "Sealed Dome"
+summary = "Get inside and establish the first clue chain before the storm closes."
+directives = ["Keep fear grounded in physical clues until the player has enough evidence."]
+
+[[campaign.acts.chapters.milestones]]
+id = "make_entry"
+title = "Make entry"
+min_turn = 2
+
+[[campaign.acts.chapters]]
+id = "lower_mechanism"
+title = "Lower Mechanism"
+summary = "Descend into the machinery that turns the telescope and the haunting."
+directives = ["Let discovered lore and companion status change what the machinery reveals."]
+
+[[campaign.acts.chapters.milestones]]
+id = "decode_mechanism"
+title = "Decode the mechanism"
+min_turn = 5
+
+[[campaign.acts.chapters]]
+id = "final_alignment"
+title = "Final Alignment"
+summary = "Resolve the missing astronomer's work before the sky answers."
+directives = ["Resolve the ending through corruption, storm pressure, and clues gathered."]
+
+[[campaign.acts.chapters.milestones]]
+id = "face_alignment"
+title = "Face the alignment"
+min_turn = 8
 
 [ui]
 main_surface = "#100d17"

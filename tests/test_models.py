@@ -2,6 +2,9 @@ import pytest
 from pydantic import ValidationError
 
 from cyoa.core.models import (
+    CampaignClockDefinition,
+    CampaignPack,
+    CampaignProgress,
     Choice,
     ChoiceRequirement,
     Companion,
@@ -39,6 +42,31 @@ def test_story_node_default_values():
     assert node.is_ending is True
     assert node.items_lost == []
     assert node.npcs_present == []
+
+
+def test_campaign_progress_seeds_and_updates_pressure_clocks():
+    campaign = CampaignPack(
+        id="demo",
+        name="Demo",
+        description="Demo campaign.",
+        clocks=[
+            CampaignClockDefinition(
+                id="danger",
+                label="DANGER",
+                initial=1,
+                minimum=0,
+                maximum=3,
+            )
+        ],
+        acts=[{"id": "act", "title": "Act", "chapters": [{"id": "chapter", "title": "Chapter"}]}],
+    )
+
+    progress = CampaignProgress.from_campaign(campaign)
+
+    assert progress.clocks[0].terse_summary() == "DANGER 1/3"
+    assert progress.apply_clock_updates({"danger": 5}) is True
+    assert progress.clocks[0].value == 3
+    assert progress.apply_clock_updates({"danger": 1}) is False
 
 
 def test_story_node_missing_required_fields():
