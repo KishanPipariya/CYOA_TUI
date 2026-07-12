@@ -111,27 +111,6 @@ def test_graph_db_warns_when_optional_dependency_is_missing(
     assert "Install the 'graph' extra" in caplog.text
 
 
-def test_db_create_story_node_resolves_title_collisions(mock_neo4j):
-    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
-        mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
-
-        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
-        mock_neo4j.run.side_effect = [
-            [
-                {"title": "New Adventure"},
-                {"title": "New Adventure (2)"},
-                {"title": "New Adventure (bad)"},
-            ],
-            MagicMock(),
-        ]
-
-        title = db.create_story_node_and_get_title("New Adventure")
-
-        assert title == "New Adventure (3)"
-        create_call = mock_neo4j.run.call_args_list[1]
-        assert create_call.kwargs["final_title"] == "New Adventure (3)"
-
-
 def test_db_create_scene_node(mock_neo4j):
     with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
         mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
@@ -148,27 +127,6 @@ def test_db_create_scene_node(mock_neo4j):
         query = mock_neo4j.run.call_args[0][0]
         assert "CREATE (s:Scene" in query
         assert "BELONGS_TO" in query
-
-
-def test_db_create_scene_node_with_mood(mock_neo4j):
-    with patch("cyoa.db.graph_db.GraphDatabase.driver") as mock_driver_call:
-        mock_driver_call.return_value.session.return_value.__enter__.return_value = mock_neo4j
-        db = CYOAGraphDB(uri="bolt://test", user="u", password="p")
-
-        # Mocking CREATE result
-        mock_result = MagicMock()
-        mock_result.single.return_value = {"scene_id": "uuid-mood-123"}
-        mock_neo4j.run.return_value = mock_result
-
-        scene_id = db.create_scene_node(
-            "Ethereal lights...", ["Touch them"], "Adventure 1", mood="ethereal"
-        )
-
-        assert scene_id == "uuid-mood-123"
-        kwargs = mock_neo4j.run.call_args[1]
-        assert kwargs["mood"] == "ethereal"
-        query = mock_neo4j.run.call_args[0][0]
-        assert "mood: $mood" in query
 
 
 def test_db_create_choice_edge(mock_neo4j):

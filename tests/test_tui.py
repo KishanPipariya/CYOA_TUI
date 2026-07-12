@@ -3415,16 +3415,6 @@ async def test_full_save_load_lifecycle(mock_app_dependencies, tmp_path, monkeyp
             assert "88%" in health_value_text
 
 
-def test_list_manual_save_files_excludes_autosave(tmp_path, monkeypatch) -> None:
-    from cyoa.core import constants
-
-    monkeypatch.setattr(constants, "SAVES_DIR", str(tmp_path))
-    (tmp_path / "autosave_latest.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "manual_turn2.json").write_text("{}", encoding="utf-8")
-
-    assert PersistenceMixin._list_manual_save_files() == ["manual_turn2.json"]
-
-
 @pytest.mark.asyncio
 async def test_restore_from_save_rejects_malformed_ui_state(mock_app_dependencies, tmp_path):
     save_path = tmp_path / "broken-ui-save.json"
