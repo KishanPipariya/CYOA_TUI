@@ -7,6 +7,8 @@ import pytest
 from cyoa.core.engine import StoryEngine
 from cyoa.core.events import Events, bus
 from cyoa.core.models import (
+    CampaignAct,
+    CampaignChapter,
     CampaignClockDefinition,
     CampaignPack,
     Choice,
@@ -79,7 +81,13 @@ def _make_clock_campaign() -> CampaignPack:
                 maximum=6,
             )
         ],
-        acts=[{"id": "act", "title": "Act", "chapters": [{"id": "chapter", "title": "Chapter"}]}],
+        acts=[
+            CampaignAct(
+                id="act",
+                title="Act",
+                chapters=[CampaignChapter(id="chapter", title="Chapter")],
+            )
+        ],
     )
 
 

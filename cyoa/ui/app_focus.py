@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from textual.app import ScreenStackError
 from textual.css.query import NoMatches
@@ -15,8 +15,9 @@ class FocusModalMixin:
     """Focus capture and restoration helpers around modal screens."""
 
     def _focused_widget(self) -> Widget | None:
+        app = cast(Any, self)
         try:
-            focused = self.focused
+            focused = app.focused
         except ScreenStackError:
             return None
         return focused if isinstance(focused, Widget) else None
@@ -27,7 +28,7 @@ class FocusModalMixin:
             return None
 
         if isinstance(focused, Button):
-            buttons = self._available_action_buttons()
+            buttons = cast(Any, self)._available_action_buttons()
             if focused in buttons:
                 return FocusTarget("choice_index", buttons.index(focused))
 
@@ -57,26 +58,27 @@ class FocusModalMixin:
         if target is None:
             return None
         if target.kind == "choice_index":
-            buttons = self._available_action_buttons()
+            buttons = cast(Any, self)._available_action_buttons()
             if not buttons:
                 return None
             index = min(int(target.value), len(buttons) - 1)
-            return buttons[index]
+            return cast(Widget, buttons[index])
         try:
-            widget = self.query_one(f"#{target.value}", Widget)
+            widget = cast(Widget, cast(Any, self).query_one(f"#{target.value}", Widget))
         except NoMatches:
             return None
         return widget if self._widget_can_receive_focus(widget) else None
 
     def _fallback_focus_widget(self, fallback: str = "choices") -> Widget | None:
+        app = cast(Any, self)
         fallback_methods: dict[str, Callable[[], Widget | None]] = {
             "choices": lambda: (
-                self._available_action_buttons()[0] if self._available_action_buttons() else None
+                app._available_action_buttons()[0] if app._available_action_buttons() else None
             ),
-            "story": lambda: self.query_one("#story-container", Widget),
-            "status": lambda: self.query_one("#status-display", Widget),
-            "journal": lambda: self.query_one("#journal-list", Widget),
-            "story_map": lambda: self.query_one("#story-map-tree", Widget),
+            "story": lambda: cast(Widget, app.query_one("#story-container", Widget)),
+            "status": lambda: cast(Widget, app.query_one("#status-display", Widget)),
+            "journal": lambda: cast(Widget, app.query_one("#journal-list", Widget)),
+            "story_map": lambda: cast(Widget, app.query_one("#story-map-tree", Widget)),
         }
         ordered = [fallback, "choices", "story", "status", "journal", "story_map"]
         for key in ordered:
@@ -107,16 +109,18 @@ class FocusModalMixin:
             if widget is not None and self._widget_can_receive_focus(widget):
                 widget.focus()
 
-        self.call_after_refresh(apply_focus)
+        app = cast(Any, self)
+        app.call_after_refresh(apply_focus)
         try:
             asyncio.get_running_loop()
         except RuntimeError:
             return
-        self.set_timer(0.01, apply_focus)
+        app.set_timer(0.01, apply_focus)
 
     def _has_open_modal_screen(self) -> bool:
+        app = cast(Any, self)
         try:
-            screen_stack = self.screen_stack
+            screen_stack = app.screen_stack
         except ScreenStackError:
             return False
         return any(isinstance(screen, ModalScreen) for screen in screen_stack[1:])
@@ -128,10 +132,11 @@ class FocusModalMixin:
         *,
         fallback_focus: str = "choices",
     ) -> None:
+        app = cast(Any, self)
         opened_over_modal = self._has_open_modal_screen()
         modal_focus_target = self._capture_focus_target()
-        if self._modal_focus_return_target is None:
-            self._modal_focus_return_target = modal_focus_target
+        if app._modal_focus_return_target is None:
+            app._modal_focus_return_target = modal_focus_target
 
         def on_dismiss(result: Any) -> None:
             try:
@@ -142,8 +147,8 @@ class FocusModalMixin:
                     if opened_over_modal:
                         self._restore_focus_target(modal_focus_target, fallback=fallback_focus)
                 else:
-                    target = self._modal_focus_return_target
-                    self._modal_focus_return_target = None
+                    target = app._modal_focus_return_target
+                    app._modal_focus_return_target = None
                     self._restore_focus_target(target, fallback=fallback_focus)
 
-        self.push_screen(screen, on_dismiss)
+        app.push_screen(screen, on_dismiss)
