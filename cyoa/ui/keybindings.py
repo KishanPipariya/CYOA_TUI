@@ -49,6 +49,26 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         palette=False,
     ),
     AppBindingSpec(
+        "focus_previous_choice_horizontal",
+        "left",
+        "focus_previous_choice",
+        "Prev Choice",
+        "Previous choice",
+        "Navigation",
+        show=False,
+        palette=False,
+    ),
+    AppBindingSpec(
+        "focus_next_choice_horizontal",
+        "right",
+        "focus_next_choice",
+        "Next Choice",
+        "Next choice",
+        "Navigation",
+        show=False,
+        palette=False,
+    ),
+    AppBindingSpec(
         "focus_story_region",
         "shift+s",
         "focus_story_region",
@@ -268,6 +288,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Undo",
         "Undo last choice",
         "Adventure Actions",
+        show=False,
     ),
     AppBindingSpec(
         "redo",
@@ -311,6 +332,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Load",
         "Load game",
         "Adventure Actions",
+        show=False,
     ),
     AppBindingSpec(
         "export_story",
@@ -328,6 +350,7 @@ APP_BINDING_SPECS: tuple[AppBindingSpec, ...] = (
         "Quit",
         "Quit game",
         "Adventure Actions",
+        show=False,
     ),
     AppBindingSpec(
         "request_restart",

@@ -171,6 +171,8 @@ class CYOAApp(
     runtime_metadata_verbosity: reactive[str] = reactive("standard")
     locked_choice_verbosity: reactive[str] = reactive("standard")
     compact_layout: reactive[bool] = reactive(False)
+    short_layout: reactive[bool] = reactive(False)
+    ultra_compact_layout: reactive[bool] = reactive(False)
 
     def __init__(
         self,
@@ -323,7 +325,7 @@ class CYOAApp(
 
         self._current_turn_widget = self.query_one("#initial-turn", Markdown)
         self._refresh_story_timeline_classes()
-        self._set_compact_layout(self.size.width)
+        self._set_compact_layout(self.size.width, self.size.height)
         status_display = self.query_one(StatusDisplay)
         status_display.generation_preset = "balanced"
         status_display.screen_reader_mode = self.screen_reader_mode
@@ -342,7 +344,7 @@ class CYOAApp(
         self._continue_startup_sequence()
 
     def on_resize(self, event: Resize) -> None:
-        self._set_compact_layout(event.size.width)
+        self._set_compact_layout(event.size.width, event.size.height)
 
     def watch_reduced_motion(self, enabled: bool) -> None:
         self.set_class(enabled, "reduced-motion")
@@ -500,12 +502,23 @@ class CYOAApp(
         """Return whether UI workers and event handlers may still touch widgets."""
         return self.is_running and not self._is_shutting_down
 
-    def _set_compact_layout(self, width: int) -> None:
-        """Enable compact mode on narrow terminals to preserve story readability."""
-        is_compact = width < 140
+    def _set_compact_layout(self, width: int, height: int) -> None:
+        """Adapt to constrained terminals without sacrificing the reading surface.
+
+        A terminal can be wide but short (split panes are a common example), so
+        width alone is not a useful definition of "compact". Short layouts use
+        the same single-column, reader-first workspace as narrow layouts.
+        """
+        is_short = height < 30
+        is_ultra_compact = height < 24
+        is_compact = width < 140 or is_short
         was_compact = bool(self.compact_layout)
         self.compact_layout = is_compact
+        self.short_layout = is_short
+        self.ultra_compact_layout = is_ultra_compact
         self.set_class(is_compact, "compact-layout")
+        self.set_class(is_short, "short-layout")
+        self.set_class(is_ultra_compact, "ultra-compact-layout")
         if is_compact and not was_compact:
             self._collapse_side_panels_for_compact_layout()
 

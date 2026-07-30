@@ -274,22 +274,23 @@ Toast.-error {
     width: 1fr;
     height: 1fr;
     min-width: 64;
-    padding: 1;
+    padding: 1 1 0 1;
     background: $surface;
     layout: vertical;
     overflow: hidden;
 }
 
 #action-panel {
-    height: 68%;
-    min-height: 16;
-    max-height: 26;
+    /* Keep the dock bounded so the story remains the flexible reading surface. */
+    height: 42%;
+    min-height: 10;
+    max-height: 18;
     border-top: solid $secondary 22%;
     margin: 1 0 0 0;
-    padding: 1 1 0 1;
+    padding: 0 1;
     background: $panel 58%;
     layout: vertical;
-    overflow-y: auto;
+    overflow: hidden;
 }
 
 #action-dock {
@@ -445,9 +446,9 @@ Toast.-error {
 /* ── Story Panel ───────────────────────────────────────────── */
 #story-container {
     height: 1fr;
-    min-height: 10;
+    min-height: 6;
     border: none;
-    padding: 1 1 0 1;
+    padding: 1 0 0 0;
     margin: 0;
     background: $surface;
     overflow-x: hidden;
@@ -460,12 +461,11 @@ Toast.-error {
 
 .story-turn {
     min-height: 3;
-    background: $panel 74%;
+    background: $panel 64%;
     color: $text;
     padding: 1 2;
     margin: 0 0 1 0;
     border-left: solid $secondary 30%;
-    border-right: solid $secondary 8%;
 }
 
 .story-turn.pending-turn {
@@ -473,19 +473,17 @@ Toast.-error {
 }
 
 .player-choice {
-    background: $surface 68%;
+    background: $surface 54%;
     color: $text;
     padding: 1 2;
     margin: 0 0 1 4;
-    border-right: solid $accent 46%;
-    border-left: solid $secondary 18%;
+    border-right: solid $accent 34%;
     text-align: right;
 }
 
 .story-turn.current-turn {
-    background: $panel 94%;
+    background: $panel 82%;
     border-left: solid $accent;
-    border-right: solid $secondary 18%;
 }
 
 .story-turn.archived-turn {
@@ -522,8 +520,8 @@ Toast.-error {
 #status-bar {
     width: 100%;
     height: auto;
-    min-height: 8;
-    padding: 0 0 1 0;
+    min-height: 0;
+    padding: 0;
     margin: 0;
     border: none;
     overflow: hidden;
@@ -531,9 +529,9 @@ Toast.-error {
 
 StatusDisplay {
     height: auto;
-    background: $panel 36%;
-    border: solid $secondary 18%;
-    padding: 1;
+    background: transparent;
+    border: none;
+    padding: 0 1;
     margin: 0;
 }
 
@@ -552,7 +550,7 @@ StatusDisplay.region-jump-highlight {
     layout: horizontal;
     height: auto;
     width: 100%;
-    margin-top: 1;
+    margin-top: 0;
 }
 
 #health-label {
@@ -618,7 +616,7 @@ StatusDisplay.region-jump-highlight {
     background: $surface 18%;
     border-left: solid $secondary 24%;
     padding: 0 1;
-    margin-top: 1;
+    margin-top: 0;
     text-wrap: nowrap;
     overflow: hidden;
 }
@@ -702,7 +700,7 @@ Button {
     padding: 0;
     background: $panel 72%;
     color: $text;
-    border: solid $secondary 34%;
+    border: solid $secondary 26%;
     border-left: solid $secondary 42%;
     tint: transparent;
 }
@@ -720,8 +718,8 @@ Button > .textual-button--label {
 
 #choices-container Button:focus {
     background: $accent 18%;
-    border: round $accent;
-    border-left: wide $accent;
+    border: solid $accent;
+    border-left: solid $accent;
     color: $text;
     tint: $accent 7%;
 }
@@ -783,6 +781,7 @@ Footer {
     dock: bottom;
     padding: 0 1;
     border-top: solid $secondary 10%;
+    overflow: hidden;
 }
 
 Footer > .footer--key {
@@ -1359,4 +1358,84 @@ Footer > .footer--highlight {
     color: #FFFFFF;
     border: round #2EEA8F;
     border-left: wide #2EEA8F;
+}
+
+/* ── Height-Constrained Reader Mode ─────────────────────────── */
+/*
+   Split panes and small terminal windows fail vertically before they fail
+   horizontally. Keep the live scene and choices visible, while moving panel
+   shortcuts and verbose status information to their existing keybindings and
+   command palette.
+*/
+.short-layout #main-container {
+    padding: 0;
+}
+
+.short-layout #story-container {
+    min-height: 6;
+    padding: 0;
+}
+
+.short-layout .story-turn {
+    padding: 0 1;
+    margin-bottom: 0;
+}
+
+.short-layout .player-choice {
+    margin-left: 1;
+    padding: 0 1;
+}
+
+.short-layout #action-panel {
+    height: 48%;
+    min-height: 8;
+    max-height: 10;
+    margin-top: 0;
+    padding: 0;
+    border-top: solid $secondary 16%;
+    overflow: hidden;
+}
+
+.short-layout #action-dock {
+    display: none;
+}
+
+.short-layout #status-bar {
+    height: 2;
+    min-height: 2;
+    max-height: 2;
+}
+
+.short-layout StatusDisplay {
+    padding: 0;
+}
+
+.short-layout #health-label {
+    display: none;
+}
+
+.short-layout #health-value {
+    width: 11;
+}
+
+.short-layout #choices-container {
+    min-height: 4;
+    max-height: 7;
+    padding: 0;
+}
+
+.short-layout #choices-container Button {
+    min-height: 3;
+    margin-bottom: 0;
+}
+
+.short-layout #choices-container Button > .textual-button--label {
+    padding: 0 1;
+}
+
+/* At twenty-ish rows, the footer costs a full line but cannot present useful
+   hints without clipping. All bindings remain available and Help/Palette are
+   still reachable by their shortcuts. */
+.ultra-compact-layout Footer {
+    display: none;
 }

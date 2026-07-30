@@ -972,6 +972,17 @@ async def test_choice_focus_moves_with_arrow_keys(mock_app_dependencies):
         await pilot.pause(0.1)
         assert app.focused is buttons[0]
 
+        # Story choices are vertical, but accept horizontal arrows too. The
+        # app bindings are deliberately not priority bindings, so modal
+        # dialogs continue to own their Left/Right navigation.
+        await pilot.press("right")
+        await pilot.pause(0.1)
+        assert app.focused is buttons[1]
+
+        await pilot.press("left")
+        await pilot.pause(0.1)
+        assert app.focused is buttons[0]
+
         await pilot.press("down", "enter")
         await _wait_for_turn(pilot, app, 2)
         app.action_skip_typewriter()
@@ -2062,6 +2073,36 @@ async def test_main_game_layout_fits_compact_terminal(mock_app_dependencies) -> 
 
         for story_widget in story_container.query(".story-turn"):
             _assert_horizontal_region_within_parent(story_widget, story_container)
+
+
+@pytest.mark.asyncio
+async def test_short_wide_terminal_uses_reader_first_layout(mock_app_dependencies) -> None:
+    """Height constraints should trigger compact layout even on a wide terminal."""
+    app = CYOAApp(model_path="dummy_path.gguf")
+
+    async with app.run_test(size=(160, 22)) as pilot:
+        await _wait_for_initial_scene(pilot, app)
+        app.action_skip_typewriter()
+
+        story_container = app.query_one("#story-container", VerticalScroll)
+        action_panel = app.query_one("#action-panel", Container)
+        status_bar = app.query_one("#status-bar", Container)
+        choices_container = app.query_one("#choices-container", Container)
+        action_dock = app.query_one("#action-dock")
+
+        assert app.compact_layout is True
+        assert app.short_layout is True
+        assert app.ultra_compact_layout is True
+        assert action_dock.display is False
+
+        for widget in (story_container, action_panel, status_bar, choices_container):
+            _assert_region_within_screen(widget, app.size)
+
+        buttons = list(choices_container.query(Button))
+        assert buttons
+        assert story_container.region.height >= 6
+        assert story_container.region.bottom <= action_panel.region.y
+        _assert_region_within_screen(buttons[0], app.size)
 
 
 @pytest.mark.asyncio
