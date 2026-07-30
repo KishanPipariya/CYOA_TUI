@@ -608,11 +608,6 @@ class PersistenceMixin:
             "turn_count": state.turn_count,
             "current_scene_id": state.current_scene_id,
             "last_choice_text": state.last_choice_text,
-            "last_resolved_choice_check": (
-                state.last_resolved_choice_check.model_dump()
-                if state.last_resolved_choice_check is not None
-                else None
-            ),
             "ending_type": ending_type,
             "ending_label": format_ending_type_label(ending_type),
             "ending_narrative": ending_narrative,

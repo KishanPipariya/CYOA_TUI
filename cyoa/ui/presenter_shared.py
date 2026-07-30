@@ -72,53 +72,6 @@ def _locked_reason_lines(
     return reason_lines or [reason]
 
 
-def _choice_check_lines(choice: Any) -> list[str]:
-    summary_builder = getattr(choice, "check_summary", None)
-    if callable(summary_builder):
-        summary = summary_builder()
-        if isinstance(summary, list):
-            return [line for line in summary if isinstance(line, str) and line.strip()]
-    return []
-
-
-def _resolved_choice_check_lines(value: Any) -> list[str]:
-    if isinstance(value, dict):
-        summary_builder = value.get("summary_lines")
-        if callable(summary_builder):
-            summary = summary_builder()
-        else:
-            stat = value.get("stat")
-            stat_value = value.get("stat_value")
-            difficulty = value.get("difficulty")
-            roll = value.get("roll")
-            total = value.get("total")
-            success = value.get("success")
-            stakes = value.get("stakes")
-            if not isinstance(stat, str) or not isinstance(success, bool):
-                return []
-            if not all(isinstance(part, int) for part in (stat_value, difficulty, roll, total)):
-                return []
-            outcome = "passed" if success else "failed"
-            lines = [
-                (
-                    f"Last check: {stat.replace('_', ' ')} {outcome} "
-                    f"({roll} + {stat_value} = {total} vs {difficulty})"
-                )
-            ]
-            if isinstance(stakes, str) and stakes.strip():
-                lines.append(f"Stakes: {stakes.strip()}")
-            return lines
-    else:
-        summary_builder = getattr(value, "summary_lines", None)
-        if callable(summary_builder):
-            summary = summary_builder()
-        else:
-            summary = None
-    if isinstance(summary, list):
-        return [line for line in summary if isinstance(line, str) and line.strip()]
-    return []
-
-
 def _format_signed_change(value: int) -> str:
     return f"{value:+d}"
 

@@ -12,11 +12,9 @@ from cyoa.core.models import (
     CampaignClockDefinition,
     CampaignPack,
     Choice,
-    ChoiceCheck,
     Companion,
     LoreEntry,
     Objective,
-    ResolvedChoiceCheck,
     StoryNode,
     WorldTime,
 )
@@ -149,19 +147,17 @@ async def test_engine_retry_uses_last_choice_text():
 
 
 @pytest.mark.asyncio
-async def test_engine_retry_prefers_last_choice_submission_when_present():
+async def test_engine_retry_uses_the_saved_choice_submission():
     broker, _provider = _make_broker_with_mock_provider()
     engine = StoryEngine(broker=broker, starting_prompt="Start")
     engine.state.last_choice_text = "Climb the wall"
-    engine.state.last_choice_submission = (
-        "Climb the wall\n\n[Resolved skill check]\nOutcome: success"
-    )
+    engine.state.last_choice_submission = "Climb the wall"
     engine._generate_next = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
     await engine.retry()
 
     engine._generate_next.assert_awaited_once_with(
-        choice_text="Climb the wall\n\n[Resolved skill check]\nOutcome: success",
+        choice_text="Climb the wall",
         persisted_choice_text="Climb the wall",
     )
 
@@ -187,57 +183,30 @@ async def test_engine_make_choice_records_choice_length_not_raw_text(
 
 
 @pytest.mark.asyncio
-async def test_engine_make_choice_resolves_skill_check_before_generation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_engine_make_choice_submits_the_selected_choice_directly() -> None:
     broker, _provider = _make_broker_with_mock_provider()
     engine = StoryEngine(broker=broker, starting_prompt="Start")
     engine.story_context = StoryContext("Start", token_counter=lambda _x: 1)
     engine.state.current_node = StoryNode(
         narrative="A broken bridge hangs over the ravine.",
         choices=[
-            Choice(
-                text="Leap the gap",
-                check=ChoiceCheck(
-                    stat="reputation",
-                    difficulty=12,
-                    stakes="You crash into the rocks below.",
-                ),
-            ),
+            Choice(text="Leap the gap"),
             Choice(text="Search for another route"),
         ],
     )
-    engine.state.player_stats["reputation"] = 4
     engine._generate_next = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    monkeypatch.setattr("cyoa.core.engine.random.randint", lambda _a, _b: 9)
 
     statuses: list[str] = []
     bus.subscribe(Events.STATUS_MESSAGE, lambda message: statuses.append(message))
 
     await engine.make_choice("Leap the gap")
 
-    assert statuses == [
-        "🎲 Testing reputation against difficulty 12...",
-        "✅ reputation check passed: 9 + 4 = 13 vs 12. Stakes avoided: You crash into the rocks below.",
-    ]
+    assert statuses == []
     assert engine.state.last_choice_text == "Leap the gap"
-    assert engine.state.last_choice_submission is not None
-    assert "Outcome: success" in engine.state.last_choice_submission
-    assert engine.state.last_resolved_choice_check == ResolvedChoiceCheck(
-        stat="reputation",
-        stat_value=4,
-        difficulty=12,
-        roll=9,
-        total=13,
-        success=True,
-        stakes="You crash into the rocks below.",
-    )
+    assert engine.state.last_choice_submission == "Leap the gap"
     assert engine.story_context is not None
-    assert "Resolved skill check" in engine.story_context.history[-1]["content"]
-    engine._generate_next.assert_awaited_once_with(
-        choice_text=engine.state.last_choice_submission,
-        persisted_choice_text="Leap the gap",
-    )
+    assert engine.story_context.history[-1]["content"] == "I choose: Leap the gap"
+    engine._generate_next.assert_awaited_once_with(choice_text="Leap the gap")
 
 
 @pytest.mark.asyncio
@@ -385,16 +354,7 @@ def test_engine_save_and_load_roundtrip():
     engine.state.player_stats = {"health": 88, "gold": 12, "reputation": 3}
     engine.state.current_scene_id = "scene-2"
     engine.state.last_choice_text = "Open door"
-    engine.state.last_choice_submission = "Open door\n\n[Resolved skill check]\nOutcome: success"
-    engine.state.last_resolved_choice_check = ResolvedChoiceCheck(
-        stat="reputation",
-        stat_value=3,
-        difficulty=10,
-        roll=8,
-        total=11,
-        success=True,
-        stakes="The seal lashes back.",
-    )
+    engine.state.last_choice_submission = "Open door"
     engine.state.current_node = _make_story_node("Node")
 
     data = engine.get_save_data()
@@ -412,19 +372,7 @@ def test_engine_save_and_load_roundtrip():
     assert loaded.state.player_stats["health"] == 88
     assert loaded.state.current_scene_id == "scene-2"
     assert loaded.state.last_choice_text == "Open door"
-    assert (
-        loaded.state.last_choice_submission
-        == "Open door\n\n[Resolved skill check]\nOutcome: success"
-    )
-    assert loaded.state.last_resolved_choice_check == ResolvedChoiceCheck(
-        stat="reputation",
-        stat_value=3,
-        difficulty=10,
-        roll=8,
-        total=11,
-        success=True,
-        stakes="The seal lashes back.",
-    )
+    assert loaded.state.last_choice_submission == "Open door"
 
 
 def test_game_state_tracks_campaign_progress_and_advances_chapters():

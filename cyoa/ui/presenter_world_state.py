@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from cyoa.ui.presenter_shared import _resolved_choice_check_lines, _world_time_summary
+from cyoa.ui.presenter_shared import _world_time_summary
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,7 +17,6 @@ class WorldStateSummaryInput:
     story_flags: set[str] | list[str] | None
     world_time: Any = None
     last_choice_text: str | None = None
-    last_resolved_choice_check: Any = None
     current_scene_id: str | None = None
     campaign_progress: Any = None
 
@@ -35,7 +34,6 @@ def build_world_state_summary(  # noqa: C901
     story_flags: set[str] | list[str] | None,
     world_time: Any = None,
     last_choice_text: str | None = None,
-    last_resolved_choice_check: Any = None,
     current_scene_id: str | None = None,
     campaign_progress: Any = None,
 ) -> str:
@@ -140,8 +138,6 @@ def build_world_state_summary(  # noqa: C901
         lines.append(f"- Scene ID: {current_scene_id}")
     if last_choice_text:
         lines.append(f"- Last choice: {last_choice_text}")
-    for detail in _resolved_choice_check_lines(last_resolved_choice_check):
-        lines.append(f"- {detail}")
 
     lines.extend(
         [

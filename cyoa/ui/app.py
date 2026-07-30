@@ -568,7 +568,6 @@ class CYOAApp(
             locked_choice_verbosity=self.locked_choice_verbosity,
             story_title=state.story_title or node.title,
             last_choice_text=state.last_choice_text,
-            last_resolved_choice_check=state.last_resolved_choice_check,
             story_flags=state.story_flags,
             items_gained=node.items_gained,
             items_lost=node.items_lost,
@@ -610,7 +609,6 @@ class CYOAApp(
             story_flags=state.story_flags,
             world_time=state.world_time,
             last_choice_text=state.last_choice_text,
-            last_resolved_choice_check=state.last_resolved_choice_check,
             current_scene_id=state.current_scene_id,
             campaign_progress=state.campaign_progress,
         )
@@ -1368,8 +1366,6 @@ class CYOAApp(
             return
 
         choice = node.choices[0]
-        if choice.check is not None:
-            return
         if self.engine.speculation_cache.get_node(
             self.engine.state.current_scene_id or "", choice.text
         ):

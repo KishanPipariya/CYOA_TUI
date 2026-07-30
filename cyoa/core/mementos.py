@@ -10,7 +10,6 @@ from cyoa.core.models import (
     Companion,
     LoreEntry,
     Objective,
-    ResolvedChoiceCheck,
     StoryNode,
     WorldTime,
 )
@@ -56,7 +55,6 @@ class GameStateSnapshot:
     current_scene_id: str | None
     last_choice_text: str | None
     last_choice_submission: str | None
-    last_resolved_choice_check: ResolvedChoiceCheck | None
     timeline_metadata: list[dict[str, Any]]
     objectives: list[Objective]
     faction_reputation: dict[str, int]
@@ -89,11 +87,6 @@ class GameStateSnapshot:
             current_scene_id=state.current_scene_id,
             last_choice_text=state.last_choice_text,
             last_choice_submission=state.last_choice_submission,
-            last_resolved_choice_check=(
-                state.last_resolved_choice_check.model_copy()
-                if state.last_resolved_choice_check is not None
-                else None
-            ),
             timeline_metadata=[entry.copy() for entry in state.timeline_metadata],
             objectives=[objective.model_copy() for objective in state.objectives],
             faction_reputation=dict(state.faction_reputation),
@@ -126,11 +119,6 @@ class GameStateSnapshot:
             current_scene_id=self.current_scene_id,
             last_choice_text=self.last_choice_text,
             last_choice_submission=self.last_choice_submission,
-            last_resolved_choice_check=(
-                self.last_resolved_choice_check.model_copy()
-                if self.last_resolved_choice_check is not None
-                else None
-            ),
             timeline_metadata=[entry.copy() for entry in self.timeline_metadata],
             objectives=[objective.model_copy() for objective in self.objectives],
             faction_reputation=dict(self.faction_reputation),
@@ -159,11 +147,6 @@ class GameStateSnapshot:
         state.current_scene_id = self.current_scene_id
         state.last_choice_text = self.last_choice_text
         state.last_choice_submission = self.last_choice_submission
-        state.last_resolved_choice_check = (
-            self.last_resolved_choice_check.model_copy()
-            if self.last_resolved_choice_check is not None
-            else None
-        )
         state.timeline_metadata = [entry.copy() for entry in self.timeline_metadata]
         state.objectives = [objective.model_copy() for objective in self.objectives]
         state.faction_reputation = dict(self.faction_reputation)
@@ -189,11 +172,6 @@ class GameStateSnapshot:
             "current_scene_id": self.current_scene_id,
             "last_choice_text": self.last_choice_text,
             "last_choice_submission": self.last_choice_submission,
-            "last_resolved_choice_check": (
-                self.last_resolved_choice_check.model_dump()
-                if self.last_resolved_choice_check
-                else None
-            ),
             "timeline_metadata": [entry.copy() for entry in self.timeline_metadata],
             "objectives": [objective.model_dump() for objective in self.objectives],
             "faction_reputation": dict(self.faction_reputation),

@@ -1,7 +1,5 @@
 from typing import Any
 
-from cyoa.ui.presenter_shared import _resolved_choice_check_lines
-
 
 def classify_ending_type(
     narrative: str,
@@ -163,7 +161,7 @@ def derive_hidden_achievements(archive_entries: list[Any]) -> list[dict[str, Any
     add_if_present(
         "silver_tongue",
         "Silver Tongue",
-        "Finish a run with reputation 10+ or a successful final reputation check.",
+        "Finish a run with reputation 10+.",
         next(
             (
                 entry
@@ -171,11 +169,6 @@ def derive_hidden_achievements(archive_entries: list[Any]) -> list[dict[str, Any
                 if (
                     isinstance(entry.get("player_stats"), dict)
                     and int(entry["player_stats"].get("reputation", 0)) >= 10
-                )
-                or (
-                    isinstance(entry.get("last_resolved_choice_check"), dict)
-                    and entry["last_resolved_choice_check"].get("stat") == "reputation"
-                    and bool(entry["last_resolved_choice_check"].get("success"))
                 )
             ),
             None,
@@ -348,8 +341,6 @@ def build_run_archive_summary(archive_entries: list[Any]) -> str:
         last_choice_text = entry.get("last_choice_text")
         if isinstance(last_choice_text, str) and last_choice_text.strip():
             lines.append(f"- Final choice: {last_choice_text.strip()}")
-        resolved_check_lines = _resolved_choice_check_lines(entry.get("last_resolved_choice_check"))
-        lines.extend(f"- {detail}" for detail in resolved_check_lines)
         divergence_points = entry.get("divergence_points")
         if isinstance(divergence_points, list) and divergence_points:
             turns = [f"Turn {turn}" for turn in divergence_points if isinstance(turn, int)]

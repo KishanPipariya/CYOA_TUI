@@ -3,11 +3,9 @@ from typing import Any
 
 from cyoa.ui.presenter_shared import (
     _active_objective_texts,
-    _choice_check_lines,
     _format_signed_change,
     _format_stat_name,
     _locked_reason_lines,
-    _resolved_choice_check_lines,
     normalize_verbosity,
 )
 
@@ -26,7 +24,6 @@ class SceneRecapInput:
     locked_choice_verbosity: str = "standard"
     story_title: str | None = None
     last_choice_text: str | None = None
-    last_resolved_choice_check: Any = None
     story_flags: set[str] | list[str] | None = None
     items_gained: list[str] | None = None
     items_lost: list[str] | None = None
@@ -53,7 +50,6 @@ def build_scene_recap(  # noqa: C901
     locked_choice_verbosity: str = "standard",
     story_title: str | None = None,
     last_choice_text: str | None = None,
-    last_resolved_choice_check: Any = None,
     story_flags: set[str] | list[str] | None = None,
     items_gained: list[str] | None = None,
     items_lost: list[str] | None = None,
@@ -72,9 +68,6 @@ def build_scene_recap(  # noqa: C901
         recap_lines[0] = f"{story_title} | Turn {turn_count}"
     if last_choice_text and (screen_reader_mode or resolved_recap_verbosity == "detailed"):
         recap_lines.append(f"Last choice: {last_choice_text}")
-    resolved_check_lines = _resolved_choice_check_lines(last_resolved_choice_check)
-    if resolved_check_lines and (screen_reader_mode or resolved_recap_verbosity == "detailed"):
-        recap_lines.extend(resolved_check_lines)
 
     recap_lines.extend(
         [
@@ -114,15 +107,7 @@ def build_scene_recap(  # noqa: C901
                 else:
                     recap_lines.append(f"{index}. {choice_text} (Unavailable: {reason_lines[0]})")
             else:
-                check_lines = _choice_check_lines(choice)
-                if check_lines and (screen_reader_mode or resolved_recap_verbosity == "detailed"):
-                    recap_lines.append(f"{index}. {choice_text}")
-                    for line in check_lines:
-                        recap_lines.append(f"   {line}")
-                elif check_lines:
-                    recap_lines.append(f"{index}. {choice_text} ({check_lines[0]})")
-                else:
-                    recap_lines.append(f"{index}. {choice_text}")
+                recap_lines.append(f"{index}. {choice_text}")
     else:
         recap_lines.append("No further choices. This scene is an ending.")
 

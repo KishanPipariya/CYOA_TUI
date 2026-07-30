@@ -5,7 +5,6 @@ from cyoa.ui.presenter_shared import (
     _active_objective_texts,
     _choice_export_text,
     _clean_export_text,
-    _resolved_choice_check_lines,
     _world_time_summary,
     normalize_verbosity,
 )
@@ -24,7 +23,6 @@ class AccessibleExportInput:
     objectives: list[Any]
     world_time: Any = None
     last_choice_text: str | None = None
-    last_resolved_choice_check: Any = None
     verbosity: str = "standard"
 
 
@@ -83,7 +81,6 @@ def _build_accessible_progress_lines(
     objectives: list[Any],
     world_time: Any = None,
     last_choice_text: str | None,
-    last_resolved_choice_check: Any,
     verbosity: str,
 ) -> list[str]:
     objective_texts = _active_objective_texts(objectives)
@@ -109,7 +106,6 @@ def _build_accessible_progress_lines(
         lines.append(f"- World time: {world_time_summary}")
     if last_choice_text:
         lines.append(f"- Last choice: {last_choice_text}")
-    lines.extend(f"- {line}" for line in _resolved_choice_check_lines(last_resolved_choice_check))
     if verbosity == "detailed" and objective_texts:
         lines.append("Objective Details:")
         lines.extend(f"- {objective}" for objective in objective_texts)
@@ -129,7 +125,6 @@ def build_accessible_export(
     objectives: list[Any],
     world_time: Any = None,
     last_choice_text: str | None = None,
-    last_resolved_choice_check: Any = None,
     verbosity: str = "standard",
 ) -> str:
     resolved_verbosity = normalize_verbosity(verbosity)
@@ -172,7 +167,6 @@ def build_accessible_export(
             objectives=objectives,
             world_time=world_time,
             last_choice_text=last_choice_text,
-            last_resolved_choice_check=last_resolved_choice_check,
             verbosity=resolved_verbosity,
         )
     )

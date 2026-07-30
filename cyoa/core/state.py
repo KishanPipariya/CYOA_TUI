@@ -13,7 +13,6 @@ from cyoa.core.models import (
     Companion,
     LoreEntry,
     Objective,
-    ResolvedChoiceCheck,
     StoryNode,
     WorldTime,
 )
@@ -57,7 +56,6 @@ class GameState:
         self.current_scene_id: str | None = None
         self.last_choice_text: str | None = None
         self.last_choice_submission: str | None = None
-        self.last_resolved_choice_check: ResolvedChoiceCheck | None = None
         self.timeline_metadata: list[dict[str, Any]] = []
         self.objectives: list[Objective] = []
         self.faction_reputation: dict[str, int] = {}
@@ -83,7 +81,6 @@ class GameState:
         self.current_scene_id = None
         self.last_choice_text = None
         self.last_choice_submission = None
-        self.last_resolved_choice_check = None
         self.timeline_metadata = []
         self.objectives = []
         self.faction_reputation = {}
@@ -222,11 +219,6 @@ class GameState:
             "current_scene_id": self.current_scene_id,
             "last_choice_text": self.last_choice_text,
             "last_choice_submission": self.last_choice_submission,
-            "last_resolved_choice_check": (
-                self.last_resolved_choice_check.model_dump()
-                if self.last_resolved_choice_check is not None
-                else None
-            ),
             "timeline_metadata": [entry.copy() for entry in self.timeline_metadata],
             "objectives": [objective.model_dump() for objective in self.objectives],
             "faction_reputation": dict(self.faction_reputation),
@@ -261,9 +253,6 @@ class GameState:
         self.current_scene_id = scalars.current_scene_id
         self.last_choice_text = scalars.last_choice_text
         self.last_choice_submission = scalars.last_choice_submission
-        self.last_resolved_choice_check = self._coerce_resolved_choice_check(
-            data.get("last_resolved_choice_check")
-        )
         self.timeline_metadata = self._coerce_timeline_metadata(data.get("timeline_metadata"))
         self.objectives = self._coerce_objectives(data.get("objectives"))
         self.faction_reputation = self._coerce_relationships(data.get("faction_reputation"))
@@ -817,14 +806,6 @@ class GameState:
                 continue
         return clocks
 
-    def _coerce_resolved_choice_check(self, value: Any) -> ResolvedChoiceCheck | None:
-        if not isinstance(value, dict):
-            return None
-        try:
-            return ResolvedChoiceCheck(**value)
-        except Exception:
-            return None
-
     def _coerce_world_time(self, value: Any) -> WorldTime:
         if isinstance(value, WorldTime):
             return value.model_copy()
@@ -900,9 +881,6 @@ class GameState:
                 value.get("last_choice_text")
                 if isinstance(value.get("last_choice_text"), str)
                 else None
-            ),
-            last_resolved_choice_check=self._coerce_resolved_choice_check(
-                value.get("last_resolved_choice_check")
             ),
             timeline_metadata=self._coerce_timeline_metadata(value.get("timeline_metadata")),
             objectives=self._coerce_objectives(value.get("objectives")),

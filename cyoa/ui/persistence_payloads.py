@@ -302,7 +302,6 @@ def render_accessible_export(
         objectives=objectives if isinstance(objectives, list) else [],
         world_time=world_time if isinstance(world_time, dict) else None,
         last_choice_text=last_choice_text if isinstance(last_choice_text, str) else None,
-        last_resolved_choice_check=payload.get("last_resolved_choice_check"),
         verbosity=verbosity,
     )
 
