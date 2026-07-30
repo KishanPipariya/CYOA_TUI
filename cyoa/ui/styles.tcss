@@ -1397,6 +1397,11 @@ Footer > .footer--highlight {
 }
 
 .short-layout #action-dock {
+    /* Keep the compact panel controls reachable even in the rescue layout. */
+    display: block;
+}
+
+.ultra-compact-layout #action-dock {
     display: none;
 }
 

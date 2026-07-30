@@ -2049,7 +2049,17 @@ class CYOAApp(
         try:
             current_index = buttons.index(focused) if isinstance(focused, Button) else -1
         except ValueError:
+            # Choice buttons are rebuilt when a preference changes. Textual can
+            # briefly retain focus on the replaced button, so preserve its
+            # position rather than making the next navigation key appear to do
+            # nothing.
             current_index = -1
+            if isinstance(focused, Button) and isinstance(focused.id, str):
+                _, separator, index_text = focused.id.rpartition("-")
+                if separator and index_text.isdigit():
+                    previous_index = int(index_text)
+                    if previous_index < len(buttons):
+                        current_index = previous_index
 
         if current_index == -1:
             target = buttons[0] if step > 0 else buttons[-1]
