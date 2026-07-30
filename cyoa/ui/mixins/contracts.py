@@ -23,6 +23,7 @@ class CYOAAppMixinContract(Protocol):
     reduced_motion: bool
     screen_reader_mode: bool
     cognitive_load_reduction_mode: bool
+    locked_choice_verbosity: str
     compact_layout: bool
     typewriter_enabled: bool
     typewriter_speed: str
@@ -36,6 +37,7 @@ class CYOAAppMixinContract(Protocol):
     _typewriter_active_chunk: list[str]
     _is_typing: bool
     _has_rendered_first_scene: bool
+    _rendered_choice_preferences: tuple[bool, str] | None
     _last_stats_snapshot: dict[str, int] | None
     _startup_timer: Any | None
     _redo_payloads: list[dict[str, object]]

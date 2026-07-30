@@ -180,6 +180,10 @@ class RenderingMixin:
         choices_container.remove_class("loading-state")
         choices_container.remove_children()
         self._mount_choice_buttons(node, choices_container, is_error)
+        host._rendered_choice_preferences = (
+            host.screen_reader_mode,
+            host.locked_choice_verbosity,
+        )
         host.apply_ui_theme()
 
         # 7. Trigger speculation

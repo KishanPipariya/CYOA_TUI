@@ -264,6 +264,7 @@ class CYOAApp(
         self._notification_history: list[NotificationHistoryEntry] = []
         self._notification_history_limit: int = 200
         self._timed_input_history: dict[str, float] = {}
+        self._rendered_choice_preferences: tuple[bool, str] | None = None
         self._latest_status_source_message: str = "Waiting for adventure updates."
         self._latest_status_severity: SeverityLevel = "information"
         self._latest_status_message: str = self._prepare_status_message(
@@ -394,7 +395,11 @@ class CYOAApp(
                     constants.ERROR_NARRATIVE_PREFIX
                 ),
             )
-        self._refresh_choices_for_screen_reader_mode()
+        if (
+            self._rendered_choice_preferences is None
+            or self._rendered_choice_preferences[0] != enabled
+        ):
+            self._refresh_choices_for_screen_reader_mode()
         self._refresh_latest_status_message()
 
     def _refresh_choices_for_screen_reader_mode(self) -> None:
@@ -419,6 +424,10 @@ class CYOAApp(
             self._mount_choice_buttons(*mount_args)
         else:
             self._mount_choice_buttons(*mount_args, focus_target=focus_target)
+        self._rendered_choice_preferences = (
+            self.screen_reader_mode,
+            self.locked_choice_verbosity,
+        )
 
     def watch_cognitive_load_reduction_mode(self, enabled: bool) -> None:
         self.set_class(enabled, "cognitive-load-mode")
@@ -480,6 +489,11 @@ class CYOAApp(
 
     def watch_locked_choice_verbosity(self, _value: str) -> None:
         if (
+            self._rendered_choice_preferences is not None
+            and self._rendered_choice_preferences[1] == self.locked_choice_verbosity
+        ):
+            return
+        if (
             self.engine is None
             or self.engine.state.current_node is None
             or self._loading_suffix_shown
@@ -496,6 +510,10 @@ class CYOAApp(
             choices_container,
             self.engine.state.current_node.narrative.startswith(constants.ERROR_NARRATIVE_PREFIX),
             focus_target=focus_target,
+        )
+        self._rendered_choice_preferences = (
+            self.screen_reader_mode,
+            self.locked_choice_verbosity,
         )
 
     def is_runtime_active(self) -> bool:
