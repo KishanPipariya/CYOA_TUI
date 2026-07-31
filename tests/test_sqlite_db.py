@@ -1,5 +1,6 @@
 import asyncio
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -15,7 +16,7 @@ def test_initialization_creates_schema_with_local_sqlite_settings(tmp_path) -> N
     _create_db(tmp_path)
 
     assert path.exists()
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         tables = {
             row[0]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")

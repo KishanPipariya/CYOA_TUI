@@ -9,7 +9,11 @@ import pytest
 
 from cyoa.core import constants as constants_module
 from cyoa.core import utils
-from cyoa.core.support import open_private_text_file, write_crash_log
+from cyoa.core.support import (
+    open_private_text_file,
+    reveal_in_file_manager,
+    write_crash_log,
+)
 from cyoa.core.user_config import (
     UserConfig,
     UserConfigLoadError,
@@ -36,6 +40,60 @@ def test_linux_user_paths_follow_xdg(monkeypatch) -> None:
         )
 
     importlib.reload(constants_module)
+
+
+def test_user_path_overrides_take_precedence(monkeypatch, tmp_path) -> None:
+    config_dir = tmp_path / "config"
+    data_dir = tmp_path / "data"
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("CYOA_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("CYOA_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("CYOA_STATE_DIR", str(state_dir))
+
+    assert constants_module.get_user_config_dir() == config_dir
+    assert constants_module.get_user_data_dir() == data_dir
+    assert constants_module.get_user_state_dir() == state_dir
+
+
+def test_user_paths_follow_macos_conventions(monkeypatch) -> None:
+    monkeypatch.setenv("HOME", "/tmp/test-home")
+    monkeypatch.setenv("CYOA_PLATFORM", "darwin")
+
+    assert constants_module.get_user_config_dir() == Path(
+        "/tmp/test-home/Library/Application Support/cyoa-tui"
+    )
+    assert constants_module.get_user_data_dir() == Path(
+        "/tmp/test-home/Library/Application Support/cyoa-tui"
+    )
+    assert constants_module.get_user_state_dir() == Path("/tmp/test-home/Library/Logs/cyoa-tui")
+
+
+def test_user_paths_follow_windows_conventions(monkeypatch) -> None:
+    monkeypatch.setenv("HOME", "/tmp/test-home")
+    monkeypatch.setenv("CYOA_PLATFORM", "win32")
+    monkeypatch.setenv("APPDATA", "/tmp/roaming")
+    monkeypatch.setenv("LOCALAPPDATA", "/tmp/local")
+
+    assert constants_module.get_user_config_dir() == Path("/tmp/roaming/cyoa-tui")
+    assert constants_module.get_user_data_dir() == Path("/tmp/local/cyoa-tui")
+    assert constants_module.get_user_state_dir() == Path("/tmp/local/cyoa-tui/Logs")
+
+
+def test_user_paths_use_windows_fallbacks_and_create_directories(monkeypatch, tmp_path) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CYOA_PLATFORM", "win32")
+    monkeypatch.delenv("APPDATA", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+
+    constants_module.ensure_user_directories()
+
+    assert constants_module.get_user_config_dir() == home / "AppData/Roaming/cyoa-tui"
+    assert constants_module.get_user_data_dir() == home / "AppData/Local/cyoa-tui"
+    assert constants_module.get_user_state_dir() == home / "AppData/Local/cyoa-tui/Logs"
+    assert constants_module.get_user_config_dir().is_dir()
+    assert constants_module.get_user_data_dir().is_dir()
+    assert constants_module.get_user_state_dir().is_dir()
 
 
 def test_default_story_database_uses_the_app_data_root(tmp_path, monkeypatch) -> None:
@@ -160,6 +218,42 @@ def test_open_private_text_file_uses_owner_only_permissions(tmp_path) -> None:
         assert stat.S_IMODE(target.stat().st_mode) == 0o600
 
 
+def test_open_private_text_file_rejects_read_mode(tmp_path) -> None:
+    with pytest.raises(ValueError, match="Unsupported mode"):
+        open_private_text_file(tmp_path / "private.txt", "r")
+
+
+@pytest.mark.parametrize(
+    "platform_name, command", [("darwin", "open"), ("win32", "explorer"), ("linux", "xdg-open")]
+)
+def test_reveal_in_file_manager_uses_platform_command(
+    monkeypatch, tmp_path, platform_name, command
+) -> None:
+    commands: list[list[str]] = []
+    monkeypatch.setattr("cyoa.core.support.sys.platform", platform_name)
+    monkeypatch.setattr(
+        "cyoa.core.support.subprocess.run", lambda args, **_kwargs: commands.append(args)
+    )
+
+    revealed, path = reveal_in_file_manager(tmp_path / "exports")
+
+    assert revealed is True
+    assert path == str(tmp_path / "exports")
+    assert commands == [[command, path]]
+
+
+def test_reveal_in_file_manager_reports_launch_failure(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        "cyoa.core.support.subprocess.run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(FileNotFoundError()),
+    )
+
+    revealed, path = reveal_in_file_manager(tmp_path / "exports")
+
+    assert revealed is False
+    assert path == str(tmp_path / "exports")
+
+
 def test_write_crash_log_uses_private_permissions(tmp_path, monkeypatch) -> None:
     crash_log_path = tmp_path / "last_crash.log"
     monkeypatch.setattr("cyoa.core.support.CRASH_LOG_FILE", str(crash_log_path))
@@ -173,3 +267,21 @@ def test_write_crash_log_uses_private_permissions(tmp_path, monkeypatch) -> None
     assert crash_log_path.exists()
     if os.name != "nt":
         assert stat.S_IMODE(crash_log_path.stat().st_mode) == 0o600
+
+
+def test_write_crash_log_includes_optional_diagnostics(tmp_path, monkeypatch) -> None:
+    crash_log_path = tmp_path / "last_crash.log"
+    monkeypatch.setattr("cyoa.core.support.CRASH_LOG_FILE", str(crash_log_path))
+
+    try:
+        raise ValueError("bad config")
+    except ValueError as exc:
+        write_crash_log(
+            exc,
+            resolved_config={"provider": "mock"},
+            runtime_diagnostics={"startup": "complete"},
+        )
+
+    contents = crash_log_path.read_text(encoding="utf-8")
+    assert "resolved_config:\n  provider: mock" in contents
+    assert "runtime_diagnostics:\n  startup: complete" in contents

@@ -7,6 +7,7 @@ import json
 import sqlite3
 import uuid
 from collections.abc import Iterable
+from contextlib import closing
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -86,7 +87,7 @@ class CYOASQLiteDB:
 
     def _initialize_schema(self) -> None:
         try:
-            with self._connect() as connection:
+            with closing(self._connect()) as connection, connection:
                 connection.executescript(self._SCHEMA)
         except sqlite3.Error as exc:
             raise SQLitePersistenceError(
@@ -131,7 +132,8 @@ class CYOASQLiteDB:
         try:
             with (
                 DBObservedSession("sqlite", "create_story") as session_obs,
-                self._connect() as connection,
+                closing(self._connect()) as connection,
+                connection,
             ):
                 connection.execute("BEGIN IMMEDIATE")
                 rows = connection.execute(
@@ -196,7 +198,8 @@ class CYOASQLiteDB:
         try:
             with (
                 DBObservedSession("sqlite", "save_scene") as session_obs,
-                self._connect() as connection,
+                closing(self._connect()) as connection,
+                connection,
             ):
                 connection.execute("BEGIN IMMEDIATE")
                 story = connection.execute(
@@ -252,7 +255,11 @@ class CYOASQLiteDB:
         if max_depth < 0:
             raise ValueError("max_depth must not be negative")
         try:
-            with DBObservedSession("sqlite", "get_scene_history"), self._connect() as connection:
+            with (
+                DBObservedSession("sqlite", "get_scene_history"),
+                closing(self._connect()) as connection,
+                connection,
+            ):
                 rows = connection.execute(
                     """WITH RECURSIVE path(id, depth, incoming_choice) AS (
                         SELECT ?, 0, NULL
@@ -309,7 +316,11 @@ class CYOASQLiteDB:
     def get_story_tree(self, story_title: str) -> dict[str, Any]:
         """Return every scene and reachable branch edge for a story map."""
         try:
-            with DBObservedSession("sqlite", "get_story_tree"), self._connect() as connection:
+            with (
+                DBObservedSession("sqlite", "get_story_tree"),
+                closing(self._connect()) as connection,
+                connection,
+            ):
                 scene_rows = connection.execute(
                     """SELECT scenes.id, scenes.narrative, scenes.mood
                     FROM scenes JOIN stories ON stories.id = scenes.story_id
