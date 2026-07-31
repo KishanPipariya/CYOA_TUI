@@ -62,9 +62,11 @@ async def test_llama_cpp_interruption_signal_flow(mock_llama):
     """Verify that canceling a stream task correctly triggers the interruption flag."""
     provider = LlamaCppProvider(model_path="dummy.gguf")
     messages = [{"role": "user", "content": "hi"}]
+    first_token_emitted = threading.Event()
 
     # Define a generator that simulates slow C++ work
-    def slow_gen():
+    def slow_gen(*args, **kwargs):
+        first_token_emitted.set()
         yield {"choices": [{"delta": {"content": "first"}}]}
         # In a real scenario, this is where the C++ thread would be stuck
         # before checking the logits processor for the next token.
@@ -83,8 +85,7 @@ async def test_llama_cpp_interruption_signal_flow(mock_llama):
 
     task = asyncio.create_task(consume())
 
-    # Wait for the first token to be processed
-    await asyncio.sleep(0.2)
+    assert await asyncio.to_thread(first_token_emitted.wait, 1.0)
 
     # Cancel the consumer task
     task.cancel()
@@ -116,14 +117,13 @@ async def test_speculative_interruption_resets_lock(mock_llama):
     # This test is harder to time perfectly, but we can verify that the
     # producer thread exits its 'with self._lock' block when the event is set.
 
-    ev = threading.Event()
-    lock_released = threading.Event()
+    producer_blocked = threading.Event()
 
     def lock_tracking_gen(*args, **kwargs):
         yield {"choices": [{"delta": {"content": "start"}}]}
-        # Wait until we are told to stop or timeout to avoid infinite test hang
-        start = time.time()
-        while not ev.is_set() and (time.time() - start < 2.0):
+        processor = kwargs["logits_processor"][0]
+        producer_blocked.set()
+        while not processor.cancel_event.is_set():
             time.sleep(0.01)
         yield {"choices": [{"delta": {"content": "stopped"}}]}
 
@@ -135,38 +135,22 @@ async def test_speculative_interruption_resets_lock(mock_llama):
                 pass
         except asyncio.CancelledError:
             pass
-        # Once the generator finishes/is cancelled, the provider lock is released
-        lock_released.set()
 
     task = asyncio.create_task(run_gen())
-    # Give the producer thread more time to acquire the lock AND start generating
-    await asyncio.sleep(0.3)
+    assert await asyncio.to_thread(producer_blocked.wait, 1.0)
 
     # At this point, the producer thread is inside the lock and stuck in the generator.
-    assert not lock_released.is_set(), "Lock should still be held while C++ inference is running."
+    assert not provider._lock.acquire(blocking=False)
 
     # Cancel the task. This triggers the 'finally' which sets the cancel_event.
     task.cancel()
-
-    # Give the cancellation signal time to propagate through the queue finally block
-    await asyncio.sleep(0.1)
 
     # Get the processor to signal our mock generator
     args, kwargs = mock_llama.create_chat_completion.call_args
     assert "logits_processor" in kwargs
     processor = kwargs["logits_processor"][0]
 
-    # In a real model, the logits processor would stop the generator.
-    # Here we simulate that by manually setting our control event.
-    if processor.cancel_event.is_set():
-        ev.set()
-
-    # The run_gen task should now finish and release the lock because the producer exited.
-    try:
-        await asyncio.wait_for(task, timeout=1.0)
-    except (TimeoutError, asyncio.CancelledError):
-        pass
-
-    # Wait for the producer thread's release logic to complete
-    await asyncio.sleep(0.1)
-    assert lock_released.is_set(), "The provider lock should be released after interruption."
+    assert await asyncio.to_thread(processor.cancel_event.wait, 1.0)
+    assert await asyncio.to_thread(provider._lock.acquire, True, 1.0)
+    provider._lock.release()
+    await asyncio.wait_for(task, timeout=1.0)

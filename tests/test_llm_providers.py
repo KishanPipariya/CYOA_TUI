@@ -306,6 +306,7 @@ async def test_llama_cpp_close_waits_for_cancelled_stream_cleanup(mock_llama) ->
     mock_llama.return_value.token_eos.return_value = 2
     provider = LlamaCppProvider(model_path="dummy.gguf")
     stream_started = threading.Event()
+    cleanup_started = threading.Event()
     allow_cleanup = threading.Event()
 
     def slow_cancelable_gen(*args, **kwargs):
@@ -314,6 +315,7 @@ async def test_llama_cpp_close_waits_for_cancelled_stream_cleanup(mock_llama) ->
         stream_started.set()
         while not processor.cancel_event.is_set():
             time.sleep(0.01)
+        cleanup_started.set()
         allow_cleanup.wait(timeout=1.0)
 
     mock_llama.return_value.create_chat_completion.side_effect = slow_cancelable_gen
@@ -322,7 +324,7 @@ async def test_llama_cpp_close_waits_for_cancelled_stream_cleanup(mock_llama) ->
     await asyncio.to_thread(stream_started.wait, 1.0)
 
     close_task = asyncio.create_task(asyncio.to_thread(provider.close))
-    await asyncio.sleep(0.1)
+    assert await asyncio.to_thread(cleanup_started.wait, 1.0)
     assert not close_task.done()
 
     allow_cleanup.set()

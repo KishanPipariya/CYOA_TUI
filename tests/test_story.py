@@ -22,6 +22,16 @@ def missing_chroma_client_factory():
     raise ImportError("chromadb backend unavailable")
 
 
+async def _wait_for_pilot(pilot, predicate, *, timeout: float = 5.0) -> None:
+    """Poll UI state while advancing Textual's test pilot loop."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
+        if predicate():
+            return
+        await pilot.pause(0.05)
+    raise AssertionError("Timed out waiting for UI state")
+
+
 @pytest.fixture(autouse=True)
 def mock_textual_workers(request, monkeypatch):
     """
@@ -1062,20 +1072,22 @@ class TestBranchingLogic:
 
             app = CYOAApp(model_path="dummy")
             async with app.run_test() as pilot:
-                # Wait for engine to initialize
-                await pilot.pause(0.5)
+                await _wait_for_pilot(
+                    pilot,
+                    lambda: app.engine is not None and app.engine.state.current_node is not None,
+                )
+                assert app.engine is not None
 
                 app.engine.state.current_scene_id = "scene-3"
                 app._current_story = "You wake up.\n\nYou stand up.\n\nYou walk left into a wall."
 
-                # Allow the initial startup worker to settle
-                await pilot.pause(0.2)
-
-                # restore_to_scene is a @work coroutine — calling it schedules a Worker;
-                # do NOT await it, just call it and give the event loop time to run it.
                 app.restore_to_scene(idx=1, history=history)
-                # Give the worker two ticks to fully execute and flush state
-                await pilot.pause(0.3)
+                await _wait_for_pilot(
+                    pilot,
+                    lambda: (
+                        app.engine is not None and app.engine.state.current_scene_id == "scene-2"
+                    ),
+                )
 
                 # Check context
                 assert app.engine.state.current_scene_id == "scene-2"
@@ -1135,9 +1147,7 @@ class TestBranchingLogic:
 
             app = CYOAApp(model_path="dummy")
             async with app.run_test() as pilot:
-                deadline = asyncio.get_running_loop().time() + 5.0
-                while app.engine is None and asyncio.get_running_loop().time() < deadline:
-                    await pilot.pause(0.05)
+                await _wait_for_pilot(pilot, lambda: app.engine is not None)
                 assert app.engine is not None
 
                 # Simulate being at a later turn with different stats
@@ -1146,7 +1156,14 @@ class TestBranchingLogic:
 
                 # Restore to Turn 1
                 app.restore_to_scene(idx=0, history=history)
-                await pilot.pause(0.3)
+                await _wait_for_pilot(
+                    pilot,
+                    lambda: (
+                        app.engine is not None
+                        and app.engine.state.player_stats
+                        == {"health": 80, "gold": 5, "reputation": 0}
+                    ),
+                )
 
                 # Check stats and inventory
                 assert app.engine.state.player_stats == {"health": 80, "gold": 5, "reputation": 0}

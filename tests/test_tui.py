@@ -3,7 +3,7 @@ import json
 import os
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from textual.containers import Container, VerticalScroll
@@ -986,27 +986,21 @@ async def test_choice_focus_moves_with_arrow_keys(mock_app_dependencies):
         assert "Go South" in journal_text
 
 
-@pytest.mark.asyncio
-async def test_steady_input_timing_gates_rapid_choice_navigation(mock_app_dependencies):
+def test_steady_input_timing_gates_rapid_choice_navigation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     app = _app_with_accessibility_config(input_timing_profile="steady")
+    move_focus = MagicMock()
+    monotonic_values = iter((100.0, 100.01, 100.26))
+    monkeypatch.setattr(app, "_move_choice_focus", move_focus)
+    monkeypatch.setattr(app, "_timed_input_now", lambda: next(monotonic_values))
 
-    async with app.run_test() as pilot:
-        await _wait_for_initial_scene(pilot, app)
+    app.action_focus_next_choice()
+    app.action_focus_next_choice()
+    assert move_focus.call_args_list == [call(1)]
 
-        buttons = _choice_buttons(app)
-        assert len(buttons) == 2
-        await _wait_for_pilot(pilot, lambda: app.focused is buttons[0])
-        assert app.focused is buttons[0]
-
-        app.action_focus_next_choice()
-        app.action_focus_next_choice()
-        await pilot.pause(0.1)
-        assert app.focused is buttons[1]
-
-        await pilot.pause(0.3)
-        app.action_focus_next_choice()
-        await pilot.pause(0.1)
-        assert app.focused is buttons[0]
+    app.action_focus_next_choice()
+    assert move_focus.call_args_list == [call(1), call(1)]
 
 
 @pytest.mark.asyncio
@@ -1443,16 +1437,19 @@ async def test_quit_during_initial_generation_ignores_late_node() -> None:
 @pytest.mark.asyncio
 async def test_quit_before_startup_timer_fires_skips_model_creation() -> None:
     app = CYOAApp(model_path="dummy_path.gguf")
+    startup_timer = MagicMock()
 
     with (
         patch("cyoa.ui.app.ModelBroker") as broker_cls,
         patch("cyoa.ui.app.CYOASQLiteDB") as db_cls,
+        patch.object(app, "set_timer", return_value=startup_timer) as set_timer,
     ):
         async with app.run_test() as pilot:
-            await pilot.pause(0.02)
+            await _wait_for_pilot(pilot, lambda: app._startup_timer is startup_timer)
             app.on_unmount()
-            await pilot.pause(0.2)
 
+    startup_timer.stop.assert_called_once_with()
+    assert any(call.args[0] == 0.1 for call in set_timer.call_args_list)
     broker_cls.assert_not_called()
     db_cls.assert_not_called()
 
@@ -3899,22 +3896,27 @@ async def test_story_map_queries_are_cached_per_scene(mock_app_dependencies) -> 
     }
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
-        assert app.engine is not None
-        assert app.engine.db is not None
+        await _wait_for_pilot(
+            pilot,
+            lambda: (
+                app.engine is not None
+                and app.engine.db is not None
+                and app.engine.state.current_scene_id is not None
+            ),
+        )
+        assert app.engine is not None and app.engine.db is not None
         get_story_tree = cast(MagicMock, app.engine.db.get_story_tree)
         get_story_tree.return_value = tree_payload
 
         app.update_story_map()
-        await pilot.pause(0.2)
+        await _wait_for_pilot(pilot, lambda: get_story_tree.call_count == 1)
         app.update_story_map()
-        await pilot.pause(0.2)
 
         assert get_story_tree.call_count == 1
 
         app.engine.state.current_scene_id = "scene-2"
         app.update_story_map()
-        await pilot.pause(0.2)
+        await _wait_for_pilot(pilot, lambda: get_story_tree.call_count == 2)
 
         assert get_story_tree.call_count == 2
 
@@ -3936,17 +3938,22 @@ async def test_branch_history_queries_are_cached_per_scene(mock_app_dependencies
     }
 
     async with app.run_test() as pilot:
-        await pilot.pause(1.0)
-        assert app.engine is not None
-        assert app.engine.db is not None
+        await _wait_for_pilot(
+            pilot,
+            lambda: (
+                app.engine is not None
+                and app.engine.db is not None
+                and app.engine.state.current_scene_id is not None
+            ),
+        )
+        assert app.engine is not None and app.engine.db is not None
         get_scene_history_path = cast(MagicMock, app.engine.db.get_scene_history_path)
         get_scene_history_path.return_value = history
 
         with patch.object(app, "push_screen", MagicMock()):
             app.action_branch_past()
-            await pilot.pause(0.2)
+            await _wait_for_pilot(pilot, lambda: get_scene_history_path.call_count == 1)
             app.action_branch_past()
-            await pilot.pause(0.2)
 
             assert get_scene_history_path.call_count == 1
 
@@ -3955,7 +3962,7 @@ async def test_branch_history_queries_are_cached_per_scene(mock_app_dependencies
                 "scenes": [{**history["scenes"][0], "id": "scene-2"}]
             }
             app.action_branch_past()
-            await pilot.pause(0.2)
+            await _wait_for_pilot(pilot, lambda: get_scene_history_path.call_count == 2)
 
             assert get_scene_history_path.call_count == 2
 
@@ -3986,7 +3993,7 @@ async def test_status_notifications_are_batched(mock_app_dependencies) -> None:
         with patch.object(app, "_dispatch_notification", side_effect=capture_dispatch):
             bus.emit(Events.STATUS_MESSAGE, message="⚡ Weaving possible futures...")
             bus.emit(Events.STATUS_MESSAGE, message="📜 Archiving old chapters...")
-            await pilot.pause(0.3)
+            await _wait_for_pilot(pilot, lambda: len(dispatched) == 1)
 
             assert dispatched == [
                 "Information: ⚡ Weaving possible futures... | 📜 Archiving old chapters..."

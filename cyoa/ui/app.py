@@ -1895,11 +1895,15 @@ class CYOAApp(
             return float(details["repeat_pacing_seconds"])
         return 0.0
 
+    def _timed_input_now(self) -> float:
+        """Return the clock used for input pacing decisions."""
+        return time.monotonic()
+
     def _accept_timed_input(self, gate: str) -> bool:
         interval = self._timed_input_interval(gate)
         if interval <= 0:
             return True
-        now = time.monotonic()
+        now = self._timed_input_now()
         last = self._timed_input_history.get(gate)
         if last is not None and (now - last) < interval:
             return False
