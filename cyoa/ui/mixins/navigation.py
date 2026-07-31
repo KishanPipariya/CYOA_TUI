@@ -294,29 +294,38 @@ class NavigationMixin:
         """Show the ending types discovered across archived runs."""
         app = as_textual_app(self)
         persistence = cast(Any, self)
+        try:
+            entries = persistence._load_run_archive()
+        except ValueError as exc:
+            app.notify(f"Run archive unavailable: {exc}", severity="error", timeout=4)
+            return
         cast(Any, app)._push_modal_screen(
-            EndingsDiscoveredScreen(
-                build_endings_discovered_summary(persistence._load_run_archive())
-            )
+            EndingsDiscoveredScreen(build_endings_discovered_summary(entries))
         )
 
     def action_show_hidden_achievements(self) -> None:
         """Show hidden achievements unlocked from archived play history."""
         app = as_textual_app(self)
         persistence = cast(Any, self)
+        try:
+            entries = persistence._load_run_archive()
+        except ValueError as exc:
+            app.notify(f"Run archive unavailable: {exc}", severity="error", timeout=4)
+            return
         cast(Any, app)._push_modal_screen(
-            HiddenAchievementsScreen(
-                build_hidden_achievements_summary(persistence._load_run_archive())
-            )
+            HiddenAchievementsScreen(build_hidden_achievements_summary(entries))
         )
 
     def action_show_run_archive(self) -> None:
         """Show archived completed runs for comparison."""
         app = as_textual_app(self)
         persistence = cast(Any, self)
-        cast(Any, app)._push_modal_screen(
-            RunArchiveScreen(build_run_archive_summary(persistence._load_run_archive()))
-        )
+        try:
+            entries = persistence._load_run_archive()
+        except ValueError as exc:
+            app.notify(f"Run archive unavailable: {exc}", severity="error", timeout=4)
+            return
+        cast(Any, app)._push_modal_screen(RunArchiveScreen(build_run_archive_summary(entries)))
 
     def action_show_replay(self) -> None:
         """Show replay controls for the current recorded playthrough."""

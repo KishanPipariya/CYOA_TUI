@@ -105,6 +105,7 @@ def _current_save_payload(**overrides: Any) -> dict[str, Any]:
             "choices": [{"text": "Continue"}, {"text": "Wait"}],
         },
     )
+    current_node = StoryNode.model_validate(current_node).model_dump()
     ui_state = {
         "current_story_text": "Recovered scene",
         "story_segments": [{"kind": "story_turn", "text": "Recovered scene"}],
@@ -117,6 +118,7 @@ def _current_save_payload(**overrides: Any) -> dict[str, Any]:
     }
     ui_state.update(overrides.pop("ui_state", {}))
     payload = {
+        "schema_version": 1,
         "starting_prompt": "Start",
         "context_history": [{"role": "user", "content": "Start"}],
         "prompt_config": {"goals": [], "directives": []},
@@ -138,11 +140,14 @@ def _current_save_payload(**overrides: Any) -> dict[str, Any]:
         "world_time": {"day": 1, "hour": 8},
         "campaign": None,
         "campaign_progress": None,
+        "campaign_clocks": [],
         "undo_history": [],
         "redo_history": [],
         "bookmarks": {},
         "ui_state": ui_state,
         "saved_at": "2026-07-11T00:00:00Z",
+        "autosave": False,
+        "restore_points": {},
     }
     payload.update(overrides)
     return payload
@@ -2856,15 +2861,17 @@ async def test_ending_persists_completed_run_summary(mock_app_dependencies, tmp_
         assert archive_path.exists()
 
         payload = json.loads(archive_path.read_text(encoding="utf-8"))
-        assert len(payload) == 1
-        assert payload[0]["story_title"] == "Test Adventure"
-        assert payload[0]["turn_count"] == 3
-        assert payload[0]["ending_type"] == "escape"
-        assert payload[0]["ending_label"] == "Escape"
-        assert payload[0]["last_choice_text"] == "Open Door"
-        assert payload[0]["ending_narrative"] == "You opened the door and escaped!"
-        assert payload[0]["companions"] == []
-        assert payload[0]["world_time"] == {"day": 1, "hour": 8}
+        assert payload["schema_version"] == 1
+        assert len(payload["entries"]) == 1
+        entry = payload["entries"][0]
+        assert entry["story_title"] == "Test Adventure"
+        assert entry["turn_count"] == 3
+        assert entry["ending_type"] == "escape"
+        assert entry["ending_label"] == "Escape"
+        assert entry["last_choice_text"] == "Open Door"
+        assert entry["ending_narrative"] == "You opened the door and escaped!"
+        assert entry["companions"] == []
+        assert entry["world_time"] == {"day": 1, "hour": 8}
         assert any(
             "Hidden achievement unlocked: Story Survivor" in line
             for line in app.get_notification_history_lines()
@@ -3667,7 +3674,7 @@ async def test_restore_from_save_rejects_malformed_story_segments(mock_app_depen
                 story_title="Broken Timeline",
                 current_node={
                     "narrative": "Recovered ending",
-                    "choices": [{"text": "Continue"}],
+                    "choices": [{"text": "Continue"}, {"text": "Wait"}],
                 },
                 ui_state={
                     "current_story_text": "Recovered history",

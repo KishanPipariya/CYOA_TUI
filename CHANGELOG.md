@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking:** persistence is now strict and versioned. Config files require `version: 1`;
+  saves, autosaves, restore points, and run archives require `schema_version: 1`.
+  Legacy/versionless or malformed files are preserved and rejected with recovery guidance
+  instead of being silently coerced, migrated, or overwritten.
+
 ## 0.1.0 - 2026-05-11
 
 Initial public release candidate.

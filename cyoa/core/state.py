@@ -1,7 +1,7 @@
 import logging
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from cyoa.core.events import Events, bus
 from cyoa.core.mementos import GameStateSnapshot, StoryContextMemento
@@ -16,6 +16,7 @@ from cyoa.core.models import (
     StoryNode,
     WorldTime,
 )
+from cyoa.core.save_schema import validate_state_payload
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +212,7 @@ class GameState:
     def get_save_data(self) -> dict[str, Any]:
         """Convert current state into a serializable dictionary."""
         return {
+            "schema_version": 1,
             "story_title": self.story_title,
             "turn_count": self.turn_count,
             "inventory": list(self.inventory),
@@ -245,41 +247,129 @@ class GameState:
 
     def load_save_data(self, data: dict[str, Any]) -> None:
         """Hydrate state from dictionary data."""
-        scalars = self._read_save_scalars(data)
-        self.story_title = scalars.story_title
-        self.turn_count = scalars.turn_count
-        self.inventory = self._coerce_inventory(data.get("inventory"))
-        self.player_stats = self._coerce_player_stats(data.get("player_stats"))
-        self.current_scene_id = scalars.current_scene_id
-        self.last_choice_text = scalars.last_choice_text
-        self.last_choice_submission = scalars.last_choice_submission
-        self.timeline_metadata = self._coerce_timeline_metadata(data.get("timeline_metadata"))
-        self.objectives = self._coerce_objectives(data.get("objectives"))
-        self.faction_reputation = self._coerce_relationships(data.get("faction_reputation"))
-        self.npc_affinity = self._coerce_relationships(data.get("npc_affinity"))
-        self.story_flags = self._coerce_story_flags(data.get("story_flags"))
-        self.lore_entries = self._coerce_lore_entries(data.get("lore_entries"))
-        self.companions = self._coerce_companions(data.get("companions"))
-        self.world_time = self._coerce_world_time(data.get("world_time"))
-        self.campaign = self._coerce_campaign(data.get("campaign"))
-        self.campaign_progress = self._coerce_campaign_progress(
-            data.get("campaign_progress"),
-            campaign=self.campaign,
+        # This method is public as well as used by StoryEngine, so keep its
+        # validation boundary even when callers bypass the engine.
+        data = validate_state_payload(data)
+        # save_schema has already checked every field, including nested models
+        # and snapshots.  Hydrate directly: restore must not contain a second
+        # permissive normalization path after that boundary.
+        self.story_title = cast(str | None, data["story_title"])
+        self.turn_count = cast(int, data["turn_count"])
+        self.inventory = list(cast(list[str], data["inventory"]))
+        self.player_stats = dict(cast(dict[str, int], data["player_stats"]))
+        self.current_scene_id = cast(str | None, data["current_scene_id"])
+        self.last_choice_text = cast(str | None, data["last_choice_text"])
+        self.last_choice_submission = cast(str | None, data["last_choice_submission"])
+        self.timeline_metadata = [
+            entry.copy() for entry in cast(list[dict[str, Any]], data["timeline_metadata"])
+        ]
+        self.objectives = [
+            Objective.model_validate(item)
+            for item in cast(list[dict[str, Any]], data["objectives"])
+        ]
+        self.faction_reputation = dict(cast(dict[str, int], data["faction_reputation"]))
+        self.npc_affinity = dict(cast(dict[str, int], data["npc_affinity"]))
+        self.story_flags = set(cast(list[str], data["story_flags"]))
+        self.lore_entries = [
+            LoreEntry.model_validate(item)
+            for item in cast(list[dict[str, Any]], data["lore_entries"])
+        ]
+        self.companions = [
+            Companion.model_validate(item)
+            for item in cast(list[dict[str, Any]], data["companions"])
+        ]
+        self.world_time = WorldTime.model_validate(data["world_time"])
+        self.campaign = (
+            CampaignPack.model_validate(data["campaign"]) if data["campaign"] is not None else None
         )
-        if self.campaign_progress is not None and not self.campaign_progress.clocks:
-            self.campaign_progress.clocks = self._coerce_campaign_clocks(
-                data.get("campaign_clocks")
-            )
+        self.campaign_progress = (
+            CampaignProgress.model_validate(data["campaign_progress"])
+            if data["campaign_progress"] is not None
+            else None
+        )
         self._undo_history = deque(
-            self._coerce_snapshot_list(data.get("undo_history")), maxlen=MAX_HISTORY_DEPTH
+            [
+                self._snapshot_from_validated_payload(item)
+                for item in cast(list[dict[str, Any]], data["undo_history"])
+            ],
+            maxlen=MAX_HISTORY_DEPTH,
         )
         self._redo_history = deque(
-            self._coerce_snapshot_list(data.get("redo_history")), maxlen=MAX_HISTORY_DEPTH
+            [
+                self._snapshot_from_validated_payload(item)
+                for item in cast(list[dict[str, Any]], data["redo_history"])
+            ],
+            maxlen=MAX_HISTORY_DEPTH,
         )
-        self._bookmarks = self._coerce_bookmarks(data.get("bookmarks"))
-        self.current_node = self._coerce_current_node(data.get("current_node"))
+        self._bookmarks = {
+            name: self._snapshot_from_validated_payload(snapshot)
+            for name, snapshot in cast(dict[str, dict[str, Any]], data["bookmarks"]).items()
+        }
+        self.current_node = (
+            StoryNode.model_validate(data["current_node"])
+            if data["current_node"] is not None
+            else None
+        )
 
         self._emit_loaded_state_events()
+
+    @staticmethod
+    def _snapshot_from_validated_payload(value: dict[str, Any]) -> GameStateSnapshot:
+        campaign = (
+            CampaignPack.model_validate(value["campaign"])
+            if value["campaign"] is not None
+            else None
+        )
+        progress = (
+            CampaignProgress.model_validate(value["campaign_progress"])
+            if value["campaign_progress"] is not None
+            else None
+        )
+        return GameStateSnapshot(
+            turn_count=cast(int, value["turn_count"]),
+            current_node=(
+                StoryNode.model_validate(value["current_node"])
+                if value["current_node"] is not None
+                else None
+            ),
+            inventory=list(cast(list[str], value["inventory"])),
+            player_stats=dict(cast(dict[str, int], value["player_stats"])),
+            story_title=cast(str | None, value["story_title"]),
+            current_scene_id=cast(str | None, value["current_scene_id"]),
+            last_choice_text=cast(str | None, value["last_choice_text"]),
+            last_choice_submission=cast(str | None, value["last_choice_submission"]),
+            timeline_metadata=[
+                entry.copy() for entry in cast(list[dict[str, Any]], value["timeline_metadata"])
+            ],
+            objectives=[
+                Objective.model_validate(item)
+                for item in cast(list[dict[str, Any]], value["objectives"])
+            ],
+            faction_reputation=dict(cast(dict[str, int], value["faction_reputation"])),
+            npc_affinity=dict(cast(dict[str, int], value["npc_affinity"])),
+            story_flags=set(cast(list[str], value["story_flags"])),
+            lore_entries=[
+                LoreEntry.model_validate(item)
+                for item in cast(list[dict[str, Any]], value["lore_entries"])
+            ],
+            companions=[
+                Companion.model_validate(item)
+                for item in cast(list[dict[str, Any]], value["companions"])
+            ],
+            world_time=WorldTime.model_validate(value["world_time"]),
+            campaign=campaign,
+            campaign_progress=progress,
+            campaign_clocks=[
+                CampaignClock.model_validate(item)
+                for item in cast(list[dict[str, Any]], value["campaign_clocks"])
+            ],
+            story_context=StoryContextMemento(
+                history=[
+                    entry.copy()
+                    for entry in cast(list[dict[str, str]], value["story_context_history"])
+                ]
+            ),
+        )
 
     def _read_save_scalars(self, data: dict[str, Any]) -> _LoadedSaveScalars:
         last_choice_text = self._coerce_optional_str(data.get("last_choice_text"))

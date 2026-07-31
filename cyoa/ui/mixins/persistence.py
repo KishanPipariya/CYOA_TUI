@@ -11,6 +11,7 @@ from textual.css.query import NoMatches
 from textual.widgets import Button, Label, ListView, Markdown
 
 from cyoa.core import constants
+from cyoa.core.save_schema import PersistenceValidationError, validate_run_archive
 from cyoa.core.support import open_private_text_file
 from cyoa.ui import persistence_payloads as payloads
 from cyoa.ui.commands import ExportStoryCommand, SaveGameCommand, UICommandContext
@@ -528,11 +529,18 @@ class PersistenceMixin:
         save_data["saved_at"] = (
             datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
         )
-        if include_restore_points:
-            save_data["restore_points"] = {
+        save_data["autosave"] = False
+        save_data["restore_points"] = (
+            {
                 name: self._clone_payload(payload)
                 for name, payload in mixin_host._bookmark_payloads.items()
             }
+            if include_restore_points
+            else {}
+        )
+        # Validate outgoing data too. A save writer must never create a payload
+        # it cannot later restore exactly.
+        payloads.validate_save_payload(save_data)
         return save_data
 
     @staticmethod
@@ -546,7 +554,7 @@ class PersistenceMixin:
             logger.warning("Unable to write persistence payload to %s: %s", path, exc)
 
     def _load_run_archive(self) -> list[dict[str, object]]:
-        """Return the archived completed runs, tolerating a missing or malformed file."""
+        """Return archived runs, preserving and rejecting incompatible files."""
         path = self._run_archive_path()
         if not os.path.exists(path):
             return []
@@ -554,17 +562,18 @@ class PersistenceMixin:
             with open(path, encoding="utf-8") as handle:
                 payload = json.load(handle)
         except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Unable to read run archive %s: %s", path, exc)
-            return []
-        return self._coerce_run_archive_entries(payload)
+            raise PersistenceValidationError(f"Unable to read run archive {path}: {exc}") from exc
+        return validate_run_archive(payload)
 
     def _write_run_archive(self, entries: list[dict[str, object]]) -> None:
-        """Persist the archived completed runs as a JSON list."""
+        """Persist archived completed runs in the versioned wrapper."""
         path = self._run_archive_path()
+        payload = {"schema_version": 1, "entries": entries}
+        validate_run_archive(payload)
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open_private_text_file(path, "w") as handle:
-                json.dump(entries, handle, indent=2, ensure_ascii=False)
+                json.dump(payload, handle, indent=2, ensure_ascii=False)
         except OSError as exc:
             logger.warning("Unable to write run archive to %s: %s", path, exc)
 
@@ -655,7 +664,13 @@ class PersistenceMixin:
         if not summary:
             return []
 
-        entries = self._load_run_archive()
+        try:
+            entries = self._load_run_archive()
+        except PersistenceValidationError as exc:
+            as_textual_app(app).notify(
+                f"Run archive unavailable: {exc}", severity="error", timeout=4
+            )
+            return []
         previous_entries = [entry.copy() for entry in entries]
         entries.append(summary)
         self._write_run_archive(entries)

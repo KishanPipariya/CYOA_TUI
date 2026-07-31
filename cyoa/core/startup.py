@@ -61,10 +61,13 @@ def _select_safe_default_provider(model: str | None) -> str:
 
 
 def validate_startup_config(args: argparse.Namespace) -> StartupConfig:  # noqa: C901
-    from cyoa.core.user_config import load_user_config
+    from cyoa.core.user_config import UserConfigLoadError, load_user_config
     from cyoa.llm.broker import PRESETS
 
-    user_config = load_user_config()
+    try:
+        user_config = load_user_config()
+    except UserConfigLoadError as exc:
+        raise StartupConfigError(str(exc)) from exc
     runtime_preset = (
         (
             args.runtime_preset.strip().lower()

@@ -19,6 +19,7 @@ from cyoa.core.models import (
     WorldTime,
 )
 from cyoa.core.runtime import EnginePhase
+from cyoa.core.save_schema import PersistenceValidationError
 from cyoa.core.state import GameState
 from cyoa.llm.broker import ModelBroker, StoryContext
 from cyoa.llm.providers import LLMProvider
@@ -651,54 +652,34 @@ async def test_engine_make_choice_ignores_runtime_event_subscriber_failures():
     assert engine.state.current_node.narrative == "After choice"
 
 
-def test_engine_load_save_data_accepts_versionless_payload():
+def test_engine_load_save_data_rejects_versionless_payload_without_mutation():
     broker, _provider = _make_broker_with_mock_provider()
     loaded = StoryEngine(broker=broker, starting_prompt="IgnoreThis")
 
-    data = {
-        "starting_prompt": "Start",
-        "context_history": [{"role": "user", "content": "Start"}],
-        "story_title": "Versionless",
-        "turn_count": 2,
-        "inventory": ["Coin"],
-        "player_stats": {"health": 99, "gold": 1, "reputation": 0},
-        "current_scene_id": "scene-1",
-        "last_choice_text": "Look",
-    }
+    source = StoryEngine(broker=broker, starting_prompt="Start")
+    source.story_context = StoryContext("Start", token_counter=lambda _x: 1)
+    data = source.get_save_data()
+    data.pop("schema_version")
 
-    loaded.load_save_data(data)
-
-    assert loaded.story_context is not None
-    assert loaded.story_context.starting_prompt == "Start"
-    assert loaded.state.story_title == "Versionless"
-    assert loaded.state.turn_count == 2
-    assert loaded.state.inventory == ["Coin"]
+    with pytest.raises(PersistenceValidationError, match="schema_version"):
+        loaded.load_save_data(data)
+    assert loaded.phase is EnginePhase.IDLE
+    assert loaded.state.turn_count == 1
 
 
-def test_engine_load_save_data_ignores_malformed_optional_payloads():
+def test_engine_load_save_data_rejects_malformed_payload_without_mutation():
     broker, _provider = _make_broker_with_mock_provider()
     loaded = StoryEngine(broker=broker, starting_prompt="Fallback")
 
-    loaded.load_save_data(
-        {
-            "starting_prompt": 123,
-            "context_history": "not-a-list",
-            "turn_count": "bad",
-            "inventory": "Coin",
-            "player_stats": {"health": "oops", "gold": 4},
-            "current_node": {"choices": "broken"},
-            "timeline_metadata": ["bad", {"kind": "branch_restore", "restored_turn": "3"}],
-        }
-    )
+    source = StoryEngine(broker=broker, starting_prompt="Start")
+    source.story_context = StoryContext("Start", token_counter=lambda _x: 1)
+    data = source.get_save_data()
+    data["turn_count"] = "bad"
 
-    assert loaded.story_context is not None
-    assert loaded.story_context.starting_prompt == "Fallback"
-    assert loaded.story_context.history == []
+    with pytest.raises(PersistenceValidationError, match="turn_count"):
+        loaded.load_save_data(data)
     assert loaded.state.turn_count == 1
-    assert loaded.state.inventory == []
-    assert loaded.state.player_stats == {"health": 100, "gold": 4, "reputation": 0}
-    assert loaded.state.current_node is None
-    assert loaded.state.timeline_metadata == [{"kind": "branch_restore", "restored_turn": 3}]
+    assert loaded.phase is EnginePhase.IDLE
 
 
 def test_engine_save_and_load_roundtrip_preserves_extended_world_state():
@@ -888,15 +869,19 @@ def test_game_state_apply_node_updates_ignores_noop_changes():
 
 def test_game_state_load_save_data_emits_title_and_node_events():
     state = GameState()
-    data = {
-        "story_title": "Restored",
-        "turn_count": 2,
-        "inventory": ["Gem"],
-        "player_stats": {"health": 75, "gold": 3, "reputation": 1},
-        "current_scene_id": "scene-x",
-        "last_choice_text": "Take gem",
-        "current_node": _make_story_node("Restored node").model_dump(),
-    }
+    data = state.get_save_data()
+    data.update(
+        {
+            "story_title": "Restored",
+            "turn_count": 2,
+            "inventory": ["Gem"],
+            "player_stats": {"health": 75, "gold": 3, "reputation": 1},
+            "current_scene_id": "scene-x",
+            "last_choice_text": "Take gem",
+            "last_choice_submission": "Take gem",
+            "current_node": _make_story_node("Restored node").model_dump(),
+        }
+    )
 
     emitted_titles: list[str | None] = []
     emitted_nodes: list[str] = []
@@ -1001,10 +986,11 @@ def test_game_state_apply_node_updates_emits_world_state_for_objectives_relation
     assert world_events == [state.get_world_state()]
 
 
-def test_game_state_load_save_data_coerces_extended_world_fields():
+def test_game_state_load_save_data_rejects_extended_world_type_coercion():
     state = GameState()
 
-    state.load_save_data(
+    data = state.get_save_data()
+    data.update(
         {
             "turn_count": True,
             "inventory": ["Torch", 7, "Key"],
@@ -1038,32 +1024,10 @@ def test_game_state_load_save_data_coerces_extended_world_fields():
             "current_node": {"choices": "broken"},
         }
     )
-
+    with pytest.raises(PersistenceValidationError):
+        state.load_save_data(data)
     assert state.turn_count == 1
-    assert state.inventory == ["Torch", "Key"]
-    assert state.player_stats == {"health": 91, "gold": 0, "reputation": 0, "luck": 5}
-    assert state.timeline_metadata == [
-        {
-            "kind": "branch_restore",
-            "source_scene_id": "scene-1",
-            "restored_turn": 2,
-        }
-    ]
-    assert state.objectives == [Objective(id="escape", text="Escape", status="active")]
-    assert state.companions == [Companion(name="Mira", status="active", affinity=4)]
-    assert state.faction_reputation == {"Guild": 4}
-    assert state.npc_affinity == {"Mira": 2}
-    assert state.story_flags == {"met_mira"}
-    assert state.lore_entries == [
-        LoreEntry(
-            category="location",
-            name="Flooded Tunnels",
-            summary="Collapsed passageways beneath the keep.",
-            discovered_turn=2,
-        )
-    ]
-    assert state.world_time == WorldTime(day=4, hour=19)
-    assert state.current_node is None
+    assert state.inventory == []
 
 
 def test_engine_load_save_data_tracks_phase_transitions():
@@ -1078,13 +1042,11 @@ def test_engine_load_save_data_tracks_phase_transitions():
         ),
     )
 
-    engine.load_save_data(
-        {
-            "starting_prompt": "Start",
-            "context_history": [{"role": "user", "content": "Start"}],
-            "turn_count": 2,
-        }
-    )
+    source = StoryEngine(broker=broker, starting_prompt="Start")
+    source.story_context = StoryContext("Start", token_counter=lambda _x: 1)
+    data = source.get_save_data()
+    data["turn_count"] = 2
+    engine.load_save_data(data)
 
     assert transitions == [
         ("idle", "restoring", "load_save_data"),

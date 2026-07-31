@@ -164,6 +164,7 @@ class GameStateSnapshot:
 
     def to_payload(self) -> dict[str, Any]:
         return {
+            "schema_version": 1,
             "turn_count": self.turn_count,
             "current_node": self.current_node.model_dump() if self.current_node else None,
             "inventory": list(self.inventory),

@@ -5,10 +5,17 @@ import stat
 import sys
 from pathlib import Path
 
+import pytest
+
 from cyoa.core import constants as constants_module
 from cyoa.core import utils
 from cyoa.core.support import open_private_text_file, write_crash_log
-from cyoa.core.user_config import UserConfig, load_user_config, save_user_config
+from cyoa.core.user_config import (
+    UserConfig,
+    UserConfigLoadError,
+    load_user_config,
+    save_user_config,
+)
 
 
 def test_linux_user_paths_follow_xdg(monkeypatch) -> None:
@@ -58,7 +65,7 @@ def test_save_config_creates_parent_directory(tmp_path, monkeypatch) -> None:
     }
 
 
-def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -> None:
+def test_user_config_round_trips_exact_known_fields(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "config.json"
     monkeypatch.setattr("cyoa.core.user_config.CONFIG_FILE", str(config_path))
 
@@ -87,7 +94,6 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
             runtime_preset="local-fast",
             setup_completed=True,
             setup_choice="download",
-            extras={"custom_flag": "enabled"},
         )
     )
 
@@ -118,7 +124,20 @@ def test_user_config_round_trips_known_and_extra_fields(tmp_path, monkeypatch) -
     assert restored.runtime_preset == "local-fast"
     assert restored.setup_completed is True
     assert restored.setup_choice == "download"
-    assert restored.extras == {"custom_flag": "enabled"}
+
+
+def test_existing_invalid_config_is_rejected_without_rewriting_it(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("cyoa.core.user_config.CONFIG_FILE", str(config_path))
+    payload = UserConfig().to_dict()
+    payload["unknown_setting"] = True
+    original = json.dumps(payload)
+    config_path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(UserConfigLoadError, match=str(config_path)):
+        load_user_config()
+
+    assert config_path.read_text(encoding="utf-8") == original
 
 
 def test_open_private_text_file_uses_owner_only_permissions(tmp_path) -> None:

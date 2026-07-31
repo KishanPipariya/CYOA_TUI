@@ -74,6 +74,10 @@ class UserConfigSaveError(RuntimeError):
     """Raised when the durable user config cannot be persisted."""
 
 
+class UserConfigLoadError(ValueError):
+    """Raised when an existing configuration file is not the supported schema."""
+
+
 def _coerce_option(value: object, allowed: tuple[str, ...], default: str) -> str:
     if isinstance(value, str):
         cleaned = value.strip().lower()
@@ -235,136 +239,135 @@ class UserConfig:
     setup_completed: bool = False
     setup_choice: str | None = None
     dismissed_startup_recommendations: list[str] = field(default_factory=list)
-    extras: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, payload: object) -> "UserConfig":
+    def from_dict(cls, payload: object) -> "UserConfig":  # noqa: C901
         if not isinstance(payload, dict):
-            return cls()
+            raise UserConfigLoadError("configuration must be a JSON object")
+        keys = set(payload)
+        missing = sorted(cls._KNOWN_PAYLOAD_KEYS - keys)
+        unknown = sorted(keys - cls._KNOWN_PAYLOAD_KEYS)
+        if missing:
+            raise UserConfigLoadError(
+                "configuration is missing required keys: " + ", ".join(missing)
+            )
+        if unknown:
+            raise UserConfigLoadError("configuration has unknown keys: " + ", ".join(unknown))
+        if payload["version"] != USER_CONFIG_VERSION or isinstance(payload["version"], bool):
+            raise UserConfigLoadError(
+                f"configuration has unsupported version; expected {USER_CONFIG_VERSION}"
+            )
 
-        provider = payload.get("provider")
-        model_path = payload.get("model_path")
-        theme = payload.get("theme")
-        dark = payload.get("dark")
-        high_contrast = payload.get("high_contrast")
-        reduced_motion = payload.get("reduced_motion")
-        screen_reader_mode = payload.get("screen_reader_mode")
-        cognitive_load_reduction_mode = payload.get("cognitive_load_reduction_mode")
-        text_scale = payload.get("text_scale")
-        line_width = payload.get("line_width")
-        line_spacing = payload.get("line_spacing")
-        notification_verbosity = payload.get("notification_verbosity")
-        scene_recap_verbosity = payload.get("scene_recap_verbosity")
-        runtime_metadata_verbosity = payload.get("runtime_metadata_verbosity")
-        locked_choice_verbosity = payload.get("locked_choice_verbosity")
-        input_timing_profile = payload.get("input_timing_profile")
-        confirm_high_impact_actions = payload.get("confirm_high_impact_actions")
-        keybindings = payload.get("keybindings")
-        typewriter = payload.get("typewriter")
-        typewriter_speed = payload.get("typewriter_speed")
-        diagnostics_enabled = payload.get("diagnostics_enabled")
-        accessibility_preset = payload.get("accessibility_preset")
-        preset = payload.get("preset")
-        runtime_preset = payload.get("runtime_preset")
-        setup_completed = payload.get("setup_completed")
-        setup_choice = payload.get("setup_choice")
-        dismissed_startup_recommendations = payload.get("dismissed_startup_recommendations")
+        def optional_string(name: str) -> str | None:
+            value = payload[name]
+            if value is None:
+                return None
+            if not isinstance(value, str) or not value:
+                raise UserConfigLoadError(f"configuration has invalid {name}")
+            return value
+
+        def required_string(name: str, allowed: tuple[str, ...] | None = None) -> str:
+            value = payload[name]
+            if (
+                not isinstance(value, str)
+                or not value
+                or (allowed is not None and value not in allowed)
+            ):
+                raise UserConfigLoadError(f"configuration has invalid {name}")
+            return value
+
+        def boolean(name: str) -> bool:
+            value = payload[name]
+            if not isinstance(value, bool):
+                raise UserConfigLoadError(f"configuration has invalid {name}")
+            return value
+
+        keybindings = payload["keybindings"]
+        if not isinstance(keybindings, dict) or any(
+            not isinstance(key, str) or not key or not isinstance(value, str) or not value
+            for key, value in keybindings.items()
+        ):
+            raise UserConfigLoadError("configuration has invalid keybindings")
+        dismissed = payload["dismissed_startup_recommendations"]
+        if not isinstance(dismissed, list) or any(
+            not isinstance(item, str) or not item for item in dismissed
+        ):
+            raise UserConfigLoadError("configuration has invalid dismissed_startup_recommendations")
+        if len(set(dismissed)) != len(dismissed):
+            raise UserConfigLoadError(
+                "configuration has duplicate dismissed_startup_recommendations"
+            )
 
         return cls(
-            provider=_trimmed_optional_str(provider),
-            model_path=_trimmed_optional_str(model_path),
-            theme=_trimmed_optional_str(theme) or "dark_dungeon",
-            dark=dark if isinstance(dark, bool) else True,
-            high_contrast=high_contrast if isinstance(high_contrast, bool) else False,
-            reduced_motion=reduced_motion if isinstance(reduced_motion, bool) else False,
-            screen_reader_mode=screen_reader_mode
-            if isinstance(screen_reader_mode, bool)
-            else False,
-            cognitive_load_reduction_mode=(
-                cognitive_load_reduction_mode
-                if isinstance(cognitive_load_reduction_mode, bool)
-                else False
+            provider=optional_string("provider"),
+            model_path=optional_string("model_path"),
+            theme=required_string("theme"),
+            dark=boolean("dark"),
+            high_contrast=boolean("high_contrast"),
+            reduced_motion=boolean("reduced_motion"),
+            screen_reader_mode=boolean("screen_reader_mode"),
+            cognitive_load_reduction_mode=boolean("cognitive_load_reduction_mode"),
+            text_scale=required_string("text_scale", TEXT_SCALE_OPTIONS),
+            line_width=required_string("line_width", READING_WIDTH_OPTIONS),
+            line_spacing=required_string("line_spacing", LINE_SPACING_OPTIONS),
+            notification_verbosity=required_string("notification_verbosity", VERBOSITY_OPTIONS),
+            scene_recap_verbosity=required_string("scene_recap_verbosity", VERBOSITY_OPTIONS),
+            runtime_metadata_verbosity=required_string(
+                "runtime_metadata_verbosity", VERBOSITY_OPTIONS
             ),
-            text_scale=_coerce_option(text_scale, TEXT_SCALE_OPTIONS, "standard"),
-            line_width=_coerce_option(line_width, READING_WIDTH_OPTIONS, "standard"),
-            line_spacing=_coerce_option(line_spacing, LINE_SPACING_OPTIONS, "standard"),
-            notification_verbosity=_coerce_option(
-                notification_verbosity, VERBOSITY_OPTIONS, "standard"
+            locked_choice_verbosity=required_string("locked_choice_verbosity", VERBOSITY_OPTIONS),
+            input_timing_profile=required_string(
+                "input_timing_profile", INPUT_TIMING_PROFILE_OPTIONS
             ),
-            scene_recap_verbosity=_coerce_option(
-                scene_recap_verbosity, VERBOSITY_OPTIONS, "standard"
+            confirm_high_impact_actions=boolean("confirm_high_impact_actions"),
+            keybindings=dict(keybindings),
+            typewriter=boolean("typewriter"),
+            typewriter_speed=required_string("typewriter_speed"),
+            diagnostics_enabled=boolean("diagnostics_enabled"),
+            accessibility_preset=required_string(
+                "accessibility_preset", ACCESSIBILITY_PRESET_OPTIONS
             ),
-            runtime_metadata_verbosity=_coerce_option(
-                runtime_metadata_verbosity, VERBOSITY_OPTIONS, "standard"
-            ),
-            locked_choice_verbosity=_coerce_option(
-                locked_choice_verbosity, VERBOSITY_OPTIONS, "standard"
-            ),
-            input_timing_profile=_coerce_input_timing_profile(input_timing_profile),
-            confirm_high_impact_actions=(
-                confirm_high_impact_actions
-                if isinstance(confirm_high_impact_actions, bool)
-                else False
-            ),
-            keybindings=_coerce_keybindings(keybindings),
-            typewriter=typewriter if isinstance(typewriter, bool) else True,
-            typewriter_speed=_trimmed_optional_str(typewriter_speed) or "normal",
-            diagnostics_enabled=(
-                diagnostics_enabled if isinstance(diagnostics_enabled, bool) else False
-            ),
-            accessibility_preset=_coerce_accessibility_preset(accessibility_preset),
-            preset=_trimmed_optional_str(preset),
-            runtime_preset=_trimmed_optional_str(runtime_preset),
-            setup_completed=setup_completed if isinstance(setup_completed, bool) else False,
-            setup_choice=_trimmed_optional_str(setup_choice),
-            dismissed_startup_recommendations=_coerce_string_list(
-                dismissed_startup_recommendations
-            ),
-            extras=cls._payload_extras(payload),
+            preset=optional_string("preset"),
+            runtime_preset=optional_string("runtime_preset"),
+            setup_completed=boolean("setup_completed"),
+            setup_choice=optional_string("setup_choice"),
+            dismissed_startup_recommendations=list(dismissed),
         )
-
-    @classmethod
-    def _payload_extras(cls, payload: Mapping[object, object]) -> dict[str, object]:
-        return {
-            key: value
-            for key, value in payload.items()
-            if isinstance(key, str) and key not in cls._KNOWN_PAYLOAD_KEYS
-        }
 
     def to_dict(self) -> dict[str, Any]:
-        payload = dict(self.extras)
-        payload.update(
-            {
-                "version": USER_CONFIG_VERSION,
-                "provider": self.provider,
-                "model_path": self.model_path,
-                "theme": self.theme,
-                "dark": self.dark,
-                "high_contrast": self.high_contrast,
-                "reduced_motion": self.reduced_motion,
-                "screen_reader_mode": self.screen_reader_mode,
-                "cognitive_load_reduction_mode": self.cognitive_load_reduction_mode,
-                "text_scale": self.text_scale,
-                "line_width": self.line_width,
-                "line_spacing": self.line_spacing,
-                "notification_verbosity": self.notification_verbosity,
-                "scene_recap_verbosity": self.scene_recap_verbosity,
-                "runtime_metadata_verbosity": self.runtime_metadata_verbosity,
-                "locked_choice_verbosity": self.locked_choice_verbosity,
-                "input_timing_profile": self.input_timing_profile,
-                "confirm_high_impact_actions": self.confirm_high_impact_actions,
-                "keybindings": self.keybindings,
-                "typewriter": self.typewriter,
-                "typewriter_speed": self.typewriter_speed,
-                "diagnostics_enabled": self.diagnostics_enabled,
-                "accessibility_preset": self.accessibility_preset,
-                "preset": self.preset,
-                "runtime_preset": self.runtime_preset,
-                "setup_completed": self.setup_completed,
-                "setup_choice": self.setup_choice,
-                "dismissed_startup_recommendations": self.dismissed_startup_recommendations,
-            }
-        )
+        payload = {
+            "version": USER_CONFIG_VERSION,
+            "provider": self.provider,
+            "model_path": self.model_path,
+            "theme": self.theme,
+            "dark": self.dark,
+            "high_contrast": self.high_contrast,
+            "reduced_motion": self.reduced_motion,
+            "screen_reader_mode": self.screen_reader_mode,
+            "cognitive_load_reduction_mode": self.cognitive_load_reduction_mode,
+            "text_scale": self.text_scale,
+            "line_width": self.line_width,
+            "line_spacing": self.line_spacing,
+            "notification_verbosity": self.notification_verbosity,
+            "scene_recap_verbosity": self.scene_recap_verbosity,
+            "runtime_metadata_verbosity": self.runtime_metadata_verbosity,
+            "locked_choice_verbosity": self.locked_choice_verbosity,
+            "input_timing_profile": self.input_timing_profile,
+            "confirm_high_impact_actions": self.confirm_high_impact_actions,
+            "keybindings": self.keybindings,
+            "typewriter": self.typewriter,
+            "typewriter_speed": self.typewriter_speed,
+            "diagnostics_enabled": self.diagnostics_enabled,
+            "accessibility_preset": self.accessibility_preset,
+            "preset": self.preset,
+            "runtime_preset": self.runtime_preset,
+            "setup_completed": self.setup_completed,
+            "setup_choice": self.setup_choice,
+            "dismissed_startup_recommendations": self.dismissed_startup_recommendations,
+        }
+        # Keep direct construction convenient for runtime code, but never emit
+        # an invalid config file.
+        UserConfig.from_dict(payload)
         return payload
 
     def to_ui_preferences(self) -> dict[str, Any]:
@@ -693,17 +696,19 @@ def load_user_config() -> UserConfig:
     try:
         with open(CONFIG_FILE, encoding="utf-8") as f:
             return UserConfig.from_dict(json.load(f))
-    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
-        logger.debug("Falling back to default user config from %s: %s", CONFIG_FILE, exc)
+    except FileNotFoundError:
         return UserConfig()
+    except (json.JSONDecodeError, OSError, UserConfigLoadError) as exc:
+        raise UserConfigLoadError(f"Unable to load configuration at {CONFIG_FILE}: {exc}") from exc
 
 
 def save_user_config(config: UserConfig, *, raise_on_error: bool = False) -> None:
     try:
+        payload = config.to_dict()
         Path(CONFIG_FILE).parent.mkdir(parents=True, exist_ok=True)
         with open_private_text_file(CONFIG_FILE, "w") as f:
-            json.dump(config.to_dict(), f, indent=2, ensure_ascii=False)
-    except OSError as exc:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+    except (OSError, UserConfigLoadError) as exc:
         logger.warning("Unable to persist user config to %s: %s", CONFIG_FILE, exc)
         if raise_on_error:
             raise UserConfigSaveError(f"Unable to save settings to {CONFIG_FILE}: {exc}") from exc
@@ -712,10 +717,9 @@ def save_user_config(config: UserConfig, *, raise_on_error: bool = False) -> Non
 def update_user_config(*, raise_on_error: bool = False, **changes: Any) -> UserConfig:
     config = load_user_config()
     for key, value in changes.items():
-        if hasattr(config, key):
-            setattr(config, key, value)
-        else:
-            config.extras[key] = value
+        if key not in UserConfig.__dataclass_fields__:
+            raise ValueError(f"Unknown user configuration field: {key}")
+        setattr(config, key, value)
     save_user_config(config, raise_on_error=raise_on_error)
     return config
 

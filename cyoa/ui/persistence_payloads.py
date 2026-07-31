@@ -2,6 +2,16 @@ import json
 import os
 from typing import cast
 
+from cyoa.core.save_schema import (
+    PersistenceValidationError,
+    validate_run_archive,
+)
+from cyoa.core.save_schema import (
+    validate_save_payload as _validate_save_payload,
+)
+from cyoa.core.save_schema import (
+    validate_ui_state as _validate_ui_state,
+)
 from cyoa.ui.presenters import build_accessible_export
 
 REQUIRED_SAVE_KEYS = {
@@ -50,20 +60,11 @@ def require_keys(payload: dict[str, object], required_keys: set[str], label: str
 
 
 def validate_save_payload(payload: object) -> dict[str, object]:
-    data = require_dict(payload, "save payload must be a JSON object")
-    require_keys(data, REQUIRED_SAVE_KEYS, "save payload")
-    validate_engine_save_fields(data)
-    validate_ui_state(data["ui_state"])
-    validate_restore_points(data.get("restore_points"))
-    return data
+    return _validate_save_payload(payload)
 
 
 def validate_ui_state(payload: object) -> None:
-    data = require_dict(payload, "save payload has invalid ui_state")
-    require_keys(data, REQUIRED_UI_STATE_KEYS, "ui_state")
-    validate_ui_scalar_fields(data)
-    validate_story_segments(data["story_segments"])
-    validate_journal_entries(data["journal_entries"])
+    _validate_ui_state(payload)
 
 
 def validate_engine_save_fields(payload: dict[str, object]) -> None:
@@ -122,13 +123,11 @@ def validate_journal_entries(journal_entries: object) -> None:
 
 
 def validate_restore_points(restore_points: object) -> None:
-    if restore_points is None:
-        return
     if not isinstance(restore_points, dict):
-        raise ValueError("save payload has invalid restore_points")
+        raise PersistenceValidationError("save payload has invalid restore_points")
     for name, restore_point in restore_points.items():
         if not isinstance(name, str) or not name.strip():
-            raise ValueError("save payload has invalid restore point name")
+            raise PersistenceValidationError("save payload has invalid restore point name")
         validate_save_payload(restore_point)
 
 
@@ -139,19 +138,7 @@ def coerce_journal_entries(payload: object) -> list[dict[str, object]]:
 
 
 def coerce_run_archive_entries(payload: object) -> list[dict[str, object]]:
-    if not isinstance(payload, list):
-        return []
-
-    entries: list[dict[str, object]] = []
-    for raw in payload:
-        if not isinstance(raw, dict):
-            continue
-        completed_at = raw.get("completed_at")
-        ending_type = raw.get("ending_type")
-        if not isinstance(completed_at, str) or not isinstance(ending_type, str):
-            continue
-        entries.append(cast(dict[str, object], raw))
-    return entries
+    return validate_run_archive(payload)
 
 
 def coerce_restore_points(payload: object) -> dict[str, dict[str, object]]:

@@ -19,6 +19,7 @@ from cyoa.core.observability import (
 from cyoa.core.ports import NarrativeMemoryStore, NPCMemoryStore, StoryRepository
 from cyoa.core.rag import RAGManager
 from cyoa.core.runtime import EnginePhase, EngineTransition
+from cyoa.core.save_schema import STATE_KEYS, validate_engine_save_payload
 from cyoa.core.state import GameState
 from cyoa.llm.broker import ModelBroker, SpeculationCache, StoryContext
 
@@ -435,10 +436,13 @@ class StoryEngine:
 
     def load_save_data(self, data: dict[str, Any]) -> None:
         """Hydrate engine state from a save data dictionary."""
+        # Validate before changing either phase or state.  This keeps a failed
+        # restore from leaving a playable engine half-reset.
+        data = validate_engine_save_payload(data, allow_ui_fields="ui_state" in data)
         self._transition_phase(EnginePhase.RESTORING, "load_save_data")
         self._prepare_for_load()
 
-        self.state.load_save_data(data)
+        self.state.load_save_data({key: data[key] for key in STATE_KEYS})
         self.story_context = self._story_context_from_save(data)
         self._sync_story_context_state()
         self._transition_phase(

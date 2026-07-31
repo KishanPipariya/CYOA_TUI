@@ -60,6 +60,15 @@ autosave, startup offers to resume it or start fresh.
 
 If you already have a packaged release build, unpack it and run `./cyoa-tui` from a terminal. The v0.1.0 packaged builds target macOS and Linux; Windows users should run from source for this release.
 
+### Persistence compatibility
+
+Settings use config `version: 1`; saves, autosaves, restore points, and run archives use
+`schema_version: 1`. These are strict schemas. Older versionless files, unknown fields,
+or malformed values are rejected without being edited, renamed, deleted, or overwritten.
+Correct the file from a backup (or remove it yourself if you no longer need it) before
+retrying; invalid config files stop startup with their path, and invalid saves or archives
+show an in-app error.
+
 ## What you get
 
 - streaming narrative turns in a terminal-first UI
