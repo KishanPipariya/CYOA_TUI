@@ -6,8 +6,8 @@
   saves, autosaves, restore points, and run archives require `schema_version: 1`.
   Legacy/versionless or malformed files are preserved and rejected with recovery guidance
   instead of being silently coerced, migrated, or overwritten.
-- **Breaking:** story graph persistence now uses the built-in local SQLite database at
-  `stories.sqlite3`; legacy remote-graph configuration and migration support were removed.
+- **Breaking:** story persistence now uses the built-in local SQLite database at
+  `stories.sqlite3`; legacy remote configuration and migration support were removed.
 
 ## 0.1.0 - 2026-05-11
 

@@ -517,7 +517,7 @@ This repo has broad test coverage across startup, engine, UI, persistence, packa
 - [`tests/test_engine_state.py`](tests/test_engine_state.py): engine state and restore flows
 - [`tests/test_story.py`](tests/test_story.py): story generation and memory behaviors
 - [`tests/test_llm_providers.py`](tests/test_llm_providers.py): provider-specific behavior
-- [`tests/test_db_integration.py`](tests/test_db_integration.py): graph repository behavior
+- [`tests/test_sqlite_db.py`](tests/test_sqlite_db.py): local SQLite repository behavior
 - [`tests/test_model_download.py`](tests/test_model_download.py): recommendation and download flow
 - [`tests/test_themes.py`](tests/test_themes.py): theme validation
 - [`tests/test_observability.py`](tests/test_observability.py): OTEL behavior and fallbacks
