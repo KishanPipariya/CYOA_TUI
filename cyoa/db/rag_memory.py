@@ -169,7 +169,7 @@ class NarrativeMemory:
     In-memory chromadb collection for narrative scene embeddings.
 
     Gracefully degrades to a no-op if chromadb is unavailable.
-    No persistence needed — the Neo4j graph DB stores everything permanently.
+    Story scenes are persisted independently in the local SQLite database.
 
     Fix #7: Lazy-initialises the chromadb client and embedding model on the
     first add() call, not at __init__ time. This avoids blocking the main

@@ -113,15 +113,15 @@ def test_db_observed_session_records_success_path(
 ) -> None:
     _patch_perf_counter(monkeypatch, [10.0, 10.25])
 
-    with obs.DBObservedSession("neo4j", "save_scene"):
+    with obs.DBObservedSession("sqlite", "save_scene"):
         pass
 
     latency = fake_telemetry["db_latency_histogram"]
     operations = fake_telemetry["db_operation_counter"]
     tracer = fake_telemetry["tracer"]
 
-    assert latency.records == [(250.0, {"db.type": "neo4j", "db.operation": "save_scene"})]
-    assert operations.adds == [(1, {"db.type": "neo4j", "db.operation": "save_scene"})]
+    assert latency.records == [(250.0, {"db.type": "sqlite", "db.operation": "save_scene"})]
+    assert operations.adds == [(1, {"db.type": "sqlite", "db.operation": "save_scene"})]
     assert tracer.spans[0].ended is True
 
 
@@ -132,7 +132,7 @@ def test_db_observed_session_records_failure_path(
     _patch_perf_counter(monkeypatch, [20.0, 20.05])
 
     with pytest.raises(ValueError, match="db failed"):
-        with obs.DBObservedSession("neo4j", "query"):
+        with obs.DBObservedSession("sqlite", "query"):
             raise ValueError("db failed")
 
     errors = fake_telemetry["db_error_counter"]
@@ -143,7 +143,7 @@ def test_db_observed_session_records_failure_path(
         (
             1,
             {
-                "db.type": "neo4j",
+                "db.type": "sqlite",
                 "db.operation": "query",
                 "error_type": "ValueError",
             },
@@ -158,7 +158,7 @@ def test_db_observed_session_records_failure_path(
 def test_db_observed_session_warns_when_elapsed_is_checked_before_enter(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    session = obs.DBObservedSession("neo4j", "query")
+    session = obs.DBObservedSession("sqlite", "query")
 
     with caplog.at_level("WARNING"):
         elapsed = session._elapsed_ms()

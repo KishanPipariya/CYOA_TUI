@@ -86,7 +86,6 @@ Press `h` for the in-app help overlay, `ctrl+shift+p` for the command palette, a
 
 - [Consumer Guide](docs/consumer-guide.md)
 - [Advanced Setup](docs/advanced-setup.md)
-- [Non-Docker Neo4j Setup](docs/non-docker-neo4j.md)
 
 ## Demo snapshot
 

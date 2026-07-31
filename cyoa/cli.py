@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 from cyoa.core.startup import StartupConfig, StartupConfigError, validate_startup_config
 
-# Load .env before anything that reads os.getenv (graph_db)
+# Load .env before startup configuration reads environment overrides.
 load_dotenv()
 
 __all__ = ["StartupConfig", "StartupConfigError", "main", "validate_startup_config"]
@@ -77,7 +77,7 @@ def _build_parser(available_themes: Sequence[str] | None = None) -> argparse.Arg
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    # Import after .env loading because graph_db reads env at import time.
+    # Import after .env loading so startup configuration sees environment overrides.
     from cyoa.core.constants import DEFAULT_STARTING_PROMPT, STORY_LOG_FILE, ensure_user_directories
     from cyoa.core.observability import setup_observability
     from cyoa.core.support import write_crash_log

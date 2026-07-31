@@ -26,11 +26,11 @@ flowchart LR
         direction TB
         Generate["Generate Node<br/>(StoryGenerator)"]:::backend
         UpdateContext["Update Context & History<br/>(StoryContext)"]:::backend
-        SaveGraph["Save Scene & Choice Edge<br/>(graph_db.py)"]:::backend
+        SaveGraph["Save Scene & Choice Edge<br/>(sqlite_db.py)"]:::backend
     end
 
     SubModel[("Local Model<br/>Qwen2.5 GGUF")]:::model
-    GraphDB[("Neo4j Graph Database<br/>(Docker / Optional)")]:::db
+    GraphDB[("Local SQLite Database<br/>(stories.sqlite3)")]:::db
 
     %% Edges
     Start --> Generate
@@ -46,5 +46,5 @@ flowchart LR
     UserChoice -- "Trigger" --> ShowLoading
     
     UpdateContext --> Generate
-    SaveGraph -- "Execute Cypher Query" --> GraphDB
+    SaveGraph -- "Transactional SQL" --> GraphDB
 ```

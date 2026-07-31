@@ -248,7 +248,7 @@ def mock_app_dependencies():
     """Mock the LLM Generator and DB to be fast and deterministic in UI tests."""
     with (
         patch("cyoa.ui.app.ModelBroker", new=_mock_generator),
-        patch("cyoa.ui.app.CYOAGraphDB") as mock_db,
+        patch("cyoa.ui.app.CYOASQLiteDB") as mock_db,
         patch(
             "cyoa.ui.app.load_user_config",
             return_value=UserConfig(
@@ -259,7 +259,6 @@ def mock_app_dependencies():
     ):
         # Configure the mock DB to not fail async DB operations
         db_instance = mock_db.return_value
-        db_instance.verify_connectivity_async = AsyncMock(return_value=True)
         db_instance.create_story_node_and_get_title.return_value = "Test Adventure"
         db_instance.get_story_tree.return_value = None  # Just empty for story map test initially
 
@@ -741,17 +740,9 @@ async def test_ui_panels_toggle(mock_app_dependencies):
 
 
 @pytest.mark.asyncio
-async def test_startup_does_not_wait_for_optional_runtime_checks() -> None:
-    release_connectivity = asyncio.Event()
-
+async def test_startup_initializes_local_persistence_without_runtime_warmup() -> None:
     def slow_db_factory(*args, **kwargs):
         db = MagicMock()
-
-        async def verify_connectivity_async():
-            await release_connectivity.wait()
-            return True
-
-        db.verify_connectivity_async = AsyncMock(side_effect=verify_connectivity_async)
         db.create_story_node_and_get_title.return_value = "Test Adventure"
         db.get_story_tree.return_value = None
         db.save_scene_async = AsyncMock(return_value="dummy-scene-id")
@@ -759,7 +750,7 @@ async def test_startup_does_not_wait_for_optional_runtime_checks() -> None:
 
     with (
         patch("cyoa.ui.app.ModelBroker", new=_mock_generator),
-        patch("cyoa.ui.app.CYOAGraphDB", side_effect=slow_db_factory),
+        patch("cyoa.ui.app.CYOASQLiteDB", side_effect=slow_db_factory),
     ):
         app = CYOAApp(model_path="dummy_path.gguf")
 
@@ -768,8 +759,6 @@ async def test_startup_does_not_wait_for_optional_runtime_checks() -> None:
             app.action_skip_typewriter()
 
             assert "You awaken in a test dungeon." in app._current_story
-
-            release_connectivity.set()
             await pilot.pause(0.2)
 
 
@@ -1386,7 +1375,6 @@ async def test_startup_failure_closes_runtime_resources() -> None:
 
     generator = MagicMock()
     db = MagicMock()
-    db.verify_connectivity_async = AsyncMock(return_value=True)
     engine = MagicMock()
     engine.db = db
     engine.rag.memory.is_online = True
@@ -1435,13 +1423,12 @@ async def test_quit_during_initial_generation_ignores_late_node() -> None:
     generator.generate_next_node_async = AsyncMock(side_effect=delayed_generate)
 
     db = MagicMock()
-    db.verify_connectivity_async = AsyncMock(return_value=True)
     db.create_story_node_and_get_title.return_value = "Test Adventure"
     db.save_scene_async = AsyncMock(return_value="scene-1")
 
     with (
         patch("cyoa.ui.app.ModelBroker", return_value=generator),
-        patch("cyoa.ui.app.CYOAGraphDB", return_value=db),
+        patch("cyoa.ui.app.CYOASQLiteDB", return_value=db),
     ):
         async with app.run_test() as pilot:
             await pilot.pause(0.5)
@@ -1459,7 +1446,7 @@ async def test_quit_before_startup_timer_fires_skips_model_creation() -> None:
 
     with (
         patch("cyoa.ui.app.ModelBroker") as broker_cls,
-        patch("cyoa.ui.app.CYOAGraphDB") as db_cls,
+        patch("cyoa.ui.app.CYOASQLiteDB") as db_cls,
     ):
         async with app.run_test() as pilot:
             await pilot.pause(0.02)
@@ -2256,10 +2243,9 @@ async def test_release_polish_layout_handles_long_status_and_locked_choices(
         return mock_gen
 
     with patch(
-        "cyoa.ui.app.CYOAGraphDB",
+        "cyoa.ui.app.CYOASQLiteDB",
     ) as mock_db:
         db_instance = mock_db.return_value
-        db_instance.verify_connectivity_async = AsyncMock(return_value=True)
         db_instance.create_story_node_and_get_title.return_value = "Release Polish Check"
         db_instance.get_story_tree.return_value = None
         db_instance.save_scene_async = AsyncMock(return_value="release-polish-scene")

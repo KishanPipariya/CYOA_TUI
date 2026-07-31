@@ -15,7 +15,6 @@ This document describes the repository as it exists on 2026-07-11. It is a fast 
 - Optional extras:
   - `local-llm` for `llama-cpp-python` and guided model download support
   - `memory` for Chroma-backed retrieval
-  - `graph` for Neo4j persistence
   - `observability` for OpenTelemetry export
   - `packaging` for PyInstaller builds
 
@@ -35,7 +34,7 @@ The current codebase supports:
 - exports as Markdown, accessible plain text, and machine-readable timeline JSON
 - journal, story map, inventory inspector, scene recap, character sheet, lore codex, notification history, run archive, endings discovered, and hidden achievements screens
 - editable directives, runtime preset selection, generation preset cycling, and remappable keybindings
-- optional Neo4j, RAG, and telemetry integrations that degrade gracefully when unavailable
+- built-in SQLite story persistence plus optional RAG and telemetry integrations
 
 ## 3. Repository Map
 
@@ -97,7 +96,7 @@ The current codebase supports:
 ### Persistence and optional services
 
 - [`cyoa/db/story_logger.py`](cyoa/db/story_logger.py): event-driven `story.md` transcript writer
-- [`cyoa/db/graph_db.py`](cyoa/db/graph_db.py): optional Neo4j repository, schema helpers, story tree reconstruction, connectivity verification
+- [`cyoa/db/sqlite_db.py`](cyoa/db/sqlite_db.py): required local story repository, schema initialization, history, and story-tree reconstruction
 - [`cyoa/db/rag_memory.py`](cyoa/db/rag_memory.py): optional in-process Chroma-backed narrative and NPC memory stores with fallback behavior
 
 ### UI layer
@@ -121,7 +120,7 @@ The current codebase supports:
 
 - [`cyoa/themes/`](cyoa/themes): shipped narrative themes and palette definitions
 - [`monitoring/`](monitoring): OTEL collector, Prometheus, and Grafana config
-- [`docker-compose.yml`](docker-compose.yml): local stack for monitoring and Neo4j
+- [`docker-compose.yml`](docker-compose.yml): local stack for monitoring
 - [`scripts/`](scripts)
   - `run_smoke.sh`
   - `check_coverage.py`
@@ -187,7 +186,7 @@ Key startup responsibilities inside [`cyoa/ui/app.py`](cyoa/ui/app.py):
 - offering startup accessibility recommendations when appropriate
 - checking for autosave recovery
 - presenting guided model download with preflight notes and blocking reasons
-- bootstrapping `ModelBroker`, `StoryEngine`, optional graph persistence, and optional RAG
+- bootstrapping `ModelBroker`, `StoryEngine`, local SQLite persistence, and optional RAG
 - warming optional runtime services only after the first scene is visible
 
 Current first-run entry options exposed by the UI:
@@ -209,7 +208,7 @@ Current first-run entry options exposed by the UI:
 - retrieves memories before generation
 - triggers background summarization when context size crosses a threshold
 - restores saves, bookmarks, undo/redo snapshots, and branch-to-history state
-- persists nodes to Neo4j when online
+- persists nodes and choice edges to local SQLite
 - indexes scenes into narrative and NPC memory stores
 - shuts down background tasks and external services cleanly
 
@@ -254,16 +253,15 @@ Older rolling-summary compatibility helpers are no longer part of the broker API
 
 It injects these memories into `StoryContext` and rebuilds memory stores after branch or restore flows when needed.
 
-### Optional graph persistence
+### Local story persistence
 
-[`CYOAGraphDB`](cyoa/db/graph_db.py) provides:
+[`CYOASQLiteDB`](cyoa/db/sqlite_db.py) provides:
 
 - story title creation and collision handling
 - scene persistence
 - scene history path lookup
 - story tree reconstruction for the map/archive surfaces
-- schema migration statements
-- async connectivity verification
+- automatic schema initialization
 
 ## 7. Runtime Flow
 
@@ -433,14 +431,9 @@ The most important current env surface is:
 - runtime presets:
   - `APP_RUNTIME_PRESET`
 - optional integrations:
-  - `CYOA_ENABLE_GRAPH_DB`
   - `CYOA_ENABLE_OBSERVABILITY`
 - diagnostics:
   - `CYOA_ENABLE_RAG`
-- Neo4j:
-  - `NEO4J_URI`
-  - `NEO4J_USER`
-  - `NEO4J_PASSWORD`
 - observability:
   - `OTEL_EXPORTER_OTLP_ENDPOINT`
 - filesystem overrides:
@@ -474,6 +467,7 @@ Important files and directories include:
 - `saves/exports/`: exported Markdown, accessible text, and timeline JSON
 - `saves/run_archive.json`: archive metadata
 - `models/`: downloaded GGUF files
+- `stories.sqlite3`: local story scenes and choice edges
 - `story.md`: append-only story transcript maintained by `StoryLogger`
 - `last_crash.log`: structured crash report written on unexpected startup failure
 
@@ -484,14 +478,6 @@ Save and autosave restore flows hydrate through [`cyoa/ui/mixins/persistence.py`
 ## 12. Optional Integrations and Degraded Mode
 
 The current architecture is intentionally resilient when optional services are missing.
-
-### Neo4j
-
-- not required for startup
-- only activated when explicitly enabled or when Neo4j credentials are present
-- connectivity is verified asynchronously after the first scene
-- failures produce warnings and disable graph-backed features for the session
-- a circuit breaker prevents repeated expensive failures
 
 ### RAG memory
 

@@ -6,6 +6,8 @@
   saves, autosaves, restore points, and run archives require `schema_version: 1`.
   Legacy/versionless or malformed files are preserved and rejected with recovery guidance
   instead of being silently coerced, migrated, or overwritten.
+- **Breaking:** story graph persistence now uses the built-in local SQLite database at
+  `stories.sqlite3`; legacy remote-graph configuration and migration support were removed.
 
 ## 0.1.0 - 2026-05-11
 
@@ -16,4 +18,4 @@ Initial public release candidate.
 - Local llama.cpp runtime presets for faster or higher-quality play.
 - Theme packs, save/load, undo/redo, branching, bookmarks, exports, journal, story map, recap, character sheet, and lore codex.
 - Accessibility startup flags, configurable keybindings, reduced motion, high contrast, and screen-reader-friendly review flows.
-- Optional graph persistence, retrieval memory, and observability stack for advanced users.
+- Local story persistence, optional retrieval memory, and observability for advanced users.

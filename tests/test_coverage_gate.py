@@ -25,15 +25,11 @@ def test_check_coverage_passes_when_targets_meet_thresholds(tmp_path, monkeypatc
                     "cyoa/core/engine.py": {
                         "summary": {"num_statements": 100, "missing_lines": 10}
                     },
-                    "cyoa/llm/broker.py": {
-                        "summary": {"num_statements": 100, "missing_lines": 20}
-                    },
-                    "cyoa/db/graph_db.py": {
+                    "cyoa/llm/broker.py": {"summary": {"num_statements": 100, "missing_lines": 20}},
+                    "cyoa/db/sqlite_db.py": {
                         "summary": {"num_statements": 100, "missing_lines": 28}
                     },
-                    "cyoa/ui/app.py": {
-                        "summary": {"num_statements": 100, "missing_lines": 15}
-                    },
+                    "cyoa/ui/app.py": {"summary": {"num_statements": 100, "missing_lines": 15}},
                 }
             }
         ),
@@ -54,15 +50,11 @@ def test_check_coverage_fails_when_target_is_below_threshold(tmp_path, monkeypat
                     "cyoa/core/engine.py": {
                         "summary": {"num_statements": 100, "missing_lines": 25}
                     },
-                    "cyoa/llm/broker.py": {
+                    "cyoa/llm/broker.py": {"summary": {"num_statements": 100, "missing_lines": 20}},
+                    "cyoa/db/sqlite_db.py": {
                         "summary": {"num_statements": 100, "missing_lines": 20}
                     },
-                    "cyoa/db/graph_db.py": {
-                        "summary": {"num_statements": 100, "missing_lines": 20}
-                    },
-                    "cyoa/ui/app.py": {
-                        "summary": {"num_statements": 100, "missing_lines": 16}
-                    },
+                    "cyoa/ui/app.py": {"summary": {"num_statements": 100, "missing_lines": 16}},
                 }
             }
         ),
@@ -84,15 +76,11 @@ def test_check_coverage_ignores_unrelated_flags(tmp_path, monkeypatch):
                     "cyoa/core/engine.py": {
                         "summary": {"num_statements": 100, "missing_lines": 10}
                     },
-                    "cyoa/llm/broker.py": {
+                    "cyoa/llm/broker.py": {"summary": {"num_statements": 100, "missing_lines": 20}},
+                    "cyoa/db/sqlite_db.py": {
                         "summary": {"num_statements": 100, "missing_lines": 20}
                     },
-                    "cyoa/db/graph_db.py": {
-                        "summary": {"num_statements": 100, "missing_lines": 20}
-                    },
-                    "cyoa/ui/app.py": {
-                        "summary": {"num_statements": 100, "missing_lines": 10}
-                    },
+                    "cyoa/ui/app.py": {"summary": {"num_statements": 100, "missing_lines": 10}},
                 }
             }
         ),

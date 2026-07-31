@@ -38,6 +38,16 @@ def test_linux_user_paths_follow_xdg(monkeypatch) -> None:
     importlib.reload(constants_module)
 
 
+def test_default_story_database_uses_the_app_data_root(tmp_path, monkeypatch) -> None:
+    from cyoa.db.sqlite_db import CYOASQLiteDB
+
+    monkeypatch.setenv("CYOA_DATA_DIR", str(tmp_path / "app-data"))
+    database = CYOASQLiteDB()
+
+    assert database.database_path == tmp_path / "app-data" / "stories.sqlite3"
+    assert database.database_path.exists()
+
+
 def test_save_config_creates_parent_directory(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "nested" / "config.json"
     monkeypatch.setattr("cyoa.core.user_config.CONFIG_FILE", str(config_path))

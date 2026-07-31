@@ -60,8 +60,8 @@ from cyoa.core.user_config import (
     resolve_accessibility_preferences,
     update_user_config,
 )
-from cyoa.db.graph_db import CYOAGraphDB
 from cyoa.db.rag_memory import is_rag_diagnostics_enabled
+from cyoa.db.sqlite_db import CYOASQLiteDB
 from cyoa.llm.broker import ModelBroker
 from cyoa.llm.providers import LlamaCppProvider
 from cyoa.ui.app_focus import FocusModalMixin
@@ -803,17 +803,6 @@ class CYOAApp(
             return
 
         self._optional_runtime_ready = True
-        if self.engine.db and getattr(self.engine.db, "enabled", False):
-            is_online = await self.engine.db.verify_connectivity_async()
-            if not self.is_runtime_active():
-                return
-            if not is_online:
-                self.queue_notification(
-                    "Graph DB not found. Proceeding with ephemeral memory only.",
-                    severity="warning",
-                    timeout=5,
-                )
-
         if (
             self.is_runtime_active()
             and is_rag_diagnostics_enabled()
@@ -1317,7 +1306,7 @@ class CYOAApp(
                 self.engine = StoryEngine(
                     broker=self.generator,
                     starting_prompt=self.starting_prompt,
-                    db=CYOAGraphDB(),
+                    db=CYOASQLiteDB(),
                     initial_world_state=getattr(self, "_initial_world_state", {}),
                     initial_prompt_config=getattr(self, "_initial_prompt_config", {}),
                 )

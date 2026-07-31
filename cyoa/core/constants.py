@@ -170,4 +170,4 @@ DEFAULT_LLM_SUMMARY_THRESHOLD = 0.8
 
 # --- Database & Persistence ---
 
-DEFAULT_NEO4J_URI = "bolt://localhost:7687"
+STORIES_DB_FILE = str(get_user_data_dir() / "stories.sqlite3")

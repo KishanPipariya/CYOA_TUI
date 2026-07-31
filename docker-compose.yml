@@ -1,19 +1,4 @@
 services:
-  neo4j:
-    image: neo4j:latest
-    container_name: cyoa_graph_db
-    ports:
-      - "127.0.0.1:7474:7474" # Browser interface
-      - "127.0.0.1:7687:7687" # Bolt routing
-    environment:
-      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD}
-      # Add APOC (Awesome Procedures on Cypher) plugin which is very useful for advanced graphs
-      - NEO4J_PLUGINS=["apoc"]
-    volumes:
-      - neo4j_data:/data
-      - neo4j_logs:/logs
-      - neo4j_plugins:/plugins
-
   jaeger:
     image: cr.jaegertracing.io/jaegertracing/jaeger:2.17.0
     container_name: jaeger
@@ -56,8 +41,3 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
     depends_on:
       - prometheus
-
-volumes:
-  neo4j_data:
-  neo4j_logs:
-  neo4j_plugins:

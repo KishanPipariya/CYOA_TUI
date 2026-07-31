@@ -2,7 +2,7 @@
 Automated Story Tests — tests/test_story.py
 
 Headless test harness that verifies core CYOA behaviour without loading the
-actual LLM model or requiring a Neo4j instance.
+actual LLM model or a durable database outside the test workspace.
 """
 
 import asyncio
@@ -1053,14 +1053,12 @@ class TestBranchingLogic:
 
         with (
             patch("cyoa.ui.app.ModelBroker", return_value=mock_gen),
-            patch("cyoa.ui.app.CYOAGraphDB") as mock_db_cls,
+            patch("cyoa.ui.app.CYOASQLiteDB") as mock_db_cls,
         ):
             mock_db = mock_db_cls.return_value
-            mock_db.verify_connectivity_async = AsyncMock(return_value=True)
             mock_db.create_story_node_and_get_title.return_value = "Test Story"
             mock_db.get_story_tree.return_value = None
-            mock_db.save_scene_async = AsyncMock(return_value="sid")
-            mock_db.verify_connectivity_async = AsyncMock(return_value=True)  # Redundant but safe
+            mock_db.save_scene_async = AsyncMock(return_value="sid")  # Redundant but safe
 
             app = CYOAApp(model_path="dummy")
             async with app.run_test() as pilot:
@@ -1128,14 +1126,12 @@ class TestBranchingLogic:
 
         with (
             patch("cyoa.ui.app.ModelBroker", return_value=mock_gen),
-            patch("cyoa.ui.app.CYOAGraphDB") as mock_db_cls,
+            patch("cyoa.ui.app.CYOASQLiteDB") as mock_db_cls,
         ):
             mock_db = mock_db_cls.return_value
-            mock_db.verify_connectivity_async = AsyncMock(return_value=True)
             mock_db.create_story_node_and_get_title.return_value = "Test Story"
             mock_db.get_story_tree.return_value = None
-            mock_db.save_scene_async = AsyncMock(return_value="sid")
-            mock_db.verify_connectivity_async = AsyncMock(return_value=True)  # Redundant but safe
+            mock_db.save_scene_async = AsyncMock(return_value="sid")  # Redundant but safe
 
             app = CYOAApp(model_path="dummy")
             async with app.run_test() as pilot:

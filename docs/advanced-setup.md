@@ -14,7 +14,7 @@ Optional extras:
 
 ```bash
 uv sync --extra local-llm
-uv sync --extra graph --extra memory --extra observability
+uv sync --extra memory --extra observability
 uv sync --extra packaging
 ```
 
@@ -53,7 +53,7 @@ Supported providers:
 
 ## Optional Services
 
-Bring up the local infrastructure stack only if you need graph persistence and telemetry:
+Bring up the local infrastructure stack only if you need telemetry:
 
 ```bash
 docker-compose up -d
@@ -61,7 +61,6 @@ docker-compose up -d
 
 Included services:
 
-- Neo4j
 - Jaeger v2
 - OpenTelemetry Collector
 - Prometheus
@@ -69,7 +68,8 @@ Included services:
 
 Chroma is used in-process and is not launched by `docker-compose`.
 
-If you want Neo4j graph persistence without Docker, see [Non-Docker Neo4j Setup](./non-docker-neo4j.md).
+Story maps and scene history are stored locally in `stories.sqlite3` at the app-data root;
+no service configuration is required.
 
 ## Packaged Builds
 
